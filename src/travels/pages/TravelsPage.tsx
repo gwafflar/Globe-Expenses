@@ -3,6 +3,7 @@
 // logic to the `useTravels` hook.
 
 import { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/auth/store/useAuthStore'
 import { useTravels } from '@/travels/hooks/useTravels'
 import type { Travel } from '@/travels/types'
@@ -26,11 +27,15 @@ export function TravelsPage() {
   const { currentUser, signOut } = useAuthStore()
   const userId = currentUser?.uid
 
+  // React Router helper that lets us imperatively change the current URL
+  // in response to a click (e.g. when a travel card is clicked).
+  const navigate = useNavigate()
+
   // Local UI state controlling whether the "Create travel" modal is open.
   const [isCreateModalOpen, setIsCreateModalOpen] = useState<boolean>(false)
 
   // Subscribe to the current user's travels via the custom hook.
-  const { travels, isLoading } = useTravels(userId)
+  const { travels, isLoading, error } = useTravels(userId)
 
   // Precompute a presentation-friendly version of each travel card.
   const travelCards = useMemo(
@@ -54,6 +59,12 @@ export function TravelsPage() {
 
   const handleOpenCreateTravel = () => {
     setIsCreateModalOpen(true)
+  }
+
+  // When the user clicks a travel card, we navigate to `/travels/:travelId`,
+  // which is wired in App.tsx to render the TravelDetailPage.
+  const handleTravelClick = (travelId: string) => {
+    navigate(`/travels/${travelId}`)
   }
 
   const handleSignOutClick = async () => {
@@ -91,6 +102,16 @@ export function TravelsPage() {
           <div className="flex h-full items-center justify-center">
             <p className="text-sm text-muted-foreground">Loading your travels…</p>
           </div>
+        ) : error ? (
+          <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
+            <p className="text-base font-medium">Unable to load your travels.</p>
+            <p className="max-w-sm text-sm text-muted-foreground">
+              {error}
+            </p>
+            <Button type="button" variant="outline" onClick={() => window.location.reload()}>
+              Retry
+            </Button>
+          </div>
         ) : travelCards.length === 0 ? (
           // Empty state when the user has no travels yet.
           <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
@@ -104,28 +125,42 @@ export function TravelsPage() {
           </div>
         ) : (
           // List of travel cards.
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
             {travelCards.map((travel) => (
-              <Card key={travel.travelId} className="hover:bg-accent/30 transition-colors">
+              <button
+                key={travel.travelId}
+                type="button"
+                onClick={() => handleTravelClick(travel.travelId)}
+                className="text-left cursor-pointer group"
+                style={{ perspective: '800px' }}
+              >
+              <Card
+                  className="h-full transition-all duration-200 ease-out
+                    group-hover:shadow-xl
+                    group-hover:-translate-y-1
+                    group-hover:scale-[1.03]
+                    group-hover:[transform:translateY(-4px)_scale(1.03)_rotateX(2deg)]"
+              >                  
                 <CardHeader className="flex flex-row items-center gap-3 space-y-0">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-secondary text-xl">
-                    <span>{travel.emoji}</span>
-                  </div>
-                  <div className="space-y-1">
-                    <CardTitle className="text-base">{travel.name}</CardTitle>
-                    {travel.dateLabel && (
-                      <CardDescription>{travel.dateLabel}</CardDescription>
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-secondary text-xl">
+                      <span>{travel.emoji}</span>
+                    </div>
+                    <div className="space-y-1">
+                      <CardTitle className="text-base">{travel.name}</CardTitle>
+                      {travel.dateLabel && (
+                        <CardDescription>{travel.dateLabel}</CardDescription>
+                      )}
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    {travel.description && (
+                      <p className="text-sm text-muted-foreground line-clamp-2">
+                        {travel.description}
+                      </p>
                     )}
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  {travel.description && (
-                    <p className="text-sm text-muted-foreground line-clamp-2">
-                      {travel.description}
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+              </button>
             ))}
           </div>
         )}

@@ -25,7 +25,8 @@ export const auth = getAuth(app)
 // persistentLocalCache: caches Firestore data in IndexedDB for offline reads
 // persistentMultipleTabManager: allows multiple browser tabs to share the same cache
 export const db = initializeFirestore(app, {
-  cache: persistentLocalCache({
-    tabManager: persistentMultipleTabManager()
-  })
+  // Firestore v12+ uses `localCache` for offline persistence configuration.
+  localCache: persistentLocalCache({
+    tabManager: persistentMultipleTabManager(),
+  }),
 })

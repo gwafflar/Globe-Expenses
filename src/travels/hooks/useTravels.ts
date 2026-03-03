@@ -12,6 +12,7 @@ import {
   where,
   type QuerySnapshot,
   type DocumentData,
+  type FirestoreError,
 } from 'firebase/firestore'
 import { db } from '@/services/firebase'
 import type { Travel } from '@/travels/types'
@@ -19,11 +20,13 @@ import type { Travel } from '@/travels/types'
 interface UseTravelsResult {
   travels: Travel[]
   isLoading: boolean
+  error: string | null
 }
 
 export function useTravels(userId: string | undefined): UseTravelsResult {
   const [travels, setTravels] = useState<Travel[]>([])
   const [isLoading, setIsLoading] = useState<boolean>(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     // If we don't yet have a user ID (e.g. auth still initializing),
@@ -31,6 +34,7 @@ export function useTravels(userId: string | undefined): UseTravelsResult {
     if (!userId) {
       setTravels([])
       setIsLoading(false)
+      setError(null)
       return
     }
 
@@ -70,11 +74,21 @@ export function useTravels(userId: string | undefined): UseTravelsResult {
 
         setTravels(nextTravels)
         setIsLoading(false)
+        setError(null)
       },
-      () => {
-        // In case of an error, we simply clear the list and stop loading.
+      (err: FirestoreError) => {
+        // If the listener errors (missing permissions, missing index, etc.),
+        // Firestore will call this error callback. Previously we swallowed it,
+        // which made the UI look like "no travels" with no explanation.
+        //
+        // Logging the raw error helps during development: Firestore often
+        // includes a direct "create index" link in the message.
+        // eslint-disable-next-line no-console
+        console.error('useTravels onSnapshot error:', err)
+
         setTravels([])
         setIsLoading(false)
+        setError(err.message || 'Unable to load travels.')
       },
     )
 
@@ -87,6 +101,6 @@ export function useTravels(userId: string | undefined): UseTravelsResult {
     }
   }, [userId])
 
-  return { travels, isLoading }
+  return { travels, isLoading, error }
 }
 
