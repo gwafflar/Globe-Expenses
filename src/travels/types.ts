@@ -9,6 +9,12 @@ export interface MemberRef {
   joinedAt: Timestamp
 }
 
+export interface TravelSettings {
+  // When false, the country and city fields are hidden in the transaction form.
+  // Defaults to true (location tracking on).
+  trackLocation: boolean
+}
+
 export interface Travel {
   travelId: string
   name: string
@@ -21,5 +27,6 @@ export interface Travel {
   createdBy: string
   createdAt: Timestamp
   currencies: string[]
+  settings?: TravelSettings
 }
 

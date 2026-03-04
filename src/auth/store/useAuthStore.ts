@@ -1,31 +1,41 @@
 // useAuthStore.ts — global authentication state + Firebase user bootstrap.
 // This store:
 // - exposes the currently authenticated Firebase user (or null)
+// - exposes the Firestore user profile (or null) — loaded once at sign-in
 // - exposes an `isAuthReady` flag so the UI knows when initial auth loading is done
 // - listens to `onAuthStateChanged` exactly once at module load
 // - ensures a Firestore user document exists for every authenticated user
+//
+// Why store userProfile here instead of fetching it in each component?
+// The profile (mainCurrency, categories, paymentMethods) is needed by the
+// transaction form and potentially many other components. Fetching it once at
+// sign-in and storing it globally means:
+//   1. No repeated network calls per component mount
+//   2. The profile is available offline after the first load (Firestore caches it)
+//   3. Components can read it synchronously from the store — no loading states needed
 
 import { create } from 'zustand'
 import type { User } from 'firebase/auth'
 import { onAuthStateChanged, signOut as firebaseSignOut } from 'firebase/auth'
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore'
 import { auth, db } from '@/services/firebase'
+import type { UserProfile } from '@/auth/services/userService'
 
 // Shape of the auth store
 interface AuthState {
   currentUser: User | null          // Firebase User object, or null if not logged in
+  userProfile: UserProfile | null   // Firestore user profile, or null if not loaded yet
   isAuthReady: boolean              // false until Firebase has checked session on startup
   signOut: () => Promise<void>      // action to sign the user out
 }
 
-// create() defines the store — the argument is a function that receives
-// a `set` function used to update state (similar to setState in React)
 export const useAuthStore = create<AuthState>(() => ({
-  currentUser: null,   // start with no user
-  isAuthReady: false,  // Firebase hasn't checked session yet
+  currentUser: null,
+  userProfile: null,
+  isAuthReady: false,
 
   // Sign-out action exposed to components.
-  // We rely on the `onAuthStateChanged` listener below to actually clear `currentUser`
+  // We rely on the `onAuthStateChanged` listener below to actually clear state
   // when Firebase confirms the sign-out.
   signOut: async () => {
     await firebaseSignOut(auth)
@@ -41,43 +51,50 @@ onAuthStateChanged(auth, async (user) => {
     // When `user` is non-null, the user is authenticated.
     // We must ensure a corresponding Firestore document exists at `users/{uid}`.
 
-    // 1. Build a typed reference to the user document.
     const userDocRef = doc(db, 'users', user.uid)
-
-    // 2. Read the document once to see if it already exists.
-    //    Firestore reads are cheap and cached; this is safe to do on every login.
     const snapshot = await getDoc(userDocRef)
 
+    // `profile` will hold the final Firestore document data.
+    // We declare it here so both branches (exists / doesn't exist) can assign to it.
+    let profile: UserProfile
+
     if (!snapshot.exists()) {
-      // 3. If the document does not exist, create it with the required fields.
-      //    `serverTimestamp()` lets Firestore set `createdAt` on the server,
-      //    so we don't depend on the client's clock being correct.
+      // Document doesn't exist yet — create it with default values.
+      // This handles first sign-in for both email/password and Google OAuth.
       await setDoc(userDocRef, {
         uid: user.uid,
-        type: 'human', // per SPEC: only humans have User documents; agents don't
-        displayName: user.displayName ?? '', // fallback to empty string if missing
-        email: user.email ?? '',             // email can be null for some providers
-        mainCurrency: 'EUR',                 // sensible default; user can change later
-        categories: [] as string[],          // user-defined categories (initially empty)
-        paymentMethods: [] as string[],      // user-defined payment methods (initially empty)
+        type: 'human',
+        displayName: user.displayName ?? '',
+        email: user.email ?? '',
+        mainCurrency: 'EUR',
+        categories: [] as string[],
+        paymentMethods: [] as string[],
         createdAt: serverTimestamp(),
       })
+
+      // Re-fetch after creation to get the full document including server-set fields.
+      // We can't use the setDoc data directly because serverTimestamp() is a sentinel
+      // value that only resolves to a real Timestamp on the server side.
+      const fresh = await getDoc(userDocRef)
+      profile = fresh.data() as UserProfile
+    } else {
+      // Document already exists — use it directly.
+      profile = snapshot.data() as UserProfile
     }
 
-    // 4. Whatever the doc status, update the store with the current Firebase user
-    //    and signal that auth is now "ready" for the UI.
+    // Update the store with both the Firebase user and the Firestore profile.
+    // Components can now read userProfile synchronously without any extra fetches.
     useAuthStore.setState({
       currentUser: user,
+      userProfile: profile,
       isAuthReady: true,
     })
   } else {
-    // When `user` is null, there is no active session.
-    // We clear `currentUser` and still flip `isAuthReady` so the UI can render
-    // the correct logged-out screens.
+    // No active session — clear everything.
     useAuthStore.setState({
       currentUser: null,
+      userProfile: null,
       isAuthReady: true,
     })
   }
 })
-
