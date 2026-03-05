@@ -68,6 +68,8 @@ The product is distributed as a Progressive Web App (PWA), installable directly 
 | Paid By (splits) | Yes | Split\[\] | Who paid and how much each. Must sum to total amount. |
 | Beneficiaries (splits) | Yes | Split\[\] | Who benefits and how much each. Must sum to total amount. |
 | Draft ID | No  | String | ID of the originating draft if created via bank import (v2). Enables retrieval of raw bank data on demand. |
+| Country | No  | String | Country where the expense occurred. User-entered. Useful for filtering and context. Pre-filled by the bank import agent in v2. |
+| City | No  | String | City where the expense occurred. User-entered. Useful for filtering and context. Pre-filled (inferred) by the bank import agent in v2. |
 | Notes | No  | String | Free text additional notes |
 
 ### 3.3.2 Transaction Attribution
@@ -78,6 +80,8 @@ The createdBy field uses a union type to distinguish between manual user entry a
 - { type: 'agent', name: string } - for transactions created by the bank import agent (e.g. 'Revolut Agent', 'Deblock Agent')
 
 This enables filtering and auditing by source in the transaction list view.
+
+Note: the `country` and `city` fields are entered manually by the user in v1. In v2, they could also be pre-filled by the bank import agent from bank data or inferred from past transaction records.
 
 ### 3.3.3 Split Model
 
@@ -259,3 +263,62 @@ The following principles were established during the brainstorming session and s
 | 19  | Transaction.draftId reference | Lean pointer from transaction to originating draft; raw data fetched on demand, not duplicated | Keeps transaction documents clean; raw data only loaded when explicitly needed |
 | 20  | Activity feed (v2, pull model) | Dedicated Activity tab for collaborative events affecting the current user; push upgrade in v3 via FCM | Conceptually separate from drafts inbox; pull model keeps v2 scope manageable |
 | 21  | Manual fetch trigger deferred to v4 | Fetch-new-transactions button is v4, not v2 | Low priority given reliable webhooks; reduces v2 scope |
+| 22  | country/city on Transaction (v1) | Optional fields on Transaction, user-entered in v1, pre-filled by bank import agent in v2 | Useful for filtering and context; consistent model across v1 and v2 avoids a schema migration |
+
+
+# Specification doc — sections to update (v0.3 → v0.4)
+
+## 3.2 Travel Management — add fields
+
+Add to the travel fields list:
+- `categories`: per-travel list of `LabeledItem` (label + optional emoji). Falls back to `userProfile.categories` in the transaction form if empty.
+- `paymentMethods`: per-travel list of `LabeledItem`. Same fallback.
+- `countries`: per-travel list of `LabeledItem` with flag emoji. Auto-populated from transactions; editable in Parameters tab.
+- `cities`: per-travel list of `LabeledItem`. Auto-populated from transactions; editable in Parameters tab.
+
+## 3.3.1 Transaction Fields — no change
+
+No field changes. Country and city values are now synced to `travel.countries`/`travel.cities` as a side effect of transaction creation (see 5.1).
+
+## New section 3.X — Travel Detail Tabs
+
+The travel detail view is organised into three tabs:
+
+**Transactions tab**
+- Lists all transactions for the travel (existing behaviour)
+- Filter button and Display Mode toggle: placeholders, coming in a future version
+
+**Balance tab**
+- Placeholder. Will display net balances per member and optimal settlement suggestions (greedy debt-simplification algorithm).
+
+**Parameters tab**
+- Travel identity: name (auto-save on blur) and emoji (auto-save on blur)
+- Members: placeholder for dynamic membership (v2)
+- Currencies: collapsible searchable checklist of 42 currencies; selection persisted to `travel.currencies`
+- Categories: inline editable list with optional emoji per item; add/rename/delete; persisted to `travel.categories`
+- Payment methods: same as categories; persisted to `travel.paymentMethods`
+- Countries: collapsible searchable checklist of ~110 countries with flag emojis; selection persisted to `travel.countries`
+- Cities: inline editable list with optional emoji; persisted to `travel.cities`; auto-seeded from existing transactions on render
+
+Tab switching: tap tab label, or horizontal swipe gesture (50px threshold, horizontal movement must dominate).
+
+## 3.3 Transaction form — update dropdown behaviour
+
+**Currency dropdown:**
+- Default: last transaction's currency (falls back to `userProfile.mainCurrency` for the first transaction)
+- Options shown first: travel currencies ordered by most recent use
+- `+ Add…` option: opens inline searchable currency picker; selected currency is permanently added to `travel.currencies`
+
+**Country dropdown:**
+- Default: last transaction's country
+- Options shown first: travel countries ordered by most recent use (with flag emoji)
+- `+ Add…` option: opens inline searchable country picker with flags; selected country permanently added to `travel.countries`
+
+## 8. Decision Log — add entries
+
+| 38 | Per-travel lists | `categories`, `paymentMethods`, `countries`, `cities` stored on travel document; fall back to `userProfile` globals if empty. `LabeledItem` type carries optional emoji. | Maximum flexibility per trip; emoji personalisation; backward compatible |
+| 39 | `LabeledItem` type | `{ id: string, label: string, emoji?: string }` with stable client-generated id | Stable id needed for Firestore array element addressing (arrayUnion/arrayRemove) |
+| 40 | CountryPicker backed by static list | ~110 countries with flag emojis; replaces free-text entry for countries | Flags are a v1 feature (decision #13 extended); static list avoids API dependency |
+| 41 | Smart currency/country in transaction form | Travel lists ordered by recent use; `+ Add…` adds permanently to travel | Reduces friction for recurring currencies/countries; keeps list curated |
+| 42 | syncTransactionLocation | After transaction save, new country/city written to travel document via arrayUnion (fire-and-forget, offline-safe) | Ensures dropdowns stay current without manual Parameters entry |
+| 43 | Shared picker data | `src/shared/data/pickerData.ts` | Single source of truth; avoids duplication between ParametersTab and TransactionForm |

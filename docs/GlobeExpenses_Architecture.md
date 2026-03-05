@@ -2,7 +2,7 @@
 
 General Architecture Document
 
-_Version 0.4 - March 2026_
+_Version 0.3 - March 2026_
 
 # 1\. System Overview
 
@@ -56,11 +56,15 @@ The frontend is organized into the following top-level modules:
 
 Firestore's built-in offline persistence is enabled at SDK initialization. This provides automatic local caching of all Firestore reads and queued writes during offline periods. When connectivity is restored, Firestore automatically replays the write queue.
 
-Transaction creation uses a fire-and-forget write pattern: `doc()` pre-generates the document ID client-side, then `setDoc()` is called without awaiting. The document appears in the UI immediately via the `onSnapshot` listener with `metadata.hasPendingWrites === true`. This flag drives the "not synced" badge on the transaction card and the save banner colour. The flag flips to false once the server confirms the write.
-
 Additionally, Dexie.js (IndexedDB wrapper) is used to store draft transactions and the offline write queue in a structured, queryable way. The Service Worker handles asset caching so the app shell loads without network.
 
 Conflict policy for v1: last-write-wins (Firestore default). Concurrent edit detection is planned for v2: each transaction document stores a lastModifiedAt timestamp and lastModifiedBy field. If a document was modified remotely after the user loaded it, a visual warning badge is shown on the transaction, prompting the user to review.
+
+**Fire-and-forget write pattern**: transaction creation uses `doc()` + `setDoc()` without `await`. This returns the document ID synchronously (generated client-side) and closes the form immediately, without blocking on server confirmation. Firestore writes to local IndexedDB cache instantly; the server sync happens in the background. This is the correct pattern for offline-first UX — the user never waits.
+
+**`hasPendingWrites` metadata**: the `onSnapshot` listener in `useTransactions` is configured with `{ includeMetadataChanges: true }`. This causes the callback to fire not only when data changes, but also when `snapshot.metadata.hasPendingWrites` flips from `true` (locally cached, not yet synced) to `false` (server confirmed). The UI uses this to show and dismiss sync status indicators without polling.
+
+**`TransactionWithStatus`** is a UI-layer TypeScript type (not stored in Firestore) that extends `Transaction` with `isPending: boolean`, derived from `hasPendingWrites`. It is the type returned by the `useTransactions` hook.
 
 # 4\. Data Architecture
 
@@ -69,7 +73,7 @@ Conflict policy for v1: last-write-wins (Firestore default). Concurrent edit det
 | **Collection / Document path** | **Description** |
 | --- | --- |
 | users/{userId} | User profile, preferences, currency, categories, payment methods |
-| travels/{travelId} | Travel metadata, member list (fixed at creation in v1), per-travel settings |
+| travels/{travelId} | Travel metadata, member list (fixed at creation in v1) |
 | travels/{travelId}/transactions/{txId} | Individual transaction documents |
 | travels/{travelId}/drafts/{draftId} | Draft transactions pending user review (v2) |
 | travels/{travelId}/settlements/{sId} | Computed settlement suggestions (v2) |
@@ -89,6 +93,21 @@ Conflict policy for v1: last-write-wins (Firestore default). Concurrent edit det
 | paymentMethods | string\[\] | User-defined payment method list (global) |
 | createdAt | timestamp | Account creation date |
 
+### UserProfile (client-side type)
+
+UserProfile is a TypeScript interface defined in `src/auth/services/userService.ts`. It mirrors the Firestore User document and is loaded once at sign-in into the Zustand auth store (`useAuthStore`). It is not a separate Firestore collection — it is a typed view of the `users/{userId}` document used throughout the frontend.
+
+| **Field** | **Type** | **Description** |
+| --- | --- | --- |
+| uid | string | Firebase Auth UID |
+| type | 'human' | Always 'human' |
+| displayName | string | User's display name |
+| email | string | User email address |
+| mainCurrency | string | ISO 4217 code |
+| categories | string\[\] | User-defined category list |
+| paymentMethods | string\[\] | User-defined payment method list |
+| createdAt | Timestamp | Account creation date |
+
 ### Travel
 
 | **Field** | **Type** | **Description** |
@@ -103,19 +122,15 @@ Conflict policy for v1: last-write-wins (Firestore default). Concurrent edit det
 | createdBy | string | UID of travel creator |
 | createdAt | timestamp | Creation timestamp |
 | currencies | string\[\] | All currencies used in this travel |
-| settings | TravelSettings? | Optional per-travel configuration. Absent on older travels — read as default. |
 
 MemberRef: { uid: string, displayName: string, joinedAt: timestamp }
-
-TravelSettings: { trackLocation: boolean }
-- trackLocation: when false, the country and city fields are hidden in the transaction form and not saved. Defaults to true when the field is absent.
 
 ### Transaction
 
 | **Field** | **Type** | **Description** |
 | --- | --- | --- |
 | txId | string | Auto-generated Firestore ID |
-| date | date | Date of the spending (stored as DD-MM-YYYY string) |
+| date | date | Date of the spending |
 | name | string | Description / name of the expense |
 | totalAmount | number | Total amount in original currency |
 | currency | string | ISO 4217 currency code |
@@ -123,8 +138,6 @@ TravelSettings: { trackLocation: boolean }
 | totalAmountMain | number | totalAmount \* exchangeRate (computed, stored) |
 | category | string? | Optional category (from user's list) |
 | paymentMethod | string? | Optional payment method (from user's list) |
-| country | string? | Optional country of the expense. Stored as a plain string (e.g. 'Japan'). Country flag emoji prefix planned for v2. Controlled by travel.settings.trackLocation. |
-| city | string? | Optional city of the expense. Stored as a plain string. City emoji (using country flag) deferred to v2. Controlled by travel.settings.trackLocation. |
 | paidBy | Split\[\] | Who physically paid, and how much each |
 | beneficiaries | Split\[\] | Who benefits, and what share each |
 | createdBy | CreatedByRef | Who or what created this record (user or agent) |
@@ -132,6 +145,8 @@ TravelSettings: { trackLocation: boolean }
 | lastModifiedAt | timestamp | Last write timestamp (for conflict detection) |
 | lastModifiedBy | string | UID of last writer |
 | draftId | string? | ID of the originating draft, if this transaction was created via bank import (v2). Used to retrieve raw bank data on demand. |
+| country | string? | Country where the expense occurred (optional, user-entered). |
+| city | string? | City where the expense occurred (optional, user-entered). |
 | notes | string? | Optional free-text notes |
 
 Split: { uid: string, amount: number } - amounts must sum to totalAmount
@@ -139,15 +154,6 @@ Split: { uid: string, amount: number } - amounts must sum to totalAmount
 CreatedByRef: { type: 'user', uid: string } | { type: 'agent', name: string }
 
 Examples: { type: 'user', uid: 'abc123' } or { type: 'agent', name: 'Revolut Agent' }
-
-**Location field UX (v1):**
-- Country and city dropdowns show only values previously used in the same travel, ordered by most recent usage.
-- A special "Other" value is available as a named option (stored as the string "Other").
-- "Add new…" opens an inline text input to enter a new value, which is then added to the dropdown for future use.
-- Both fields are pre-filled from the most recent transaction in the travel on form open.
-- Both fields are hidden entirely when travel.settings.trackLocation is false.
-- Country flag emoji stored inline (e.g. "🇯🇵 Japan") deferred to v2 — requires a country→emoji mapping utility.
-- City emoji (inheriting country flag) deferred to v2.
 
 ### Draft Transaction (v2)
 
@@ -185,19 +191,17 @@ A positive net means the user is owed money. A negative net means the user owes 
 
 ## 5.1 Transaction Creation (Online)
 
-- User fills transaction form (date, name, amount, currency, category, payment method, country, city, paidBy splits, beneficiary splits)
+- User fills transaction form (date, name, amount, currency, category, payment method, paidBy splits, beneficiary splits)
 - Client validates that paidBy and beneficiary sums equal totalAmount
 - Exchange rate is looked up from local hardcoded table and stored on the document
-- Document ID is pre-generated client-side via `doc()`; `setDoc()` is called without awaiting (fire-and-forget)
-- Document appears immediately in the local UI via onSnapshot, with hasPendingWrites=true
-- Server confirms the write; hasPendingWrites flips to false; UI updates badge and banner
+- Document is written to Firestore - real-time listener propagates update to all online members
 
 ## 5.2 Transaction Creation (Offline)
 
-- Same form, same fire-and-forget write
-- Firestore caches the document in local IndexedDB; hasPendingWrites=true
-- Document appears in UI immediately with "not synced" badge
-- On reconnection, Firestore replays the write automatically; hasPendingWrites flips to false
+- Same form and validation
+- Firestore SDK queues the write locally (IndexedDB)
+- Document appears immediately in the local UI (optimistic update)
+- On reconnection, Firestore replays the queue automatically
 
 ## 5.3 Bank Import Agent Flow (v2)
 
@@ -244,8 +248,8 @@ A positive net means the user is owed money. A negative net means the user owes 
 
 | **Phase** | **Name** | **Scope** |
 | --- | --- | --- |
-| v1  | Core (current) | PWA, offline sync, single/multi-member travel (fixed), transactions with multi-payer splits, travel emoji, location tracking (country/city) with per-travel toggle, dashboard, CSV export/import, hardcoded currency rates |
-| v2  | Collaborative+ | Bank import agent (Revolut webhook, Nordigen aggregator, on-chain via Alchemy/Moralis), draft transaction inbox with soft-delete and raw data audit trail, carousel travel selector, AI-assisted categorization and city inference, activity feed (pull model) for collaborative transaction events, dynamic travel membership, conflict detection UI, live currency rates, settlement suggestions, country flag emoji on location fields |
+| v1  | Core (current) | PWA, offline sync, single/multi-member travel (fixed), transactions with multi-payer splits, travel emoji, dashboard, CSV export/import, hardcoded currency rates |
+| v2  | Collaborative+ | Bank import agent (Revolut webhook, Nordigen aggregator, on-chain via Alchemy/Moralis), draft transaction inbox with soft-delete and raw data audit trail, carousel travel selector, AI-assisted categorization and city inference, activity feed (pull model) for collaborative transaction events, dynamic travel membership, conflict detection UI, live currency rates, settlement suggestions |
 | v3  | Notifications | Push notifications (FCM) for new/edited transactions involving the user; activity feed upgraded to push model |
 | v4  | Advanced | Bank-rate currency input, cash withdrawal tracking, full conflict resolution UI, recurring/template transactions, manual fetch-new-transactions trigger, potential native app wrappers |
 
@@ -267,7 +271,48 @@ A positive net means the user is owed money. A negative net means the user owes 
 | Activity feed: seen/unseen state | How is 'unseen' tracked per user? A lastSeenAt field on the user document is a simple option. | OPEN (v2) |
 | Manual fetch trigger | A button to manually trigger the bank import agent (webhook fallback) is deferred to v4 as low priority given reliable webhooks. | DECIDED (v4) |
 | UI design-first approach | UI should be designed (wireframes) before implementing v2 features to avoid costly backend rework. | OPEN |
-| Country flag emoji on location fields | Country stored as plain string in v1. Flag emoji prefix (e.g. "🇯🇵 Japan") requires a country→emoji mapping utility. Deferred to v2. | DECIDED (v2) |
-| City emoji | City would inherit the country flag emoji. Deferred to v2 alongside country flag work. | DECIDED (v2) |
-| "Add new" for categories/payment methods in form | Quick inline creation of new category or payment method from within the transaction form. Deferred to v2 — for now, these are managed only in Settings. | DECIDED (v2) |
-| Location field editing in travel settings | Country and city values previously used in a travel should be editable/deletable from the travel settings screen. Deferred to v2. | OPEN (v2) |
+
+
+
+# Architecture doc — sections to update (v0.4 → v0.5)
+
+## 3.1 Application Structure — add new paths
+
+Add under `travels/`:
+- `travels/components/TravelTabs.tsx` — three-tab container with swipe gesture
+- `travels/components/tabs/TransactionsTab.tsx` — transaction list, filter placeholders
+- `travels/components/tabs/BalanceTab.tsx` — balance/settlement (placeholder)
+- `travels/components/tabs/ParametersTab.tsx` — travel settings, all per-travel lists
+
+Add under `shared/`:
+- `shared/data/pickerData.ts` — static data for currency and country pickers (42 currencies, ~110 countries with flag emojis)
+
+## 4.2 Core Data Models — Travel
+
+Add to Travel model table:
+
+| categories | LabeledItem[] | Per-travel category list. Empty array on older documents — falls back to userProfile.categories in the form. |
+| paymentMethods | LabeledItem[] | Per-travel payment method list. Same fallback behaviour. |
+| countries | LabeledItem[] | Countries used in this travel. Seeded from transactions via syncTransactionLocation; editable in Parameters tab via CountryPicker. |
+| cities | LabeledItem[] | Cities used in this travel. Auto-seeded from transactions; editable inline in Parameters tab. |
+
+Add new type definition:
+
+**LabeledItem**: `{ id: string, label: string, emoji?: string }`
+- `id`: client-generated stable key (nanoid or timestamp-based) for Firestore array element addressing
+- `label`: display name
+- `emoji`: optional emoji prefix (e.g. flag for countries, custom emoji for categories)
+
+## 4.2 — Update Transaction model note
+
+Location fields (`country`, `city`) are now synced back to the travel document via `syncTransactionLocation()` after a transaction is saved. This keeps `travel.countries` and `travel.cities` up to date without requiring manual entry in Parameters.
+
+## 5.1 / 5.2 Transaction Creation flows — add step
+
+After the document write step, add:
+- `syncTransactionLocation()` is called fire-and-forget: if `country` or `city` is new (not already in `travel.countries`/`travel.cities`), it is appended via `arrayUnion`. The parent page updates local state optimistically via `onLocationAdded` callback.
+
+## 7. Phased Roadmap — v1 scope update
+
+Update v1 scope line to:
+> PWA, offline sync, single/multi-member travel (fixed), transactions with multi-payer splits, travel emoji, location tracking (country/city) with per-travel toggle, **three-tab travel detail (Transactions / Balance / Parameters)**, **per-travel categories/paymentMethods/countries/cities lists**, **smart currency and country dropdowns in transaction form**, dashboard, CSV export/import, hardcoded currency rates

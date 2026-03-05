@@ -1,6 +1,4 @@
 // useTravels.ts — custom hook to subscribe to the current user's travels.
-// Encapsulates all Firestore logic so that the page component stays focused
-// on layout and rendering.
 
 import { useEffect, useState } from 'react'
 import {
@@ -29,8 +27,6 @@ export function useTravels(userId: string | undefined): UseTravelsResult {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    // If we don't yet have a user ID (e.g. auth still initializing),
-    // we skip setting up the listener.
     if (!userId) {
       setTravels([])
       setIsLoading(false)
@@ -38,9 +34,6 @@ export function useTravels(userId: string | undefined): UseTravelsResult {
       return
     }
 
-    // Build a query on the `travels` collection:
-    // - only documents where memberUids contains this user
-    // - ordered by createdAt descending (newest travels first)
     const travelsRef = collection(db, 'travels')
     const q = query(
       travelsRef,
@@ -48,9 +41,6 @@ export function useTravels(userId: string | undefined): UseTravelsResult {
       orderBy('createdAt', 'desc'),
     )
 
-    // onSnapshot sets up a real-time listener to this query.
-    // It calls our callback immediately with the current results,
-    // and again whenever matching documents change (added/updated/deleted).
     setIsLoading(true)
     const unsubscribe = onSnapshot(
       q,
@@ -69,6 +59,12 @@ export function useTravels(userId: string | undefined): UseTravelsResult {
             createdBy: data.createdBy as string,
             createdAt: data.createdAt as Timestamp,
             currencies: data.currencies ?? [],
+            settings: data.settings,
+            // Per-travel lists — default to [] for older documents that pre-date this field
+            categories: data.categories ?? [],
+            paymentMethods: data.paymentMethods ?? [],
+            countries: data.countries ?? [],
+            cities: data.cities ?? [],
           }
         })
 
@@ -77,25 +73,14 @@ export function useTravels(userId: string | undefined): UseTravelsResult {
         setError(null)
       },
       (err: FirestoreError) => {
-        // If the listener errors (missing permissions, missing index, etc.),
-        // Firestore will call this error callback. Previously we swallowed it,
-        // which made the UI look like "no travels" with no explanation.
-        //
-        // Logging the raw error helps during development: Firestore often
-        // includes a direct "create index" link in the message.
         // eslint-disable-next-line no-console
         console.error('useTravels onSnapshot error:', err)
-
         setTravels([])
         setIsLoading(false)
         setError(err.message || 'Unable to load travels.')
       },
     )
 
-    // The function returned from useEffect is a cleanup function.
-    // React calls it when the component using this hook unmounts,
-    // or when userId changes. Here we detach the Firestore listener
-    // so it stops pushing updates and avoids memory leaks.
     return () => {
       unsubscribe()
     }
@@ -103,4 +88,3 @@ export function useTravels(userId: string | undefined): UseTravelsResult {
 
   return { travels, isLoading, error }
 }
-

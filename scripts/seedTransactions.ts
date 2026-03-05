@@ -10,7 +10,7 @@ import { getFirestore, collection, addDoc, Timestamp } from "firebase/firestore"
 
 // Paste your Firebase config here (same as your .env values)
 const firebaseConfig = {
-  apiKey: "AIzaSyDxxqPYNTClCfMNePM_W35Ws013s9PsI9c",
+  apiKey: "API_KEY",
   authDomain: "globe-expenses.firebaseapp.com",
   projectId: "globe-expenses",
 };

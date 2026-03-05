@@ -8,16 +8,26 @@
 // - On submit, calls createTransaction() (fire-and-forget): form closes immediately,
 //   transaction appears in list with isPending=true until server confirms.
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { useAuthStore } from '@/auth/store/useAuthStore'
 import { createTransaction } from '@/transactions/services/transactionService'
-import { getExchangeRate, SUPPORTED_CURRENCIES } from '@/shared/utils/exchangeRates'
+import { getExchangeRate } from '@/shared/utils/exchangeRates'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import type { MemberRef, TravelSettings } from '@/travels/types'
+import type { LabeledItem, MemberRef, TravelSettings } from '@/travels/types'
+import { updateTravelCurrencies, updateTravelList, syncTransactionLocation } from '@/travels/services/travelService'
+import { ALL_CURRENCIES, ALL_COUNTRIES } from '@/shared/data/pickerData'
+import type { Split } from '@/transactions/types'
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
-import { ChevronDown } from 'lucide-react'
+import {
+  Drawer,
+  DrawerContent,
+  DrawerHeader,
+  DrawerTitle,
+} from '@/components/ui/drawer'
+import { SplitEditor } from '@/transactions/components/SplitEditor'
+import { SplitSummaryRow } from '@/transactions/components/SplitSummaryRow'
 
 // ---------------------------------------------------------------------------
 // Date conversion helpers
@@ -196,6 +206,201 @@ function LocationSelect({ label, value, onChange, previousValues, placeholder }:
 }
 
 // ---------------------------------------------------------------------------
+// SmartCurrencySelect
+// Shows travel currencies first (ordered by recent use), then "Add…" which
+// opens an inline searchable picker. Selecting from picker adds to travel list.
+// ---------------------------------------------------------------------------
+
+interface SmartCurrencySelectProps {
+  value: string
+  onChange: (code: string) => void
+  travelId: string
+  orderedCurrencies: string[]
+  onCurrencyAdded: (code: string) => void
+}
+
+function SmartCurrencySelect({ value, onChange, orderedCurrencies, onCurrencyAdded }: SmartCurrencySelectProps) {
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const searchRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (pickerOpen && searchRef.current) searchRef.current.focus()
+  }, [pickerOpen])
+
+  const filtered = ALL_CURRENCIES.filter(([code, , name]) => {
+    const q = search.toLowerCase()
+    return code.toLowerCase().includes(q) || name.toLowerCase().includes(q)
+  })
+
+  // For the select: show travel currencies + current value (if not in list)
+  const selectOptions = [...new Set([...orderedCurrencies, value])]
+
+  if (pickerOpen) {
+    return (
+      <div className="flex flex-col gap-1">
+        <label className="text-sm font-medium">Currency</label>
+        <div className="flex flex-col gap-1 rounded-md border bg-background p-2 shadow-md">
+          <input
+            ref={searchRef}
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search…"
+            className="rounded border px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+          <div className="max-h-40 overflow-y-auto">
+            {filtered.map(([code, symbol, name]) => (
+              <button
+                key={code}
+                type="button"
+                onClick={() => {
+                  onChange(code)
+                  onCurrencyAdded(code)
+                  setPickerOpen(false)
+                  setSearch('')
+                }}
+                className="flex w-full gap-2 rounded px-2 py-1 text-left text-xs hover:bg-accent/40"
+              >
+                <span className="font-medium w-10 shrink-0">{code}</span>
+                <span className="text-muted-foreground">({symbol})</span>
+                <span className="truncate text-muted-foreground">{name}</span>
+              </button>
+            ))}
+          </div>
+          <button type="button" onClick={() => { setPickerOpen(false); setSearch('') }}
+            className="text-xs text-muted-foreground hover:text-foreground text-right">
+            Cancel
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-sm font-medium">Currency</label>
+      <select
+        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+        value={value}
+        onChange={(e) => {
+          if (e.target.value === '__add__') {
+            setPickerOpen(true)
+          } else {
+            onChange(e.target.value)
+          }
+        }}
+      >
+        {selectOptions.map((code) => (
+          <option key={code} value={code}>{code}</option>
+        ))}
+        <option value="__add__">+ Add…</option>
+      </select>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// SmartCountrySelect
+// Shows travel countries first (ordered by recent use), then "Add…" picker.
+// ---------------------------------------------------------------------------
+
+interface SmartCountrySelectProps {
+  value: string
+  onChange: (name: string) => void
+  travelId: string
+  orderedCountries: LabeledItem[]
+  onCountryAdded: (name: string, flag: string) => void
+}
+
+function SmartCountrySelect({ value, onChange, orderedCountries, onCountryAdded }: SmartCountrySelectProps) {
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const searchRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (pickerOpen && searchRef.current) searchRef.current.focus()
+  }, [pickerOpen])
+
+  const filtered = ALL_COUNTRIES.filter(([, name]) =>
+    name.toLowerCase().includes(search.toLowerCase())
+  )
+
+  const selectOptions = [
+    ...orderedCountries,
+    // Include current value if not already in list
+    ...(value && !orderedCountries.find((c) => c.label === value)
+      ? [{ id: 'current', label: value, emoji: '🌍' }]
+      : []),
+  ]
+
+  if (pickerOpen) {
+    return (
+      <div className="flex flex-col gap-1">
+        <label className="text-sm font-medium">Country</label>
+        <div className="flex flex-col gap-1 rounded-md border bg-background p-2 shadow-md">
+          <input
+            ref={searchRef}
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search country…"
+            className="rounded border px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+          <div className="max-h-40 overflow-y-auto">
+            {filtered.map(([flag, name]) => (
+              <button
+                key={name}
+                type="button"
+                onClick={() => {
+                  onChange(name)
+                  onCountryAdded(name, flag)
+                  setPickerOpen(false)
+                  setSearch('')
+                }}
+                className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs hover:bg-accent/40"
+              >
+                <span className="text-base">{flag}</span>
+                <span>{name}</span>
+              </button>
+            ))}
+          </div>
+          <button type="button" onClick={() => { setPickerOpen(false); setSearch('') }}
+            className="text-xs text-muted-foreground hover:text-foreground text-right">
+            Cancel
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-sm font-medium">Country</label>
+      <select
+        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+        value={value}
+        onChange={(e) => {
+          if (e.target.value === '__add__') {
+            setPickerOpen(true)
+          } else {
+            onChange(e.target.value)
+          }
+        }}
+      >
+        <option value="">— optional —</option>
+        {selectOptions.map((c) => (
+          <option key={c.id} value={c.label}>
+            {c.emoji ? `${c.emoji} ${c.label}` : c.label}
+          </option>
+        ))}
+        <option value="__add__">+ Add…</option>
+      </select>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Field wrapper
 // ---------------------------------------------------------------------------
 function FieldWrapper({
@@ -217,15 +422,34 @@ function FieldWrapper({
 }
 
 // ---------------------------------------------------------------------------
+// Split helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Splits `total` equally among `uids`, rounded to 2 decimal places.
+ * The last uid absorbs any rounding remainder so the sum always equals total.
+ */
+
+
+// ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 interface TransactionFormProps {
   travelId: string
   members: MemberRef[]
-  travelSettings?: TravelSettings          // undefined = treat as default (trackLocation: true)
-  existingTransactions: TransactionWithStatus[]  // used to derive previous country/city values
+  travelSettings?: TravelSettings
+  travelCategories?: LabeledItem[]
+  travelPaymentMethods?: LabeledItem[]
+  // Per-travel currency and country lists (from Parameters tab)
+  travelCurrencies?: string[]         // ISO codes, ordered by user preference
+  travelCountries?: LabeledItem[]     // countries with flag emoji
+  travelCities?: LabeledItem[]        // cities for dedup check
+  existingTransactions: TransactionWithStatus[]
   onSuccess: (newTxId: string) => void
   onCancel: () => void
+  // Called after save when a new country or city was introduced — so parent
+  // (TravelDetailPage) can update travel.countries / travel.cities immediately
+  onLocationAdded?: (newCountry: LabeledItem | null, newCity: LabeledItem | null) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -233,11 +457,17 @@ interface TransactionFormProps {
 // ---------------------------------------------------------------------------
 export function TransactionForm({
   travelId,
-  members: _members,
+  members,
   travelSettings,
+  travelCategories,
+  travelPaymentMethods,
+  travelCurrencies,
+  travelCountries,
+  travelCities,
   existingTransactions,
   onSuccess,
   onCancel,
+  onLocationAdded,
 }: TransactionFormProps) {
   const { currentUser, userProfile } = useAuthStore()
 
@@ -249,24 +479,67 @@ export function TransactionForm({
     )
   }
 
+  // Effective category and payment method lists:
+  // use per-travel lists if available, else fall back to userProfile global lists.
+  // Per-travel items carry an optional emoji prefix for display.
+  const effectiveCategories: string[] =
+    travelCategories && travelCategories.length > 0
+      ? travelCategories.map((c) => c.emoji ? `${c.emoji} ${c.label}` : c.label)
+      : userProfile.categories
+
+  const effectivePaymentMethods: string[] =
+    travelPaymentMethods && travelPaymentMethods.length > 0
+      ? travelPaymentMethods.map((p) => p.emoji ? `${p.emoji} ${p.label}` : p.label)
+      : userProfile.paymentMethods
+
+  // --- Currency list -------------------------------------------------------
+  // Travel currencies ordered as: previously used (from transactions, most recent first),
+  // then remaining travel currencies, then everything else is accessible via "Add…".
+  // Default currency = last transaction's currency, else userProfile.mainCurrency.
+  const lastUsedCurrency = existingTransactions[0]?.currency ?? userProfile.mainCurrency
+
+  // Build ordered currency list: travel currencies come first, ordered by last use
+  const orderedCurrencies = useMemo(() => {
+    const travelSet = new Set(travelCurrencies ?? [])
+    // Most recently used first (transactions are already ordered desc by date)
+    const recentlyUsed = [...new Set(existingTransactions.map((tx) => tx.currency))].filter(
+      (c) => travelSet.has(c),
+    )
+    const rest = (travelCurrencies ?? []).filter((c) => !recentlyUsed.includes(c))
+    return [...recentlyUsed, ...rest]
+  }, [travelCurrencies, existingTransactions])
+
+  // --- Country list --------------------------------------------------------
+  // Travel countries ordered by most recently used in transactions.
+  const orderedCountries = useMemo(() => {
+    const travelCountryNames = new Set((travelCountries ?? []).map((c) => c.label.toLowerCase()))
+    const recentlyUsed = [...new Set(existingTransactions.map((tx) => tx.country).filter(Boolean) as string[])].filter(
+      (name) => travelCountryNames.has(name.toLowerCase()),
+    )
+    const rest = (travelCountries ?? []).filter(
+      (c) => !recentlyUsed.map((r) => r.toLowerCase()).includes(c.label.toLowerCase()),
+    )
+    return [
+      ...recentlyUsed.map((name) => travelCountries?.find((c) => c.label.toLowerCase() === name.toLowerCase())!).filter(Boolean),
+      ...rest,
+    ]
+  }, [travelCountries, existingTransactions])
+
   // Whether to show country/city fields.
   // Defaults to true if the travel has no settings yet (backward compatible).
   const trackLocation = travelSettings?.trackLocation ?? true
 
+  // Solo travel: only 1 member — splits are auto-set, no UI shown
+  const isSolo = members.length === 1
+
   // Derive previously used values once — memoized so it doesn't recompute
   // on every keystroke. Depends on existingTransactions which changes rarely.
-  const previousCountries = useMemo(
-    () => getPreviousValues(existingTransactions, 'country'),
-    [existingTransactions],
-  )
   const previousCities = useMemo(
     () => getPreviousValues(existingTransactions, 'city'),
     [existingTransactions],
   )
 
-  // Pre-fill country/city from the most recent transaction (first in list,
-  // since useTransactions orders by date desc).
-  const lastCountry = existingTransactions[0]?.country ?? ''
+  // Pre-fill city from the most recent transaction
   const lastCity = existingTransactions[0]?.city ?? ''
 
   // --- Field state --------------------------------------------------------
@@ -275,19 +548,54 @@ export function TransactionForm({
   const [name, setName] = useState<string>('')
   // Pre-filled to '0' so the mobile numeric keyboard shows 0.00 immediately.
   const [amountStr, setAmountStr] = useState<string>('0')
-  const [currency, setCurrency] = useState<string>(userProfile.mainCurrency)
+  const [currency, setCurrency] = useState<string>(lastUsedCurrency)
   const [category, setCategory] = useState<string>('')
   const [paymentMethod, setPaymentMethod] = useState<string>('')
+  const lastCountry = existingTransactions[0]?.country ?? ''
   const [country, setCountry] = useState<string>(trackLocation ? lastCountry : '')
   const [city, setCity] = useState<string>(trackLocation ? lastCity : '')
   const [notes, setNotes] = useState<string>('')
 
-  // --- UI state -----------------------------------------------------------
+  // --- Split state --------------------------------------------------------
+
+  const totalAmount = parseFloat(amountStr) || 0
+
+  // paidBy starts as the current user paying the full amount
+  const [paidBy, setPaidBy] = useState<Split[]>([
+    { uid: currentUser.uid, amount: totalAmount },
+  ])
+  const [paidByMode, setPaidByMode] = useState<'equal' | 'custom'>('equal')
+
+  // beneficiaries starts as all members split equally
+  // Default: only the active user benefits (spec: "default beneficiaries = current user only")
+  const [beneficiaries, setBeneficiaries] = useState<Split[]>([{ uid: currentUser.uid, amount: totalAmount }])
+  const [beneficiaryMode, setBeneficiaryMode] = useState<'equal' | 'custom'>('equal')
+
+  // Drawer open state
+  const [paidByDrawerOpen, setPaidByDrawerOpen] = useState(false)
+  const [beneficiaryDrawerOpen, setBeneficiaryDrawerOpen] = useState(false)
+
+  // --- Solo travel: keep splits silently in sync with totalAmount ----------
+  // When there is only one member, we never show the split UI. Instead we
+  // keep both splits up to date whenever totalAmount changes.
+  useEffect(() => {
+    if (!isSolo) return
+    const soloSplit: Split[] = [{ uid: currentUser.uid, amount: totalAmount }]
+    setPaidBy(soloSplit)
+    setBeneficiaries(soloSplit)
+  }, [isSolo, currentUser.uid, totalAmount])
+
+  // --- Validation ---------------------------------------------------------
+
+  // Validity rounds both sides to 2dp — absorbs 3dp drift (e.g. 33.333×3 = 99.999 → 100.00)
+  const r2 = (x: number) => Math.round(x * 100) / 100
+  const paidByValid =
+    isSolo || Math.abs(r2(paidBy.reduce((a, s) => a + s.amount, 0)) - r2(totalAmount)) < 0.01
+  const beneficiaryValid =
+    isSolo || Math.abs(r2(beneficiaries.reduce((a, s) => a + s.amount, 0)) - r2(totalAmount)) < 0.01
 
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [submitted, setSubmitted] = useState<boolean>(false)
-
-  // --- Validation ---------------------------------------------------------
 
   function validate(): Record<string, string> {
     const errs: Record<string, string> = {}
@@ -299,6 +607,8 @@ export function TransactionForm({
     if (amountStr === '' || isNaN(amount)) {
       errs.amount = 'Enter a valid amount.'
     }
+    if (!paidByValid) errs.paidBy = 'Paid by amounts must equal the total.'
+    if (!beneficiaryValid) errs.beneficiaries = 'Split amounts must equal the total.'
     return errs
   }
 
@@ -313,18 +623,31 @@ export function TransactionForm({
     const user = currentUser!
     const profile = userProfile!
 
-    const totalAmount = parseFloat(amountStr)
+    const total = parseFloat(amountStr)
     const exchangeRate = getExchangeRate(currency, profile.mainCurrency)
-    const totalAmountMain = Math.round(totalAmount * exchangeRate * 100) / 100
+    const totalAmountMain = Math.round(total * exchangeRate * 100) / 100
 
-    // TODO (Prompt C): replace hardcoded splits with SplitEditor values.
-    const paidBy = [{ uid: user.uid, amount: totalAmount }]
-    const beneficiaries = [{ uid: user.uid, amount: totalAmount }]
+    // Sync country/city to travel document so dropdowns update immediately
+    const countryToSync = trackLocation && country ? country : undefined
+    const cityToSync = trackLocation && city ? city : undefined
+    if (countryToSync || cityToSync) {
+      syncTransactionLocation(
+        travelId,
+        countryToSync,
+        cityToSync,
+        travelCountries ?? [],
+        travelCities ?? [],
+      ).then(({ newCountry, newCity }) => {
+        if (onLocationAdded && (newCountry || newCity)) {
+          onLocationAdded(newCountry, newCity)
+        }
+      }).catch(console.error)
+    }
 
     const newTxId = createTransaction(travelId, {
       date,
       name: name.trim(),
-      totalAmount,
+      totalAmount: total,
       currency,
       exchangeRate,
       totalAmountMain,
@@ -380,8 +703,6 @@ export function TransactionForm({
         <div className="flex-1">
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium">Amount</label>
-            {/* inputMode="decimal" tells the mobile OS to open the numeric keyboard.
-                type="number" alone is not always sufficient on iOS/Android. */}
             <Input
               type="number"
               inputMode="decimal"
@@ -397,29 +718,33 @@ export function TransactionForm({
           </div>
         </div>
         <div className="w-28">
-          <FieldWrapper label="Currency">
-            <select
-              className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-              value={currency}
-              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setCurrency(e.target.value)}
-            >
-              {SUPPORTED_CURRENCIES.map((code: string) => (
-                <option key={code} value={code}>{code}</option>
-              ))}
-            </select>
-          </FieldWrapper>
+          <SmartCurrencySelect
+            value={currency}
+            onChange={setCurrency}
+            travelId={travelId}
+            orderedCurrencies={orderedCurrencies}
+            onCurrencyAdded={(code) => {
+              // Persist new currency to travel list, then set it as selected
+              const next = [...(travelCurrencies ?? []), code]
+              updateTravelCurrencies(travelId, next).catch(console.error)
+            }}
+          />
         </div>
       </div>
 
       {/* Country + City — only shown when travel.settings.trackLocation is true */}
       {trackLocation && (
         <>
-          <LocationSelect
-            label="Country"
+          <SmartCountrySelect
             value={country}
             onChange={setCountry}
-            previousValues={previousCountries}
-            placeholder="— optional —"
+            travelId={travelId}
+            orderedCountries={orderedCountries}
+            onCountryAdded={(name, flag) => {
+              // Persist new country to travel list (use timestamp as id — nanoid not available here)
+              const next = [...(travelCountries ?? []), { id: `country-${Date.now()}`, label: name, emoji: flag }]
+              updateTravelList(travelId, 'countries', next).catch(console.error)
+            }}
           />
           <LocationSelect
             label="City"
@@ -433,9 +758,9 @@ export function TransactionForm({
 
       {/* Category */}
       <FieldWrapper label="Category">
-        {userProfile.categories.length === 0 ? (
+        {effectiveCategories.length === 0 ? (
           <select disabled className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm text-muted-foreground shadow-sm opacity-60">
-            <option>No categories yet — add them in Settings</option>
+            <option>No categories yet — add them in Parameters</option>
           </select>
         ) : (
           <select
@@ -444,7 +769,7 @@ export function TransactionForm({
             onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setCategory(e.target.value)}
           >
             <option value="">— optional —</option>
-            {userProfile.categories.map((cat: string) => (
+            {effectiveCategories.map((cat: string) => (
               <option key={cat} value={cat}>{cat}</option>
             ))}
           </select>
@@ -453,9 +778,9 @@ export function TransactionForm({
 
       {/* Payment Method */}
       <FieldWrapper label="Payment Method">
-        {userProfile.paymentMethods.length === 0 ? (
+        {effectivePaymentMethods.length === 0 ? (
           <select disabled className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm text-muted-foreground shadow-sm opacity-60">
-            <option>No payment methods yet — add them in Settings</option>
+            <option>No payment methods yet — add them in Parameters</option>
           </select>
         ) : (
           <select
@@ -464,7 +789,7 @@ export function TransactionForm({
             onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setPaymentMethod(e.target.value)}
           >
             <option value="">— optional —</option>
-            {userProfile.paymentMethods.map((pm: string) => (
+            {effectivePaymentMethods.map((pm: string) => (
               <option key={pm} value={pm}>{pm}</option>
             ))}
           </select>
@@ -482,30 +807,36 @@ export function TransactionForm({
         />
       </FieldWrapper>
 
-      {/* Split placeholder rows — TODO (Prompt C): replace with SplitEditor */}
-      <button
-        type="button"
-        onClick={() => console.log('TODO: open paidBy split editor (Prompt C)')}
-        className="flex items-center justify-between rounded-md border border-input px-3 py-2 text-sm transition-colors hover:bg-accent/30"
-      >
-        <span className="font-medium text-muted-foreground">Paid by</span>
-        <span className="flex items-center gap-1">
-          <span>{currentUser.displayName ?? 'You'}</span>
-          <ChevronDown className="h-4 w-4 text-muted-foreground" />
-        </span>
-      </button>
+      {/* Split rows — hidden entirely for solo travel (1 member) */}
+      {!isSolo && (
+        <>
+          <SplitSummaryRow
+            label="Paid by"
+            splits={paidBy}
+            members={members}
+            mode={paidByMode}
+            isValid={paidByValid}
+            currentUserUid={currentUser.uid}
+            onClick={() => setPaidByDrawerOpen(true)}
+          />
+          {submitted && errors.paidBy && (
+            <p className="text-xs text-destructive">{errors.paidBy}</p>
+          )}
 
-      <button
-        type="button"
-        onClick={() => console.log('TODO: open beneficiaries split editor (Prompt C)')}
-        className="flex items-center justify-between rounded-md border border-input px-3 py-2 text-sm transition-colors hover:bg-accent/30"
-      >
-        <span className="font-medium text-muted-foreground">Split</span>
-        <span className="flex items-center gap-1">
-          <span>Equal</span>
-          <ChevronDown className="h-4 w-4 text-muted-foreground" />
-        </span>
-      </button>
+          <SplitSummaryRow
+            label="Split"
+            splits={beneficiaries}
+            members={members}
+            mode={beneficiaryMode}
+            isValid={beneficiaryValid}
+            currentUserUid={currentUser.uid}
+            onClick={() => setBeneficiaryDrawerOpen(true)}
+          />
+          {submitted && errors.beneficiaries && (
+            <p className="text-xs text-destructive">{errors.beneficiaries}</p>
+          )}
+        </>
+      )}
 
       {/* Actions */}
       <div className="flex gap-2 pt-2">
@@ -516,6 +847,60 @@ export function TransactionForm({
           Save
         </Button>
       </div>
+
+      {/* Paid By bottom sheet */}
+      <Drawer open={paidByDrawerOpen} onOpenChange={setPaidByDrawerOpen}>
+        <DrawerContent>
+          <DrawerHeader>
+            <DrawerTitle>Paid by</DrawerTitle>
+          </DrawerHeader>
+          <SplitEditor
+            members={members}
+            totalAmount={totalAmount}
+            value={paidBy}
+            onChange={setPaidBy}
+            mode={paidByMode}
+            onModeChange={setPaidByMode}
+            label="Paid by"
+          />
+          <div className="px-4 pb-6 pt-2">
+            <Button
+              type="button"
+              className="w-full"
+              onClick={() => setPaidByDrawerOpen(false)}
+            >
+              Done
+            </Button>
+          </div>
+        </DrawerContent>
+      </Drawer>
+
+      {/* Beneficiaries bottom sheet */}
+      <Drawer open={beneficiaryDrawerOpen} onOpenChange={setBeneficiaryDrawerOpen}>
+        <DrawerContent>
+          <DrawerHeader>
+            <DrawerTitle>Split between</DrawerTitle>
+          </DrawerHeader>
+          <SplitEditor
+            members={members}
+            totalAmount={totalAmount}
+            value={beneficiaries}
+            onChange={setBeneficiaries}
+            mode={beneficiaryMode}
+            onModeChange={setBeneficiaryMode}
+            label="Split between"
+          />
+          <div className="px-4 pb-6 pt-2">
+            <Button
+              type="button"
+              className="w-full"
+              onClick={() => setBeneficiaryDrawerOpen(false)}
+            >
+              Done
+            </Button>
+          </div>
+        </DrawerContent>
+      </Drawer>
 
     </div>
   )

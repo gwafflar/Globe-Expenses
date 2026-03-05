@@ -331,3 +331,165 @@
 - [ ] Travel detail page (`/travels/:travelId`) — clicking a card navigates to the travel
 - [ ] Transaction list within a travel (empty for now)
 - [ ] Transaction creation form (date, name, amount, currency, paidBy splits, beneficiaries)
+
+## ✨ Working Session 005.1 — March 4th 2026
+
+**Type**: Feature implementation
+**Tools used**: Claude (claude.ai)
+
+### What was built
+
+- **`src/shared/utils/exchangeRates.ts`**: hardcoded exchange rates for 15 currencies (EUR base), `getExchangeRate()` cross-rate utility, `SUPPORTED_CURRENCIES` array
+- **`src/auth/services/userService.ts`**: `UserProfile` interface, `getUser()` single-read Firestore fetch
+- **`src/transactions/services/transactionService.ts`**: `createTransaction()` using `doc()` + `setDoc()` fire-and-forget pattern — returns document ID synchronously without awaiting server confirmation
+- **`src/auth/store/useAuthStore.ts`**: extended with `userProfile: UserProfile | null`, loaded once at sign-in and stored globally — avoids per-form Firestore fetches, works offline
+- **`src/transactions/hooks/useTransactions.ts`**: exports `TransactionWithStatus` (Transaction + `isPending: boolean`), uses `{ includeMetadataChanges: true }` so the callback fires when `hasPendingWrites` flips to false after sync
+- **`src/transactions/components/TransactionForm.tsx`**: **full transaction creation form** (date, name, amount, currency, category, payment method, notes, split placeholders). Fire-and-forget save — closes immediately, passes new doc ID to parent via `onSuccess(newTxId: string)`
+- **`src/travels/pages/TravelDetailPage.tsx`**:
+  - `PendingBadge` component: detects `isPending true → false` transition via `useRef`, shows `✅ synced` flash for 2s
+  - `SaveBanner`: orange (pending) or green (saved), driven by Firestore metadata not `navigator.onLine`
+  - `watchedTxId` pattern: parent watches newly created tx ID in the live snapshot to derive banner colour — reliable even when WiFi is off
+
+### Decisions made (binding)
+
+| # | Decision | Notes |
+|---|----------|-------|
+| 38 | Fire-and-forget transaction writes | `doc()` + `setDoc()` without await — returns ID synchronously, Firestore queues offline |
+| 39 | User profile loaded once at sign-in | Stored in Zustand, avoids repeated Firestore reads, works offline |
+| 40 | Banner colour driven by Firestore metadata | `hasPendingWrites` from snapshot, not `navigator.onLine` — correctly handles WiFi-off case |
+| 41 | `watchedTxId` pattern | Parent tracks new doc ID in live snapshot to detect pending→synced transition |
+| 42 | `includeMetadataChanges: true` on onSnapshot | Required for `hasPendingWrites` flip to trigger a re-render |
+
+### Issues encountered & resolved
+
+- **`navigator.onLine` unreliable when WiFi off**: returns `true` on desktop even without connectivity. Fixed by deriving banner state from `hasPendingWrites` in the Firestore snapshot instead.
+- **"synced" flash not appearing**: needed `useRef` to detect the `isPending true → false` transition — without it, `useEffect` can't compare previous vs current value.
+
+### Carry-forward items
+
+- [ ] Prompt C — split editor bottom sheet (paidBy and beneficiaries) with equal/custom modes
+- [ ] Firestore composite index needed for `date desc + createdAt desc` ordering on transactions — create when deploying
+- [ ] `firestore.indexes.json` should be committed and managed via `firebase deploy --only firestore:indexes`
+- [ ] Firestore security rules for `drafts` subcollection (required before v2 work)
+- [ ] Settings screen: categories and payment methods management (currently always empty dropdowns)
+- [ ] Move sign-out button from travels page to a proper profile/settings screen
+
+
+## ✨ Working Session 005.2 — March 5th 2026
+
+**Type**: Feature implementation
+**Tools used**: Claude (claude.ai)
+
+### What was built
+
+**Split editor enhancements (carry-over from Session 005.1 tail):**
+- `SplitEditor` mode (`equal`/`custom`) lifted to controlled prop — tab selection persists across drawer open/close
+- Custom mode amounts rounded to 2dp throughout (inputs, emit, absorb chip)
+- Solo travel: `TravelDetailPage` suppresses "X for you" label, shows main currency amount instead
+
+**Three-tab layout on TravelDetailPage:**
+- `TravelTabs` component with tab bar + swipe gesture (horizontal touch drag, 50px threshold)
+- Three tabs: **Transactions**, **Balance** (placeholder), **Parameters**
+- Transaction list extracted into `TransactionsTab` component (cleaner separation)
+- Filter and Display Mode buttons as greyed placeholders with "Coming soon" tooltip
+
+**ParametersTab — fully implemented:**
+- Travel name and emoji: inline editing, auto-save on blur
+- Members: placeholder
+- Currencies: collapsible `CurrencyPicker` — searchable checklist of 42 currencies, persists to `travel.currencies`
+- Categories: `EditableLabeledList` — add (emoji + label), inline rename on tap, delete; auto-resets add row after submit
+- Payment methods: same `EditableLabeledList`
+- Countries: collapsible `CountryPicker` — searchable checklist of ~110 countries with flag emojis, persists to `travel.countries`
+- Cities: `EditableLabeledList` — auto-seeded from existing transactions on mount
+
+**Data model extension (per-travel lists):**
+- `Travel` type gains `categories: LabeledItem[]`, `paymentMethods: LabeledItem[]`, `countries: LabeledItem[]`, `cities: LabeledItem[]`
+- `LabeledItem: { id: string, label: string, emoji?: string }` — new shared type
+- `createTravel` initialises all four lists as `[]`
+- `useTravels` maps all four fields with `?? []` fallback (backward compatible with old documents)
+- `travelService` gains: `updateTravelMeta`, `updateTravelSettings`, `updateTravelList`, `updateTravelCurrencies`, `syncTransactionLocation`
+
+**Smart dropdowns in TransactionForm:**
+- Currency defaults to last transaction's currency (falls back to `userProfile.mainCurrency`)
+- Currency dropdown: travel currencies ordered by recent use → `+ Add…` opens inline searchable picker → permanently adds to travel
+- Country dropdown: travel countries ordered by recent use → `+ Add…` opens inline searchable picker with flags → permanently adds to travel
+- Categories and payment methods read from per-travel lists, falling back to `userProfile` global lists
+- `onLocationAdded` callback: when a new country/city is introduced via a transaction, `TravelDetailPage` updates local travel state immediately (optimistic) and `syncTransactionLocation` writes to Firestore in the background
+
+**Shared data:**
+- `src/shared/data/pickerData.ts` — 42 currencies `[code, symbol, name]` and ~110 countries `[flag, name]`, `getFlagForCountry()` helper; shared by ParametersTab and TransactionForm
+
+### Files created
+
+| File | Path |
+|------|------|
+| `TravelTabs.tsx` | `src/travels/components/TravelTabs.tsx` |
+| `TransactionsTab.tsx` | `src/travels/components/tabs/TransactionsTab.tsx` |
+| `BalanceTab.tsx` | `src/travels/components/tabs/BalanceTab.tsx` |
+| `ParametersTab.tsx` | `src/travels/components/tabs/ParametersTab.tsx` |
+| `pickerData.ts` | `src/shared/data/pickerData.ts` |
+
+### Files modified
+
+| File | Changes |
+|------|---------|
+| `TravelDetailPage.tsx` | Replaced inline transaction section with `TravelTabs`; added `handleLocationAdded`; passes new props to `TransactionForm` |
+| `TransactionForm.tsx` | Smart currency/country dropdowns; `onLocationAdded` callback; reads per-travel categories/paymentMethods |
+| `SplitEditor.tsx` | `mode` is now a controlled prop |
+| `travels/types.ts` | Added `LabeledItem`, `categories`, `paymentMethods`, `countries`, `cities` to `Travel` |
+| `travels/services/travelService.ts` | Added `updateTravelMeta`, `updateTravelCurrencies`, `updateTravelList`, `syncTransactionLocation` |
+| `travels/hooks/useTravels.ts` | Maps the four new `LabeledItem[]` fields with `?? []` fallback |
+
+### Decisions made (binding)
+
+| # | Decision | Notes |
+|---|----------|-------|
+| 38 | Per-travel lists | `categories`, `paymentMethods`, `countries`, `cities` stored on travel document; fall back to `userProfile` globals if empty |
+| 39 | `LabeledItem` type | `{ id: string, label: string, emoji?: string }` — stable id for array updates, optional emoji |
+| 40 | Countries as `CountryPicker` | Replaces free-text `EditableLabeledList`; backed by static list of ~110 countries with flag emojis |
+| 41 | Smart currency/country in form | Travel lists ordered by recent use; `+ Add…` adds permanently to travel |
+| 42 | `syncTransactionLocation` | After transaction save, new country/city synced to travel document via `arrayUnion`; optimistic local update via `onLocationAdded` |
+| 43 | Shared picker data | `src/shared/data/pickerData.ts` single source of truth for currency and country static data |
+
+### Lessons learned / issues resolved
+
+- **Build error: self-import** — a heredoc generation artifact added `import { TravelTabs } from '@/travels/components/TravelTabs'` inside TravelTabs itself. TypeScript TS2303 circular definition error. Always verify imports after generation.
+- **`Travel` type extension breaks `useTravels`** — adding required fields to `Travel` causes TS2322 in the hook mapping. Always update hook mapping in the same step as type changes.
+- **Emoji `maxLength` blocks mobile emoji** — removing `maxLength` on emoji inputs is necessary; use `Intl.Segmenter` to limit to one grapheme cluster instead.
+- **Add row visual reset** — setting controlled state to `''` after `addItem()` doesn't always visually reset inputs if a parent re-render races. Fix: key the add row div on an incrementing counter (`addRowKey`) to force DOM remount.
+
+### Carry-forward items (open)
+
+- [ ] Minor UI polish items noted but deferred (split editor UX, form layout details)
+- [ ] Balance tab: implement settlement computation (greedy debt simplification)
+- [ ] Filter and Display Mode in Transactions tab (currently placeholders)
+- [ ] `updateProfile` timing: Firestore user doc may be created with empty `displayName` on email/password registration — fix when building profile/settings screen
+- [ ] Composite indexes should be managed via `firestore.indexes.json` in the repo
+- [ ] PWA icons: still placeholder icons from scaffold
+- [] Generate new versions of documentations with new updates
+
+### Next steps (Session 006)
+
+- [ ] Balance tab: compute net balances per member, derive optimal settlements, display who owes whom
+- [ ] Or: dashboard module (spending charts, totals by category)
+
+
+
+### Small improvements ideas for the UI:
+- New expense: white area at the bottom, hidding some fields (require to scroll down). Let's first finish the form with the splits.
+- issue with selecting date on laptop (phone is ok)
+- New country : when typing a coutry (option New), suggest from real world country and associated emoji (including faute de frappe en fonction de la distance par rapport a la bonne ecriture ?). Pensez au fait que dans de futures versions si la langue de l'app est differente, alors la liste des pays devra etre dans une autre langue
+- order countries based on lastly selected in previous transaction (orderby createdAt). Same for city, but also currency.
+- Select Category and Paiment method: drop list with categories/methods (ordered by what ? fixed or last occurences ?), possibility to add a new one or to let empty.
+- Click on button Save in case if invalid data: show there is an issue (either label or backgounf flashing once in low opacity red)
+### Misc
+App has been deployed to firebase. Can be accessed from URL https://globe-expenses.web.app
+
+next steps:
+- fix minor UI issues
+- manage import (from current transaction list) + export - and check it is fully export-importable
+At this point, fully usable for my own usage in my travel. 
+- finish the v0.1 : Edit profile, parameters, edit travel and transactions
+- make a logo icon, publish v0.1 and celebrate 🎉
+
+- in later phases, tolerate a non correct totalAmount for spliting payerby and paidfor. Show warning. If user confirms, save and send transaction. In TravelDetail all uncorrect transactions are displayed with a red label and :emojiredcross: to show it contains an error. A filter allows to only show those problematic transactions.  In dashboard, show the number of errors. In balance calculation, indicate the range of error due to uncompleteness. 
