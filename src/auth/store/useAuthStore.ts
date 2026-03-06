@@ -27,6 +27,9 @@ interface AuthState {
   userProfile: UserProfile | null   // Firestore user profile, or null if not loaded yet
   isAuthReady: boolean              // false until Firebase has checked session on startup
   signOut: () => Promise<void>      // action to sign the user out
+  // Updates the cached userProfile in-place so components reflect profile edits
+  // immediately without waiting for a Firestore re-fetch.
+  setUserProfile: (profile: UserProfile) => void
 }
 
 export const useAuthStore = create<AuthState>(() => ({
@@ -39,6 +42,14 @@ export const useAuthStore = create<AuthState>(() => ({
   // when Firebase confirms the sign-out.
   signOut: async () => {
     await firebaseSignOut(auth)
+  },
+
+  // Overwrites the cached userProfile with the provided value.
+  // ProfilePage calls this after a successful Firestore write so the rest of
+  // the app (e.g. TransactionForm, which reads userProfile from this store)
+  // reflects the updated name/nametag without a full re-fetch.
+  setUserProfile: (profile: UserProfile) => {
+    useAuthStore.setState({ userProfile: profile })
   },
 }))
 

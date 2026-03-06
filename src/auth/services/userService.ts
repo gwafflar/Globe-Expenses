@@ -6,7 +6,7 @@
 // categories, and paymentMethods are stored in the Firestore `users/{uid}` document,
 // which we fully control and can extend freely.
 
-import { doc, getDoc } from 'firebase/firestore'
+import { doc, getDoc, updateDoc } from 'firebase/firestore'
 import type { Timestamp } from 'firebase/firestore'
 import { db } from '@/services/firebase'
 
@@ -14,13 +14,27 @@ import { db } from '@/services/firebase'
 // This mirrors the User data model defined in ARCHITECTURE.md.
 export interface UserProfile {
   uid: string
-  type: 'human'          // always 'human' — agents never have User documents (see ARCHITECTURE.md)
+  type: 'human'            // always 'human' — agents never have User documents (see ARCHITECTURE.md)
   displayName: string
   email: string
-  mainCurrency: string   // ISO 4217 code, e.g. 'EUR'
-  categories: string[]   // user-defined expense categories, global across all travels
+  nametag?: string         // optional @handle for friend management (v2)
+  mainCurrency: string     // ISO 4217 code, e.g. 'EUR'
+  categories: string[]     // user-defined expense categories, global across all travels
   paymentMethods: string[] // user-defined payment methods, global across all travels
-  createdAt: Timestamp   // Firestore server timestamp set at account creation
+  createdAt: Timestamp     // Firestore server timestamp set at account creation
+}
+
+/**
+ * Persists a partial update to the user's Firestore document.
+ * Only the provided fields are written — others are left unchanged.
+ * Called from ProfilePage after the user edits their identity or preferences.
+ */
+export async function updateUserProfile(
+  uid: string,
+  fields: Partial<Pick<UserProfile, 'displayName' | 'nametag' | 'mainCurrency'>>,
+): Promise<void> {
+  const ref = doc(db, 'users', uid)
+  await updateDoc(ref, fields as Record<string, unknown>)
 }
 
 /**

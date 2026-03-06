@@ -5,11 +5,19 @@
 // Transaction list is subscribed via useTransactions (onSnapshot).
 
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
+
 import { doc, getDoc, Timestamp } from 'firebase/firestore'
 import { db } from '@/services/firebase'
 import type { LabeledItem, Travel } from '@/travels/types'
 import { useAuthStore } from '@/auth/store/useAuthStore'
+import { ChevronLeft } from 'lucide-react'
+
+function avatarHue(uid: string): number {
+  let hash = 0
+  for (const ch of uid) hash = (hash * 31 + ch.charCodeAt(0)) & 0xffffffff
+  return Math.abs(hash) % 360
+}
 import { useTransactions } from '@/transactions/hooks/useTransactions'
 import { Button } from '@/components/ui/button'
 import {
@@ -58,7 +66,7 @@ function SaveBanner({ state, onDismiss }: { state: BannerState; onDismiss: () =>
 export function TravelDetailPage() {
   const { travelId } = useParams()
   const navigate = useNavigate()
-  const { currentUser } = useAuthStore()
+  const { currentUser, userProfile } = useAuthStore()
   const currentUserUid = currentUser?.uid ?? ''
 
   const [travel, setTravel] = useState<Travel | null>(null)
@@ -164,6 +172,9 @@ export function TravelDetailPage() {
 
   const handleBack = () => navigate('/travels')
 
+  const hue = currentUser ? avatarHue(currentUser.uid) : 0
+  const initials = (userProfile?.displayName || currentUser?.email || '?').charAt(0).toUpperCase()
+
   function handleTransactionSaved(newTxId: string) {
     setIsFormOpen(false)
     setWatchedTxId(newTxId)
@@ -188,7 +199,9 @@ export function TravelDetailPage() {
     return (
       <div className="flex min-h-screen flex-col bg-background">
         <header className="flex items-center gap-3 border-b px-4 py-3">
-          <Button type="button" variant="outline" className="px-3 py-1 text-xs" onClick={handleBack}>Back</Button>
+          <button type="button" onClick={handleBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors">
+            <ChevronLeft className="h-4 w-4" />All travels
+          </button>
           <h1 className="text-base font-semibold">Loading travel…</h1>
         </header>
         <main className="flex flex-1 items-center justify-center">
@@ -202,7 +215,9 @@ export function TravelDetailPage() {
     return (
       <div className="flex min-h-screen flex-col bg-background">
         <header className="flex items-center gap-3 border-b px-4 py-3">
-          <Button type="button" variant="outline" className="px-3 py-1 text-xs" onClick={handleBack}>Back</Button>
+          <button type="button" onClick={handleBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors">
+            <ChevronLeft className="h-4 w-4" />All travels
+          </button>
           <h1 className="text-base font-semibold">Travel not found</h1>
         </header>
         <main className="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-center">
@@ -226,26 +241,37 @@ export function TravelDetailPage() {
 
       {/* Header */}
       <header className="flex items-center justify-between gap-3 border-b px-4 py-3">
-        <div className="flex items-center gap-3">
-          <Button type="button" variant="outline" className="px-3 py-1 text-xs" onClick={handleBack}>
-            Back
-          </Button>
-          <div className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-secondary text-lg">
-              {travel.emoji || '🌍'}
-            </div>
-            <div>
-              <h1 className="text-base font-semibold leading-tight">{travel.name}</h1>
-              {headerDates && <p className="text-xs text-muted-foreground">{headerDates}</p>}
-            </div>
+        {/* Left: back to travels list */}
+        <button
+          type="button"
+          onClick={handleBack}
+          className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <ChevronLeft className="h-4 w-4" />
+          All travels
+        </button>
+
+        {/* Centre: travel emoji + name */}
+        <div className="flex items-center gap-2">
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-secondary text-lg">
+            {travel.emoji || '🌍'}
+          </div>
+          <div>
+            <h1 className="text-base font-semibold leading-tight">{travel.name}</h1>
+            {headerDates && <p className="text-xs text-muted-foreground">{headerDates}</p>}
           </div>
         </div>
-        <Link
-          to="/travels"
-          className="text-xs font-medium text-primary underline-offset-2 hover:underline"
+
+        {/* Right: profile avatar */}
+        <button
+          type="button"
+          onClick={() => navigate('/profile')}
+          title="Profile"
+          className="flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold text-white shadow-sm transition hover:opacity-90"
+          style={{ backgroundColor: `hsl(${hue}, 55%, 50%)` }}
         >
-          All travels
-        </Link>
+          {initials}
+        </button>
       </header>
 
       {/* Tab content */}

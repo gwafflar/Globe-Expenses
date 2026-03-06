@@ -6,6 +6,7 @@ import { LoginPage } from '@/auth/pages/LoginPage'
 import { RegisterPage } from '@/auth/pages/RegisterPage'
 import { TravelsPage } from '@/travels/pages/TravelsPage'
 import { TravelDetailPage } from '@/travels/pages/TravelDetailPage'
+import { ProfilePage } from '@/auth/pages/ProfilePage'
 
 function NotFoundPage() { return <div>404 — Not found</div> }
 
@@ -24,6 +25,7 @@ export default function App() {
         {/* /travels and nested travel detail are behind the auth guard */}
         <Route path="/travels" element={<TravelsPage />} />
         <Route path="/travels/:travelId" element={<TravelDetailPage />} />
+        <Route path="/profile" element={<ProfilePage />} />
       </Route>
 
       {/* Catch-all: any unknown URL shows 404 */}

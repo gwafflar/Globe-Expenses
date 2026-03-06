@@ -469,6 +469,13 @@
 - [] Generate new versions of documentations with new updates
 
 ### Next steps (Session 006)
+- [ ] Solving all issues with TransactionForm
+- [ ] Edit transactions tab
+- [ ] Profile Page
+- [ ] Adding users to a shared travel
+- [ ] Export and import to/from csv/xlsx
+
+### Next steps (Session 007-00x)
 
 - [ ] Balance tab: compute net balances per member, derive optimal settlements, display who owes whom
 - [ ] Or: dashboard module (spending charts, totals by category)
@@ -482,6 +489,7 @@
 - order countries based on lastly selected in previous transaction (orderby createdAt). Same for city, but also currency.
 - Select Category and Paiment method: drop list with categories/methods (ordered by what ? fixed or last occurences ?), possibility to add a new one or to let empty.
 - Click on button Save in case if invalid data: show there is an issue (either label or backgounf flashing once in low opacity red)
+
 ### Misc
 App has been deployed to firebase. Can be accessed from URL https://globe-expenses.web.app
 
@@ -492,4 +500,10 @@ At this point, fully usable for my own usage in my travel.
 - finish the v0.1 : Edit profile, parameters, edit travel and transactions
 - make a logo icon, publish v0.1 and celebrate 🎉
 
-- in later phases, tolerate a non correct totalAmount for spliting payerby and paidfor. Show warning. If user confirms, save and send transaction. In TravelDetail all uncorrect transactions are displayed with a red label and :emojiredcross: to show it contains an error. A filter allows to only show those problematic transactions.  In dashboard, show the number of errors. In balance calculation, indicate the range of error due to uncompleteness. 
+- in later phases, tolerate a non correct totalAmount for spliting payerby and paidfor. Show warning. If user confirms, save and send transaction. In TravelDetail all uncorrect transactions are displayed with a red label and :emojiredcross: to show it contains an error. A filter allows to only show those problematic transactions.  In dashboard, show the number of errors. In balance calculation, indicate the range of error due to uncompleteness.
+
+## ✨ Working Session 006 — March 2026
+
+### Open questions
+
+- **`updateTravelList` conflict risk (v2)**: when adding a new category or payment method from the transaction form, the full `LabeledItem[]` array is overwritten via `updateDoc`. If two travel members add different items simultaneously while one is offline, the last sync wins and the other's item is lost. Fix in v2: use `arrayUnion` for individual item additions instead of overwriting the full array.

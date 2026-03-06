@@ -5,6 +5,14 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/auth/store/useAuthStore'
+
+// Simple hash-based hue — same function as ProfilePage, kept local to avoid
+// a shared utility file for now. Same UID always gives the same colour.
+function avatarHue(uid: string): number {
+  let hash = 0
+  for (const ch of uid) hash = (hash * 31 + ch.charCodeAt(0)) & 0xffffffff
+  return Math.abs(hash) % 360
+}
 import { useTravels } from '@/travels/hooks/useTravels'
 import type { Travel } from '@/travels/types'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -24,7 +32,7 @@ function formatDate(date: Travel['startDate']): string {
 }
 
 export function TravelsPage() {
-  const { currentUser, signOut } = useAuthStore()
+  const { currentUser, userProfile } = useAuthStore()
   const userId = currentUser?.uid
 
   // React Router helper that lets us imperatively change the current URL
@@ -67,9 +75,8 @@ export function TravelsPage() {
     navigate(`/travels/${travelId}`)
   }
 
-  const handleSignOutClick = async () => {
-    await signOut()
-  }
+  const hue = currentUser ? avatarHue(currentUser.uid) : 0
+  const initials = (userProfile?.displayName || currentUser?.email || '?').charAt(0).toUpperCase()
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
@@ -82,17 +89,19 @@ export function TravelsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            type="button"
-            className="text-xs"
-            variant="outline"
-            onClick={handleSignOutClick}
-          >
-            Sign out
-          </Button>
           <Button type="button" onClick={handleOpenCreateTravel}>
             New travel
           </Button>
+          {/* Profile avatar button — navigates to /profile */}
+          <button
+            type="button"
+            onClick={() => navigate('/profile')}
+            title="Profile"
+            className="flex h-9 w-9 items-center justify-center rounded-full text-sm font-bold text-white shadow-sm transition hover:opacity-90"
+            style={{ backgroundColor: `hsl(${hue}, 55%, 50%)` }}
+          >
+            {initials}
+          </button>
         </div>
       </header>
 
