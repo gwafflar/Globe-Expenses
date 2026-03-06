@@ -5,8 +5,16 @@ import { nanoid } from 'nanoid'
 import type { LabeledItem, Travel } from '@/travels/types'
 import { updateTravelCurrencies, updateTravelList, updateTravelMeta } from '@/travels/services/travelService'
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
+import { useAuthStore } from '@/auth/store/useAuthStore'
+import {
+  fetchFriends,
+  sendTravelInvite,
+  createShareableInvite,
+} from '@/friends/services/friendService'
+import type { Friend } from '@/friends/types'
 import { Button } from '@/components/ui/button'
 import { ALL_CURRENCIES, ALL_COUNTRIES } from '@/shared/data/pickerData'
+import { Share2, UserPlus, Check } from 'lucide-react'
 
 // ---------------------------------------------------------------------------
 // Section wrapper
@@ -328,6 +336,192 @@ function EditableLabeledList({ items, travelId, field, placeholder, onItemsChang
 }
 
 // ---------------------------------------------------------------------------
+// MiniAvatar — color circle with initial, same hash as ProfilePage
+// ---------------------------------------------------------------------------
+
+function avatarHue(uid: string): number {
+  let hash = 0
+  for (const ch of uid) hash = (hash * 31 + ch.charCodeAt(0)) & 0xffffffff
+  return Math.abs(hash) % 360
+}
+
+function MiniAvatar({ uid, name }: { uid: string; name: string }) {
+  const hue = avatarHue(uid)
+  return (
+    <div
+      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+      style={{ backgroundColor: `hsl(${hue}, 55%, 50%)` }}
+    >
+      {(name || '?').charAt(0).toUpperCase()}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// MembersSection — current members + invite friends + share link
+// ---------------------------------------------------------------------------
+
+function MembersSection({ travel }: { travel: Travel }) {
+  const { userProfile } = useAuthStore()
+
+  // Friend picker: lazy-loaded when "Invite a friend" is expanded
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [friends, setFriends] = useState<Friend[]>([])
+  const [friendsLoading, setFriendsLoading] = useState(false)
+  // Track which UIDs we just sent a travel invite to (for immediate button feedback)
+  const [invitedUids, setInvitedUids] = useState<Set<string>>(new Set())
+
+  // Share invite link state
+  const [shareLoading, setShareLoading] = useState(false)
+  const [shareFeedback, setShareFeedback] = useState<string | null>(null)
+
+  // Load friends when the picker opens (lazy — not on mount)
+  useEffect(() => {
+    if (!pickerOpen || !userProfile) return
+    if (friends.length > 0) return  // already loaded
+    setFriendsLoading(true)
+    fetchFriends(userProfile.uid).then(list => {
+      setFriends(list)
+      setFriendsLoading(false)
+    })
+  }, [pickerOpen, userProfile]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Friends already in this travel (filter them out of the picker)
+  const existingMemberUids = new Set(travel.memberUids)
+  const invitableFriends = friends.filter(f => !existingMemberUids.has(f.uid))
+
+  async function handleSendTravelInvite(toUid: string) {
+    if (!userProfile) return
+    setInvitedUids(prev => new Set(prev).add(toUid))
+    await sendTravelInvite(userProfile, toUid, travel.travelId, travel.name)
+  }
+
+  async function handleShareLink() {
+    if (!userProfile) return
+    setShareLoading(true)
+    setShareFeedback(null)
+    try {
+      const inviteId = await createShareableInvite(
+        userProfile, 'travel_member', travel.travelId, travel.name,
+      )
+      const url = `${window.location.origin}/invite/${inviteId}`
+
+      if (navigator.share) {
+        await navigator.share({
+          title: `Join ${travel.name} on GlobeExpenses`,
+          text: `${userProfile.displayName} invited you to track expenses on ${travel.name}!`,
+          url,
+        })
+      } else {
+        await navigator.clipboard.writeText(url)
+        setShareFeedback('Link copied!')
+        setTimeout(() => setShareFeedback(null), 3000)
+      }
+    } catch {
+      // user cancelled share sheet — ignore
+    } finally {
+      setShareLoading(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {/* Current members list */}
+      <ul className="flex flex-col gap-1.5">
+        {travel.members.map(member => (
+          <li key={member.uid} className="flex items-center gap-2 rounded-lg border bg-card px-3 py-2">
+            <MiniAvatar uid={member.uid} name={member.displayName} />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium truncate">{member.displayName}</p>
+            </div>
+            {member.uid === travel.createdBy && (
+              <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+                creator
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+
+      {/* Invite a friend (collapsible friend picker) */}
+      <div className="flex flex-col gap-2">
+        <button
+          type="button"
+          onClick={() => setPickerOpen(o => !o)}
+          className="flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent/20"
+        >
+          <UserPlus className="h-4 w-4" />
+          Invite a friend
+          <span className="ml-auto text-xs">{pickerOpen ? '▲' : '▼'}</span>
+        </button>
+
+        {pickerOpen && (
+          <div className="rounded-lg border p-2">
+            {friendsLoading && (
+              <p className="py-2 text-center text-xs text-muted-foreground">Loading friends…</p>
+            )}
+            {!friendsLoading && invitableFriends.length === 0 && (
+              <p className="py-2 text-center text-xs text-muted-foreground">
+                {friends.length === 0
+                  ? 'No friends yet. Add friends from your profile page.'
+                  : 'All your friends are already in this travel.'}
+              </p>
+            )}
+            {!friendsLoading && invitableFriends.map(friend => {
+              const alreadyInvited = invitedUids.has(friend.uid)
+              return (
+                <div key={friend.uid} className="flex items-center gap-2 rounded px-2 py-1.5">
+                  <MiniAvatar uid={friend.uid} name={friend.displayName} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{friend.displayName}</p>
+                    {friend.nametag && (
+                      <p className="text-xs text-muted-foreground">@{friend.nametag}</p>
+                    )}
+                  </div>
+                  {alreadyInvited ? (
+                    <span className="flex items-center gap-1 text-xs text-green-600">
+                      <Check className="h-3 w-3" /> Invited
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleSendTravelInvite(friend.uid)}
+                      className="flex items-center gap-1 text-xs text-primary hover:underline"
+                    >
+                      <UserPlus className="h-3 w-3" />
+                      Invite
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Share invite link */}
+      <div className="flex flex-col gap-1">
+        <button
+          type="button"
+          onClick={handleShareLink}
+          disabled={shareLoading}
+          className="flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent/20 disabled:opacity-50"
+        >
+          <Share2 className="h-4 w-4" />
+          {shareLoading ? 'Creating link…' : 'Share invite link'}
+        </button>
+        {shareFeedback && (
+          <p className="text-xs text-green-600 pl-1">{shareFeedback}</p>
+        )}
+        <p className="text-xs text-muted-foreground pl-1">
+          Anyone with the link can join this travel.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
@@ -409,9 +603,7 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
 
       {/* Members */}
       <Section title="Members">
-        <div className="flex h-16 items-center justify-center rounded-xl border border-dashed text-xs text-muted-foreground">
-          Member management — coming soon
-        </div>
+        <MembersSection travel={travel} />
       </Section>
 
       {/* Currencies */}

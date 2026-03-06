@@ -6,7 +6,7 @@
 // categories, and paymentMethods are stored in the Firestore `users/{uid}` document,
 // which we fully control and can extend freely.
 
-import { doc, getDoc, updateDoc } from 'firebase/firestore'
+import { doc, getDoc, updateDoc, writeBatch } from 'firebase/firestore'
 import type { Timestamp } from 'firebase/firestore'
 import { db } from '@/services/firebase'
 
@@ -27,14 +27,63 @@ export interface UserProfile {
 /**
  * Persists a partial update to the user's Firestore document.
  * Only the provided fields are written — others are left unchanged.
- * Called from ProfilePage after the user edits their identity or preferences.
+ * Does NOT handle nametag uniqueness — use claimNametag() for that.
  */
 export async function updateUserProfile(
   uid: string,
-  fields: Partial<Pick<UserProfile, 'displayName' | 'nametag' | 'mainCurrency'>>,
+  fields: Partial<Pick<UserProfile, 'displayName' | 'mainCurrency'>>,
 ): Promise<void> {
   const ref = doc(db, 'users', uid)
   await updateDoc(ref, fields as Record<string, unknown>)
+}
+
+/**
+ * Checks whether a nametag handle is available (not claimed by another user).
+ * Reads the sentinel document at nametags/{tag}.
+ * Returns true if available, false if taken.
+ */
+export async function isNametagAvailable(tag: string): Promise<boolean> {
+  // The sentinel collection stores one document per claimed handle.
+  // If the document exists, the handle is taken.
+  const ref = doc(db, 'nametags', tag)
+  const snapshot = await getDoc(ref)
+  return !snapshot.exists()
+}
+
+/**
+ * Atomically updates a user's nametag:
+ *   1. Releases the old sentinel document (nametags/{oldTag}) if it exists
+ *   2. Claims the new sentinel document (nametags/{newTag}) → { uid }
+ *   3. Updates users/{uid} → { nametag: newTag }
+ *
+ * Uses a Firestore batch write so all three operations succeed or fail together.
+ * Throws a "permission-denied" FirestoreError if the new nametag was claimed
+ * by another user between the availability check and the write (race condition).
+ * The caller (ProfilePage) catches this and shows "already taken".
+ */
+export async function claimNametag(
+  uid: string,
+  oldTag: string | undefined,
+  newTag: string,
+): Promise<void> {
+  const batch = writeBatch(db)
+
+  // Release the old handle if the user already had one
+  if (oldTag && oldTag !== newTag) {
+    const oldRef = doc(db, 'nametags', oldTag)
+    batch.delete(oldRef)
+  }
+
+  // Claim the new handle — security rules enforce that uid == auth.uid
+  const newRef = doc(db, 'nametags', newTag)
+  batch.set(newRef, { uid })
+
+  // Update the user's profile document
+  const userRef = doc(db, 'users', uid)
+  batch.update(userRef, { nametag: newTag })
+
+  // Commit all three writes atomically
+  await batch.commit()
 }
 
 /**

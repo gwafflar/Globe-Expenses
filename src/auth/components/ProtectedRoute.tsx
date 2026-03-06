@@ -3,12 +3,14 @@
 // based on whether Firebase has finished checking the session and whether
 // a user is currently logged in.
 
-import { Navigate, Outlet } from 'react-router-dom'
+import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { useAuthStore } from '@/auth/store/useAuthStore'
 
 export function ProtectedRoute() {
-  // Read the current auth state from the store.
   const { currentUser, isAuthReady } = useAuthStore()
+  // `location` gives us the full current URL path + search string.
+  // We pass it as ?redirect= so LoginPage can send the user back here after sign-in.
+  const location = useLocation()
 
   // While Firebase is still restoring the session from disk, we *don't*
   // know yet if the user is logged in. We show a centered spinner instead
@@ -22,9 +24,12 @@ export function ProtectedRoute() {
     )
   }
 
-  // Once auth is ready and there is no user, we redirect to the login page.
+  // Once auth is ready and there is no user, redirect to login.
+  // We encode the current path so the login page can navigate back here after sign-in.
+  // e.g. /invite/abc123 → /login?redirect=%2Finvite%2Fabc123
   if (!currentUser) {
-    return <Navigate to="/login" replace />
+    const redirect = encodeURIComponent(location.pathname)
+    return <Navigate to={`/login?redirect=${redirect}`} replace />
   }
 
   // If we reach this point, auth is ready *and* we have a user.

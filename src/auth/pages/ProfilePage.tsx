@@ -9,13 +9,22 @@
 //   - Contact developer: expandable card with mail / Discord / Telegram
 //   - Sign out (red, with confirmation dialog)
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { updateProfile } from 'firebase/auth'
 import { sendPasswordResetEmail } from 'firebase/auth'
 import { auth } from '@/services/firebase'
 import { useAuthStore } from '@/auth/store/useAuthStore'
-import { updateUserProfile } from '@/auth/services/userService'
+import { updateUserProfile, isNametagAvailable, claimNametag } from '@/auth/services/userService'
+import {
+  searchByNametag,
+  sendFriendRequest,
+  acceptFriendRequest,
+  declineFriendRequest,
+  fetchFriends,
+} from '@/friends/services/friendService'
+import { usePendingInvites } from '@/friends/hooks/usePendingInvites'
+import type { Friend, SearchUser } from '@/friends/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -30,7 +39,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { ChevronLeft, LogOut, Mail } from 'lucide-react'
+import { ChevronLeft, LogOut, Mail, UserPlus, Check, X, Search, Share2 } from 'lucide-react'
+import { createShareableInvite } from '@/friends/services/friendService'
 
 // ---------------------------------------------------------------------------
 // Avatar color
@@ -42,6 +52,24 @@ function avatarHue(uid: string): number {
   let hash = 0
   for (const ch of uid) hash = (hash * 31 + ch.charCodeAt(0)) & 0xffffffff
   return Math.abs(hash) % 360
+}
+
+// ---------------------------------------------------------------------------
+// MiniAvatar — small colored circle with initials, used in friend lists
+// ---------------------------------------------------------------------------
+
+// Same hash-based color as the main avatar, scaled down to 32px.
+function MiniAvatar({ uid, name }: { uid: string; name: string }) {
+  const hue = avatarHue(uid)
+  const initial = (name || '?').charAt(0).toUpperCase()
+  return (
+    <div
+      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+      style={{ backgroundColor: `hsl(${hue}, 55%, 50%)` }}
+    >
+      {initial}
+    </div>
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -91,6 +119,27 @@ export function ProfilePage() {
   // Contact card toggle
   const [contactOpen, setContactOpen] = useState(false)
 
+  // ── Friends state ──────────────────────────────────────────────────────────
+  // Search
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<SearchUser[]>([])
+  const [searchLoading, setSearchLoading] = useState(false)
+  // Track UIDs we've just sent a request to (for immediate button feedback)
+  const [sentTo, setSentTo] = useState<Set<string>>(new Set())
+
+  // Incoming friend requests via real-time snapshot listener
+  const { invites: pendingInvites } = usePendingInvites(currentUser?.uid)
+
+  // Friends list (fetched once, refreshed after accept)
+  const [friends, setFriends] = useState<Friend[]>([])
+
+  // Ref to cancel in-flight debounce timer on new keystroke
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Share invite link state
+  const [shareLoading, setShareLoading] = useState(false)
+  const [shareFeedback, setShareFeedback] = useState<string | null>(null)
+
   // Guard: should not reach this page without being authenticated
   if (!currentUser || !userProfile) return null
 
@@ -102,28 +151,61 @@ export function ProfilePage() {
   // -------------------------------------------------------------------------
 
   async function handleSaveIdentity() {
+    // TypeScript doesn't narrow currentUser/userProfile through async closures;
+    // re-check here so the rest of the function body has non-null types.
+    if (!currentUser || !userProfile) return
     setIdentitySaving(true)
     setIdentityMsg(null)
     try {
       const trimmedName = displayName.trim()
       const trimmedTag = nametag.trim().toLowerCase()
+      const nametagChanged = trimmedTag !== (userProfile.nametag ?? '').replace(/^@/, '')
 
-      // 1. Update Firebase Auth displayName (used by currentUser.displayName)
+      // --- Nametag availability pre-check -----------------------------------
+      // Only run when the handle has actually changed. The check is not
+      // atomic (there's a brief window between check and write), but the
+      // batch write will also fail if another user claims it in that window —
+      // we catch that error below as well.
+      if (nametagChanged && trimmedTag !== '') {
+        const available = await isNametagAvailable(trimmedTag)
+        if (!available) {
+          setIdentityMsg({ ok: false, text: '@' + trimmedTag + ' is already taken.' })
+          return
+        }
+      }
+
+      // --- Firebase Auth displayName ----------------------------------------
       await updateProfile(currentUser, { displayName: trimmedName })
 
-      // 2. Persist to Firestore users/{uid}
-      await updateUserProfile(currentUser.uid, {
-        displayName: trimmedName,
-        nametag: trimmedTag,
-      })
+      // --- Nametag: atomic sentinel + user doc update -----------------------
+      if (nametagChanged && trimmedTag !== '') {
+        // claimNametag() runs a batch: delete old sentinel, create new sentinel,
+        // update users/{uid}.nametag — all three succeed or all fail.
+        await claimNametag(
+          currentUser.uid,
+          userProfile.nametag?.replace(/^@/, ''),
+          trimmedTag,
+        )
+      } else if (!nametagChanged) {
+        // Nametag unchanged — only update other fields
+        await updateUserProfile(currentUser.uid, { displayName: trimmedName })
+      }
+      // (if trimmedTag is empty and changed: we leave nametag as-is for now)
 
-      // 3. Update the Zustand cache so TransactionForm and travel creation
-      //    see the new displayName immediately without a re-fetch.
-      setUserProfile({ ...userProfile, displayName: trimmedName, nametag: trimmedTag })
+      // --- Zustand cache update ---------------------------------------------
+      // Keeps TransactionForm and other consumers in sync without re-fetch.
+      setUserProfile({ ...userProfile, displayName: trimmedName, nametag: trimmedTag || userProfile.nametag || '' })
 
       setIdentityMsg({ ok: true, text: 'Saved.' })
-    } catch {
-      setIdentityMsg({ ok: false, text: 'Failed to save. Please try again.' })
+    } catch (err: unknown) {
+      // FirestoreError with code 'permission-denied' means the nametag was
+      // claimed between our availability check and the batch write (race condition).
+      const code = (err as { code?: string })?.code
+      if (code === 'permission-denied') {
+        setIdentityMsg({ ok: false, text: '@' + nametag + ' was just taken. Try another handle.' })
+      } else {
+        setIdentityMsg({ ok: false, text: 'Failed to save. Please try again.' })
+      }
     } finally {
       setIdentitySaving(false)
     }
@@ -134,6 +216,7 @@ export function ProfilePage() {
   // -------------------------------------------------------------------------
 
   async function handlePasswordReset() {
+    if (!currentUser) return
     setResetState('idle')
     try {
       await sendPasswordResetEmail(auth, currentUser.email!)
@@ -150,6 +233,106 @@ export function ProfilePage() {
   async function handleSignOut() {
     await signOut()
     navigate('/login', { replace: true })
+  }
+
+  // -------------------------------------------------------------------------
+  // Friends — load list on mount
+  // -------------------------------------------------------------------------
+
+  // useEffect runs after the component renders. Here we load the friend list once.
+  // We also reload it whenever the user accepts a request (friendsKey changes).
+  const [friendsKey, setFriendsKey] = useState(0)
+  useEffect(() => {
+    fetchFriends(currentUser.uid).then(setFriends)
+  }, [currentUser.uid, friendsKey]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // -------------------------------------------------------------------------
+  // Friends — nametag search (debounced 300ms)
+  // -------------------------------------------------------------------------
+
+  // useEffect watches searchQuery. Each time it changes, we cancel the previous
+  // timer and start a new 300ms countdown before firing the Firestore query.
+  // This prevents a query on every keystroke.
+  useEffect(() => {
+    if (searchTimer.current) clearTimeout(searchTimer.current)
+
+    if (searchQuery.trim() === '') {
+      setSearchResults([])
+      setSearchLoading(false)
+      return
+    }
+
+    setSearchLoading(true)
+    searchTimer.current = setTimeout(async () => {
+      const results = await searchByNametag(searchQuery.trim(), currentUser.uid)
+      setSearchResults(results)
+      setSearchLoading(false)
+    }, 300)
+
+    return () => {
+      if (searchTimer.current) clearTimeout(searchTimer.current)
+    }
+  }, [searchQuery, currentUser.uid]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // -------------------------------------------------------------------------
+  // Friends — send request
+  // -------------------------------------------------------------------------
+
+  async function handleSendRequest(toUid: string) {
+    if (!userProfile) return
+    setSentTo(prev => new Set(prev).add(toUid))
+    await sendFriendRequest(userProfile, toUid)
+  }
+
+  // -------------------------------------------------------------------------
+  // Friends — accept / decline
+  // -------------------------------------------------------------------------
+
+  async function handleAccept(inviteId: string) {
+    if (!userProfile) return
+    const invite = pendingInvites.find(i => i.inviteId === inviteId)
+    if (!invite) return
+    await acceptFriendRequest(invite, userProfile)
+    // Trigger friends list reload
+    setFriendsKey(k => k + 1)
+  }
+
+  async function handleDecline(inviteId: string) {
+    await declineFriendRequest(inviteId)
+    // The snapshot listener will remove this invite from pendingInvites automatically
+  }
+
+  // -------------------------------------------------------------------------
+  // Friends — share invite link
+  // -------------------------------------------------------------------------
+
+  async function handleShareInvite() {
+    if (!userProfile) return
+    setShareLoading(true)
+    setShareFeedback(null)
+    try {
+      const inviteId = await createShareableInvite(userProfile, 'friend')
+      // Build the absolute URL using the current origin (works on localhost and production)
+      const url = `${window.location.origin}/invite/${inviteId}`
+
+      if (navigator.share) {
+        // Web Share API — opens the native share sheet on mobile
+        await navigator.share({
+          title: `${userProfile.displayName} wants to connect on GlobeExpenses`,
+          text: 'Join me on GlobeExpenses to track our travel expenses together!',
+          url,
+        })
+      } else {
+        // Fallback: copy to clipboard
+        await navigator.clipboard.writeText(url)
+        setShareFeedback('Link copied to clipboard!')
+        setTimeout(() => setShareFeedback(null), 3000)
+      }
+    } catch {
+      // navigator.share throws if user cancels the share sheet — ignore that case
+    } finally {
+      setShareLoading(false)
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -218,7 +401,7 @@ export function ProfilePage() {
               />
             </div>
             <p className="text-xs text-muted-foreground">
-              Will be used for friend management in a future version.
+              Used to find and add friends. Must be unique.
             </p>
           </div>
 
@@ -282,12 +465,153 @@ export function ProfilePage() {
           </div>
         </Section>
 
-        {/* Friends — v2 placeholder */}
+        {/* ── Friends ─────────────────────────────────────────────── */}
         <Section title="Friends">
-          <p className="text-sm text-muted-foreground">
-            Friend management is coming in a future version. Your @username will be used to add
-            friends and invite them to shared travels.
-          </p>
+
+          {/* Share invite link */}
+          <div className="flex flex-col gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="self-start flex items-center gap-2"
+              onClick={handleShareInvite}
+              disabled={shareLoading}
+            >
+              <Share2 className="h-4 w-4" />
+              {shareLoading ? 'Creating link…' : 'Share invite link'}
+            </Button>
+            {shareFeedback && (
+              <p className="text-xs text-green-600">{shareFeedback}</p>
+            )}
+            <p className="text-xs text-muted-foreground">
+              Share a link — anyone who opens it can add you as a friend.
+            </p>
+          </div>
+
+          {/* Search by nametag */}
+          <div className="flex flex-col gap-2">
+            <Label>Find by @username</Label>
+            {/* Input with a search icon prefix, same pattern as the nametag field */}
+            <div className="flex items-center rounded-md border border-input bg-background px-3 focus-within:ring-2 focus-within:ring-ring">
+              <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value.replace(/^@/, '').toLowerCase())}
+                placeholder="username"
+                className="flex-1 bg-transparent py-2 pl-2 text-sm focus:outline-none"
+              />
+            </div>
+
+            {/* Search results */}
+            {searchLoading && (
+              <p className="text-xs text-muted-foreground">Searching…</p>
+            )}
+            {!searchLoading && searchResults.length > 0 && (
+              <ul className="flex flex-col gap-1">
+                {searchResults.map(user => {
+                  const alreadyFriend = friends.some(f => f.uid === user.uid)
+                  const alreadySent = sentTo.has(user.uid)
+                  return (
+                    <li key={user.uid} className="flex items-center gap-2 rounded-md border px-3 py-2">
+                      {/* Mini avatar — same color-from-uid approach */}
+                      <MiniAvatar uid={user.uid} name={user.displayName} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{user.displayName}</p>
+                        <p className="text-xs text-muted-foreground">@{user.nametag}</p>
+                      </div>
+                      {alreadyFriend ? (
+                        <span className="text-xs text-muted-foreground">Friends</span>
+                      ) : alreadySent ? (
+                        <span className="text-xs text-green-600 flex items-center gap-1">
+                          <Check className="h-3 w-3" /> Sent
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleSendRequest(user.uid)}
+                          className="flex items-center gap-1 text-xs text-primary hover:underline"
+                        >
+                          <UserPlus className="h-3 w-3" />
+                          Add
+                        </button>
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+            {!searchLoading && searchQuery.length > 0 && searchResults.length === 0 && (
+              <p className="text-xs text-muted-foreground">No users found for @{searchQuery}</p>
+            )}
+          </div>
+
+          {/* Incoming friend requests */}
+          {pendingInvites.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Friend requests ({pendingInvites.length})
+              </p>
+              <ul className="flex flex-col gap-2">
+                {pendingInvites.map(invite => (
+                  <li key={invite.inviteId} className="flex items-center gap-2 rounded-md border px-3 py-2">
+                    <MiniAvatar uid={invite.fromUid} name={invite.fromDisplayName} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{invite.fromDisplayName}</p>
+                      {invite.fromNametag && (
+                        <p className="text-xs text-muted-foreground">@{invite.fromNametag}</p>
+                      )}
+                    </div>
+                    {/* Accept and Decline buttons */}
+                    <button
+                      type="button"
+                      onClick={() => handleAccept(invite.inviteId)}
+                      className="flex items-center gap-1 rounded-full bg-primary px-2 py-1 text-xs text-primary-foreground hover:bg-primary/90"
+                    >
+                      <Check className="h-3 w-3" />
+                      Accept
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDecline(invite.inviteId)}
+                      className="flex items-center gap-1 rounded-full border px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
+                    >
+                      <X className="h-3 w-3" />
+                      Decline
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Friends list */}
+          <div className="flex flex-col gap-2">
+            {friends.length > 0 ? (
+              <>
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Your friends ({friends.length})
+                </p>
+                <ul className="flex flex-col gap-1">
+                  {friends.map(friend => (
+                    <li key={friend.uid} className="flex items-center gap-2 rounded-md border px-3 py-2">
+                      <MiniAvatar uid={friend.uid} name={friend.displayName} />
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">{friend.displayName}</p>
+                        {friend.nametag && (
+                          <p className="text-xs text-muted-foreground">@{friend.nametag}</p>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                No friends yet. Search by @username above to add someone.
+              </p>
+            )}
+          </div>
         </Section>
 
         {/* Contact developer */}

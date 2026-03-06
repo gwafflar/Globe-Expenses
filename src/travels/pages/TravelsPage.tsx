@@ -5,6 +5,7 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/auth/store/useAuthStore'
+import { usePendingInvites } from '@/friends/hooks/usePendingInvites'
 
 // Simple hash-based hue — same function as ProfilePage, kept local to avoid
 // a shared utility file for now. Same UID always gives the same colour.
@@ -77,6 +78,8 @@ export function TravelsPage() {
 
   const hue = currentUser ? avatarHue(currentUser.uid) : 0
   const initials = (userProfile?.displayName || currentUser?.email || '?').charAt(0).toUpperCase()
+  // Badge count for the avatar button — driven by a real-time snapshot on invites
+  const { count: pendingCount } = usePendingInvites(currentUser?.uid)
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
@@ -92,15 +95,22 @@ export function TravelsPage() {
           <Button type="button" onClick={handleOpenCreateTravel}>
             New travel
           </Button>
-          {/* Profile avatar button — navigates to /profile */}
+          {/* Profile avatar button — navigates to /profile.
+              The red badge shows the count of pending friend requests. */}
           <button
             type="button"
             onClick={() => navigate('/profile')}
             title="Profile"
-            className="flex h-9 w-9 items-center justify-center rounded-full text-sm font-bold text-white shadow-sm transition hover:opacity-90"
+            className="relative flex h-9 w-9 items-center justify-center rounded-full text-sm font-bold text-white shadow-sm transition hover:opacity-90"
             style={{ backgroundColor: `hsl(${hue}, 55%, 50%)` }}
           >
             {initials}
+            {pendingCount > 0 && (
+              // Badge: absolute-positioned red dot in the top-right corner
+              <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-white">
+                {pendingCount > 9 ? '9+' : pendingCount}
+              </span>
+            )}
           </button>
         </div>
       </header>

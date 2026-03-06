@@ -3,7 +3,7 @@
 // onAuthStateChanged listener to create the Firestore user document.
 
 import { useState, type FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
 import {
   createUserWithEmailAndPassword,
   updateProfile,
@@ -37,6 +37,8 @@ function mapRegisterError(error: FirebaseError): string {
 
 export function RegisterPage() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const redirectTo = new URLSearchParams(location.search).get('redirect') || '/travels'
 
   const [displayName, setDisplayName] = useState<string>('')
   const [email, setEmail] = useState<string>('')
@@ -66,8 +68,7 @@ export function RegisterPage() {
       // and creates / updates that document when it detects a logged-in user.
       // Duplicating that logic here would cause two concurrent writes.
 
-      // After successful registration, navigate to the authenticated area.
-      navigate('/travels', { replace: true })
+      navigate(redirectTo, { replace: true })
     } catch (error) {
       const message =
         (error && typeof error === 'object' && 'code' in error
@@ -141,7 +142,10 @@ export function RegisterPage() {
 
           <p className="text-center text-sm text-muted-foreground">
             Already have an account?{' '}
-            <Link to="/login" className="font-medium text-primary hover:underline">
+            <Link
+              to={redirectTo !== '/travels' ? `/login?redirect=${encodeURIComponent(redirectTo)}` : '/login'}
+              className="font-medium text-primary hover:underline"
+            >
               Sign in
             </Link>
           </p>

@@ -2,7 +2,7 @@
 // Uses Firebase Auth for authentication and React Router for navigation.
 
 import { useState, type FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
 import {
   GoogleAuthProvider,
   signInWithEmailAndPassword,
@@ -32,7 +32,11 @@ function mapAuthError(error: FirebaseError): string {
 }
 
 export function LoginPage() {
-  const navigate = useNavigate() // React Router hook to imperatively change the current URL.
+  const navigate = useNavigate()
+  const location = useLocation()
+  // Read the ?redirect= param set by ProtectedRoute when an unauthenticated user
+  // opens a protected URL (e.g. /invite/abc123). After sign-in we send them there.
+  const redirectTo = new URLSearchParams(location.search).get('redirect') || '/travels'
 
   const [email, setEmail] = useState<string>('')          // controlled email field
   const [password, setPassword] = useState<string>('')    // controlled password field
@@ -47,8 +51,7 @@ export function LoginPage() {
     try {
       // Firebase Auth call for email/password login.
       await signInWithEmailAndPassword(auth, email, password)
-      // On success, navigate to the main authenticated area.
-      navigate('/travels', { replace: true })
+      navigate(redirectTo, { replace: true })
     } catch (error) {
       // Narrow unknown error to FirebaseError when possible.
       const message =
@@ -70,7 +73,7 @@ export function LoginPage() {
       const provider = new GoogleAuthProvider()
       // Opens a popup window where the user can complete Google sign-in.
       await signInWithPopup(auth, provider)
-      navigate('/travels', { replace: true })
+      navigate(redirectTo, { replace: true })
     } catch (error) {
       const message =
         (error && typeof error === 'object' && 'code' in error
@@ -151,7 +154,10 @@ export function LoginPage() {
           <p className="text-center text-sm text-muted-foreground">
             Don&apos;t have an account?{' '}
             {/* Link component changes the URL without triggering a full page reload */}
-            <Link to="/register" className="font-medium text-primary hover:underline">
+            <Link
+              to={redirectTo !== '/travels' ? `/register?redirect=${encodeURIComponent(redirectTo)}` : '/register'}
+              className="font-medium text-primary hover:underline"
+            >
               Register
             </Link>
           </p>

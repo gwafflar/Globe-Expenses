@@ -1,8 +1,8 @@
 // transactionService.ts — Firestore write operations for transactions.
 
-import { collection, doc, setDoc, serverTimestamp } from 'firebase/firestore'
+import { collection, doc, setDoc, updateDoc, deleteField, serverTimestamp } from 'firebase/firestore'
 import { db } from '@/services/firebase'
-import type { Transaction } from '@/transactions/types'
+import type { Transaction, Split } from '@/transactions/types'
 
 /**
  * Creates a new transaction document and returns its ID immediately.
@@ -46,4 +46,63 @@ export function createTransaction(
   return newDocRef.id
 }
 
-// TODO: export function updateTransaction()
+// ---------------------------------------------------------------------------
+// Update an existing transaction
+// ---------------------------------------------------------------------------
+
+// Data shape accepted by updateTransaction — same optional fields as create,
+// but without txId/createdAt/createdBy (those never change after creation).
+// Optional fields that are missing/undefined are deleted from Firestore
+// (so clearing a category in the form truly removes it from the document).
+export type UpdateTransactionData = {
+  date: string
+  name: string
+  totalAmount: number
+  currency: string
+  exchangeRate: number
+  totalAmountMain: number
+  category?: string
+  paymentMethod?: string
+  country?: string
+  city?: string
+  paidBy: Split[]
+  beneficiaries: Split[]
+  lastModifiedBy: string
+  notes?: string
+}
+
+/**
+ * Updates an existing transaction in Firestore.
+ * Fire-and-forget: same offline-first pattern as createTransaction.
+ * Optional fields set to undefined are explicitly deleted via deleteField()
+ * so that clearing a category/city in the form actually removes the old value.
+ */
+export function updateTransaction(
+  travelId: string,
+  txId: string,
+  data: UpdateTransactionData,
+): void {
+  const txRef = doc(db, 'travels', travelId, 'transactions', txId)
+
+  // updateDoc only modifies the specified fields — createdAt/createdBy are untouched.
+  updateDoc(txRef, {
+    date: data.date,
+    name: data.name,
+    totalAmount: data.totalAmount,
+    currency: data.currency,
+    exchangeRate: data.exchangeRate,
+    totalAmountMain: data.totalAmountMain,
+    // Optional fields: deleteField() removes the key from Firestore if undefined
+    category: data.category ?? deleteField(),
+    paymentMethod: data.paymentMethod ?? deleteField(),
+    country: data.country ?? deleteField(),
+    city: data.city ?? deleteField(),
+    paidBy: data.paidBy,
+    beneficiaries: data.beneficiaries,
+    lastModifiedBy: data.lastModifiedBy,
+    notes: data.notes ?? deleteField(),
+    lastModifiedAt: serverTimestamp(),
+  }).catch((err: unknown) => {
+    console.error('[transactionService] updateDoc failed:', err)
+  })
+}

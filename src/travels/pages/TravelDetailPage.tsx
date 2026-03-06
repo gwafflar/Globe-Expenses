@@ -11,6 +11,7 @@ import { doc, getDoc, Timestamp } from 'firebase/firestore'
 import { db } from '@/services/firebase'
 import type { LabeledItem, Travel } from '@/travels/types'
 import { useAuthStore } from '@/auth/store/useAuthStore'
+import { usePendingInvites } from '@/friends/hooks/usePendingInvites'
 import { ChevronLeft } from 'lucide-react'
 
 function avatarHue(uid: string): number {
@@ -18,7 +19,7 @@ function avatarHue(uid: string): number {
   for (const ch of uid) hash = (hash * 31 + ch.charCodeAt(0)) & 0xffffffff
   return Math.abs(hash) % 360
 }
-import { useTransactions } from '@/transactions/hooks/useTransactions'
+import { useTransactions, type TransactionWithStatus } from '@/transactions/hooks/useTransactions'
 import { Button } from '@/components/ui/button'
 import {
   Drawer,
@@ -73,6 +74,8 @@ export function TravelDetailPage() {
   const [loadingTravel, setLoadingTravel] = useState(true)
   const [travelError, setTravelError] = useState<string | null>(null)
   const [isFormOpen, setIsFormOpen] = useState(false)
+  // When non-null, the form opens in edit mode pre-filled from this transaction.
+  const [editingTx, setEditingTx] = useState<TransactionWithStatus | null>(null)
   // Incremented each time the form is opened — passed as `key` to TransactionForm
   // so React unmounts and remounts it fresh, ensuring useState pre-fills (country,
   // city, currency) pick up the latest values from existingTransactions.
@@ -144,6 +147,14 @@ export function TravelDetailPage() {
   // Opens the new-expense form and forces TransactionForm to remount (fresh state).
   function openForm() {
     setFormKey((k) => k + 1)
+    setEditingTx(null)
+    setIsFormOpen(true)
+  }
+
+  // Opens the form in edit mode pre-filled from an existing transaction.
+  function handleEditTransaction(tx: TransactionWithStatus) {
+    setFormKey((k) => k + 1)
+    setEditingTx(tx)
     setIsFormOpen(true)
   }
 
@@ -174,11 +185,18 @@ export function TravelDetailPage() {
 
   const hue = currentUser ? avatarHue(currentUser.uid) : 0
   const initials = (userProfile?.displayName || currentUser?.email || '?').charAt(0).toUpperCase()
+  const { count: pendingCount } = usePendingInvites(currentUser?.uid)
 
-  function handleTransactionSaved(newTxId: string) {
+  function handleTransactionSaved(txId: string) {
     setIsFormOpen(false)
-    setWatchedTxId(newTxId)
-    setBannerState(null)
+    setEditingTx(null)
+    if (!editingTx) {
+      // Create mode: watch for pending→synced transition and show save banner.
+      setWatchedTxId(txId)
+      setBannerState(null)
+    }
+    // Edit mode: no banner — the tx is already in the list and updates immediately
+    // via the onSnapshot listener (hasPendingWrites flip).
   }
 
   // Called when user adds a new category from within the transaction form
@@ -262,15 +280,20 @@ export function TravelDetailPage() {
           </div>
         </div>
 
-        {/* Right: profile avatar */}
+        {/* Right: profile avatar with pending-invites badge */}
         <button
           type="button"
           onClick={() => navigate('/profile')}
           title="Profile"
-          className="flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold text-white shadow-sm transition hover:opacity-90"
+          className="relative flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold text-white shadow-sm transition hover:opacity-90"
           style={{ backgroundColor: `hsl(${hue}, 55%, 50%)` }}
         >
           {initials}
+          {pendingCount > 0 && (
+            <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-white">
+              {pendingCount > 9 ? '9+' : pendingCount}
+            </span>
+          )}
         </button>
       </header>
 
@@ -284,6 +307,7 @@ export function TravelDetailPage() {
           currentUserUid={currentUserUid}
           isSolo={isSolo}
           onAddExpense={openForm}
+          onEditTransaction={handleEditTransaction}
           onTravelChange={handleTravelChange}
         />
       </main>
@@ -297,11 +321,11 @@ export function TravelDetailPage() {
         +
       </button>
 
-      {/* New expense drawer */}
-      <Drawer open={isFormOpen} onOpenChange={setIsFormOpen}>
+      {/* New / Edit expense drawer — shared for both create and edit modes */}
+      <Drawer open={isFormOpen} onOpenChange={(open) => { if (!open) { setIsFormOpen(false); setEditingTx(null) } }}>
         <DrawerContent>
           <DrawerHeader>
-            <DrawerTitle>New expense</DrawerTitle>
+            <DrawerTitle>{editingTx ? 'Edit expense' : 'New expense'}</DrawerTitle>
           </DrawerHeader>
           <div className="overflow-y-auto px-4 pb-6">
             <TransactionForm
@@ -315,8 +339,9 @@ export function TravelDetailPage() {
               travelCountries={travel.countries}
               travelCities={travel.cities}
               existingTransactions={transactions}
+              initialValues={editingTx ?? undefined}
               onSuccess={handleTransactionSaved}
-              onCancel={() => setIsFormOpen(false)}
+              onCancel={() => { setIsFormOpen(false); setEditingTx(null) }}
               onLocationAdded={handleLocationAdded}
               onCategoryAdded={handleCategoryAdded}
               onPaymentMethodAdded={handlePaymentMethodAdded}

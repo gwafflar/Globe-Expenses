@@ -504,6 +504,52 @@ At this point, fully usable for my own usage in my travel.
 
 ## ✨ Working Session 006 — March 2026
 
+### What was built
+
+**Friends & invite system (carried over from Session 005.2 tail):**
+- `ProfilePage.tsx`: full profile management (identity, security, preferences, friends, contact dev, sign out)
+  - `@nametag` claim flow: availability pre-check → atomic sentinel batch write → Zustand cache update
+  - Friends: nametag search (debounced 300ms), send request, accept/decline incoming requests, share invite link
+- `src/friends/services/friendService.ts`: `createShareableInvite`, `sendFriendRequest`, `acceptFriendRequest`, `declineFriendRequest`, `sendTravelInvite`, `acceptTravelInvite`, `subscribeToIncomingRequests`, `fetchFriends`, `searchByNametag`
+- `src/friends/hooks/usePendingInvites.ts`: real-time snapshot for incoming invites, exposes `{ invites, count }`
+- `src/friends/types.ts`: `Invite`, `Friend`, `SearchUser` interfaces
+- `src/friends/pages/InvitePage.tsx`: invite acceptance page for `/invite/:inviteId` links
+- `ParametersTab.tsx` — `MembersSection`: current members list, invite friend picker (lazy), share travel invite link
+- `TravelDetailPage` header: profile avatar button with pending-invites badge (red dot)
+- `TravelsPage` header: profile avatar button with pending-invites badge
+
+**Transaction editing:**
+- `transactionService.ts`: added `updateTransaction(travelId, txId, data)` — fire-and-forget `updateDoc`, deletes optional fields via `deleteField()` when cleared (prevents stale category/city/notes after edits)
+- `TransactionForm.tsx`: dual-mode form — `initialValues?: TransactionWithStatus` prop; pre-fills all fields in edit mode; `detectSplitMode()` helper restores equal/custom mode from saved splits; `handleSave` branches to `updateTransaction` vs `createTransaction`
+- `TransactionsTab.tsx`: transaction rows are now tappable (`cursor-pointer`, hover/active states), `onEditTransaction` callback
+- `TravelTabs.tsx`: threads `onEditTransaction` from `TravelDetailPage` → `TransactionsTab`
+- `TravelDetailPage.tsx`: `editingTx` state; `handleEditTransaction()` opens edit drawer; unified drawer with dynamic "New expense"/"Edit expense" title; `handleTransactionSaved` skips save banner for edits
+
+### Decisions made (binding)
+
+| # | Decision | Notes |
+|---|----------|-------|
+| 44 | Nametag claim: atomic batch write | Delete old sentinel + create new + update user doc — all fail together |
+| 45 | `deleteField()` for optional fields in updateTransaction | Clearing category/city/notes in edit mode actually removes the Firestore field |
+| 46 | Unified create/edit drawer | Same Drawer + TransactionForm, mode driven by `editingTx` state and `initialValues` prop |
+| 47 | No save banner for edits | Transaction already in snapshot; banner only shown for new transactions (pending→synced watch) |
+
 ### Open questions
 
 - **`updateTravelList` conflict risk (v2)**: when adding a new category or payment method from the transaction form, the full `LabeledItem[]` array is overwritten via `updateDoc`. If two travel members add different items simultaneously while one is offline, the last sync wins and the other's item is lost. Fix in v2: use `arrayUnion` for individual item additions instead of overwriting the full array.
+
+### Carry-forward items (open)
+
+- [ ] CSV / XLSX export (and import)
+- [ ] Balance tab: settlement computation (greedy debt simplification)
+- [ ] Filter and Display Mode in Transactions tab (currently placeholders)
+- [ ] PWA icons: still placeholder icons from scaffold
+- [ ] Composite indexes in `firestore.indexes.json` (currently managed manually in Firebase Console)
+- [ ] `updateTravelList` conflict: overwrite vs `arrayUnion` — fix in v2
+- [ ] Delete transaction (swipe-to-delete or long-press context menu)
+
+### Next steps (Session 007)
+
+- [ ] CSV export: download all transactions for a travel as a spreadsheet
+- [ ] Balance tab: per-member net balances + optimal settlement suggestions
+- [ ] Or: delete transaction feature

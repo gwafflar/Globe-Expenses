@@ -127,11 +127,13 @@ function TransactionRow({
   members,
   currentUserUid,
   isSolo,
+  onEdit,
 }: {
   transaction: TransactionWithStatus
   members: Travel['members']
   currentUserUid: string
   isSolo: boolean
+  onEdit: (tx: TransactionWithStatus) => void
 }) {
   const dateLabel = formatDateLabel(transaction.date)
   const categoryEmoji = getCategoryEmoji(transaction.category)
@@ -147,7 +149,10 @@ function TransactionRow({
     : 'Custom split'
 
   return (
-    <Card className="flex items-center justify-between px-4 py-3">
+    <Card
+      className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-accent/30 active:bg-accent/50 transition-colors"
+      onClick={() => onEdit(transaction)}
+    >
       <div className="flex min-w-0 items-center gap-3">
         <div className="w-12 shrink-0 text-center">
           <span className="text-xs font-medium text-muted-foreground">{dateLabel}</span>
@@ -228,6 +233,7 @@ interface TransactionsTabProps {
   currentUserUid: string
   isSolo: boolean
   onAddExpense: () => void
+  onEditTransaction: (tx: TransactionWithStatus) => void
 }
 
 export function TransactionsTab({
@@ -238,6 +244,7 @@ export function TransactionsTab({
   currentUserUid,
   isSolo,
   onAddExpense,
+  onEditTransaction,
 }: TransactionsTabProps) {
   return (
     <div className="flex flex-col gap-3">
@@ -274,6 +281,7 @@ export function TransactionsTab({
               members={members}
               currentUserUid={currentUserUid}
               isSolo={isSolo}
+              onEdit={onEditTransaction}
             />
           ))}
         </div>

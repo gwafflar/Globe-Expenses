@@ -243,6 +243,7 @@ A positive net means the user is owed money. A negative net means the user owes 
 - A user can read/write drafts under a travel only if they are the owner of the linked payment method account (v2)
 - User profile documents are readable/writable only by the owning user
 - No data is publicly accessible - all operations require authentication
+- A user should be able to reset it's password (v2). This can be easily implemented with Firebase Console. Also, in case of spam, a verification email can be requested, also from Firebase Console.
 
 # 7\. Phased Roadmap
 

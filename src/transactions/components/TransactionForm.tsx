@@ -10,7 +10,7 @@
 
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { useAuthStore } from '@/auth/store/useAuthStore'
-import { createTransaction } from '@/transactions/services/transactionService'
+import { createTransaction, updateTransaction } from '@/transactions/services/transactionService'
 import { getExchangeRate } from '@/shared/utils/exchangeRates'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -535,6 +535,18 @@ function distributeEqually(total: number, uids: string[]): Split[] {
 
 
 // ---------------------------------------------------------------------------
+// Split mode detection (used when pre-filling edit mode)
+// ---------------------------------------------------------------------------
+
+// If all splits have the same amount (within 1 cent), the split was 'equal'.
+// Single-payer/single-beneficiary is always 'equal' (mode has no visible effect).
+function detectSplitMode(splits: Split[]): 'equal' | 'custom' {
+  if (splits.length <= 1) return 'equal'
+  const first = splits[0].amount
+  return splits.every((s) => Math.abs(s.amount - first) < 0.01) ? 'equal' : 'custom'
+}
+
+// ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 interface TransactionFormProps {
@@ -548,7 +560,10 @@ interface TransactionFormProps {
   travelCountries?: LabeledItem[]     // countries with flag emoji
   travelCities?: LabeledItem[]        // cities for dedup check
   existingTransactions: TransactionWithStatus[]
-  onSuccess: (newTxId: string) => void
+  // When set, the form opens in edit mode pre-filled from this transaction.
+  // When absent, the form opens in create mode with smart defaults.
+  initialValues?: TransactionWithStatus
+  onSuccess: (txId: string) => void   // receives newTxId (create) or existing txId (edit)
   onCancel: () => void
   // Called after save when a new country or city was introduced — so parent
   // (TravelDetailPage) can update travel.countries / travel.cities immediately
@@ -572,12 +587,15 @@ export function TransactionForm({
   travelCountries,
   travelCities,
   existingTransactions,
+  initialValues,
   onSuccess,
   onCancel,
   onLocationAdded,
   onCategoryAdded,
   onPaymentMethodAdded,
 }: TransactionFormProps) {
+  // true when editing an existing transaction, false for a new one
+  const isEdit = !!initialValues
   const { currentUser, userProfile } = useAuthStore()
 
   if (!currentUser || !userProfile) {
@@ -652,33 +670,59 @@ export function TransactionForm({
   const lastCity = existingTransactions[0]?.city ?? ''
 
   // --- Field state --------------------------------------------------------
+  // In edit mode, initial values come from initialValues.
+  // In create mode, smart defaults apply (last used currency/country/city, today's date).
 
-  const [date, setDate] = useState<string>(getTodayDDMMYYYY())
-  const [name, setName] = useState<string>('')
-  // Pre-filled to '0' so the mobile numeric keyboard shows 0.00 immediately.
-  const [amountStr, setAmountStr] = useState<string>('0')
-  const [currency, setCurrency] = useState<string>(lastUsedCurrency)
-  const [category, setCategory] = useState<string>('')
-  const [paymentMethod, setPaymentMethod] = useState<string>('')
   const lastCountry = existingTransactions[0]?.country ?? ''
-  const [country, setCountry] = useState<string>(trackLocation ? lastCountry : '')
-  const [city, setCity] = useState<string>(trackLocation ? lastCity : '')
-  const [notes, setNotes] = useState<string>('')
+
+  const [date, setDate] = useState<string>(
+    isEdit ? initialValues!.date : getTodayDDMMYYYY()
+  )
+  const [name, setName] = useState<string>(
+    isEdit ? initialValues!.name : ''
+  )
+  // Pre-filled to '0' so the mobile numeric keyboard shows 0.00 immediately.
+  const [amountStr, setAmountStr] = useState<string>(
+    isEdit ? String(initialValues!.totalAmount) : '0'
+  )
+  const [currency, setCurrency] = useState<string>(
+    isEdit ? initialValues!.currency : lastUsedCurrency
+  )
+  const [category, setCategory] = useState<string>(
+    isEdit ? (initialValues!.category ?? '') : ''
+  )
+  const [paymentMethod, setPaymentMethod] = useState<string>(
+    isEdit ? (initialValues!.paymentMethod ?? '') : ''
+  )
+  const [country, setCountry] = useState<string>(
+    isEdit ? (initialValues!.country ?? '') : (trackLocation ? lastCountry : '')
+  )
+  const [city, setCity] = useState<string>(
+    isEdit ? (initialValues!.city ?? '') : (trackLocation ? lastCity : '')
+  )
+  const [notes, setNotes] = useState<string>(
+    isEdit ? (initialValues!.notes ?? '') : ''
+  )
 
   // --- Split state --------------------------------------------------------
 
   const totalAmount = parseFloat(amountStr) || 0
 
-  // paidBy starts as the current user paying the full amount
-  const [paidBy, setPaidBy] = useState<Split[]>([
-    { uid: currentUser.uid, amount: totalAmount },
-  ])
-  const [paidByMode, setPaidByMode] = useState<'equal' | 'custom'>('equal')
+  // In edit mode, restore the saved splits and detect whether they were equal or custom.
+  // In create mode, default to the current user paying/benefiting the full amount.
+  const [paidBy, setPaidBy] = useState<Split[]>(
+    isEdit ? initialValues!.paidBy : [{ uid: currentUser.uid, amount: totalAmount }]
+  )
+  const [paidByMode, setPaidByMode] = useState<'equal' | 'custom'>(
+    isEdit ? detectSplitMode(initialValues!.paidBy) : 'equal'
+  )
 
-  // beneficiaries starts as all members split equally
-  // Default: only the active user benefits (spec: "default beneficiaries = current user only")
-  const [beneficiaries, setBeneficiaries] = useState<Split[]>([{ uid: currentUser.uid, amount: totalAmount }])
-  const [beneficiaryMode, setBeneficiaryMode] = useState<'equal' | 'custom'>('equal')
+  const [beneficiaries, setBeneficiaries] = useState<Split[]>(
+    isEdit ? initialValues!.beneficiaries : [{ uid: currentUser.uid, amount: totalAmount }]
+  )
+  const [beneficiaryMode, setBeneficiaryMode] = useState<'equal' | 'custom'>(
+    isEdit ? detectSplitMode(initialValues!.beneficiaries) : 'equal'
+  )
 
   // Drawer open state
   const [paidByDrawerOpen, setPaidByDrawerOpen] = useState(false)
@@ -785,26 +829,38 @@ export function TransactionForm({
       }).catch(console.error)
     }
 
-    const newTxId = createTransaction(travelId, {
+    // Shared data fields for both create and update.
+    // Optional fields set to undefined are handled appropriately in each service call.
+    const sharedData = {
       date,
       name: name.trim(),
       totalAmount: total,
       currency,
       exchangeRate,
       totalAmountMain,
-      ...(category && { category }),
-      ...(paymentMethod && { paymentMethod }),
-      // Only include location fields if tracking is enabled and a value was set
-      ...(trackLocation && country && { country }),
-      ...(trackLocation && city && { city }),
+      // Optional fields: use undefined so each service can decide how to handle them
+      category: category || undefined,
+      paymentMethod: paymentMethod || undefined,
+      country: (trackLocation && country) ? country : undefined,
+      city: (trackLocation && city) ? city : undefined,
       paidBy,
       beneficiaries,
-      createdBy: { type: 'user' as const, uid: user.uid },
       lastModifiedBy: user.uid,
-      ...(notes.trim() && { notes: notes.trim() }),
-    })
+      notes: notes.trim() || undefined,
+    }
 
-    onSuccess(newTxId)
+    if (isEdit) {
+      // updateTransaction uses deleteField() internally for undefined optional fields,
+      // so clearing category/city/notes actually removes them from Firestore.
+      updateTransaction(travelId, initialValues!.txId, sharedData)
+      onSuccess(initialValues!.txId)
+    } else {
+      const newTxId = createTransaction(travelId, {
+        ...sharedData,
+        createdBy: { type: 'user' as const, uid: user.uid },
+      })
+      onSuccess(newTxId)
+    }
   }
 
   // ---------------------------------------------------------------------------

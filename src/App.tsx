@@ -7,6 +7,7 @@ import { RegisterPage } from '@/auth/pages/RegisterPage'
 import { TravelsPage } from '@/travels/pages/TravelsPage'
 import { TravelDetailPage } from '@/travels/pages/TravelDetailPage'
 import { ProfilePage } from '@/auth/pages/ProfilePage'
+import { InvitePage } from '@/friends/pages/InvitePage'
 
 function NotFoundPage() { return <div>404 — Not found</div> }
 
@@ -26,6 +27,7 @@ export default function App() {
         <Route path="/travels" element={<TravelsPage />} />
         <Route path="/travels/:travelId" element={<TravelDetailPage />} />
         <Route path="/profile" element={<ProfilePage />} />
+        <Route path="/invite/:inviteId" element={<InvitePage />} />
       </Route>
 
       {/* Catch-all: any unknown URL shows 404 */}
