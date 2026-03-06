@@ -68,6 +68,8 @@ export function useTransactions(travelId: string | undefined): UseTransactionsRe
             currency: data.currency as string,
             exchangeRate: data.exchangeRate as number,
             totalAmountMain: data.totalAmountMain as number,
+            country: data.country as string | undefined,
+            city: data.city as string | undefined,
             category: data.category as string | undefined,
             paymentMethod: data.paymentMethod as string | undefined,
             paidBy: (data.paidBy ?? []) as Transaction['paidBy'],

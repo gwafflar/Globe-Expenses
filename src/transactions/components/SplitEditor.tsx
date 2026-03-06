@@ -161,7 +161,7 @@ export function SplitEditor({
     const next = [...selectedUids, uid]
     setSelectedUids(next)
     if (mode === 'custom') {
-      const nextInputs = { ...customInputs, [uid]: '0.000' }
+      const nextInputs = { ...customInputs, [uid]: '0.00' }
       setCustomInputs(nextInputs)
       emitCustom(nextInputs, next)
     }
@@ -287,7 +287,7 @@ export function SplitEditor({
                       disabled={isValid}
                       onClick={() => {
                         const newAmount = round(amount + remaining, 2)
-                        const nextInputs = { ...customInputs, [uid]: newAmount.toFixed(3) }
+                        const nextInputs = { ...customInputs, [uid]: newAmount.toFixed(2) }
                         setCustomInputs(nextInputs)
                         emitCustom(nextInputs, selectedUids)
                         setTotalChangedWarning(false)

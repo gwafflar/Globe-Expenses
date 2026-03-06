@@ -516,10 +516,22 @@ function FieldWrapper({
 // Split helpers
 // ---------------------------------------------------------------------------
 
+function round(x: number, dp: number): number {
+  const f = Math.pow(10, dp)
+  return Math.round(x * f) / f
+}
+
 /**
- * Splits `total` equally among `uids`, rounded to 2 decimal places.
- * The last uid absorbs any rounding remainder so the sum always equals total.
+ * Splits `total` equally among `uids`, rounded to 3dp internally.
+ * Validity is checked at 2dp — matches SplitEditor's rounding model.
+ * Using the functional setState updater (prev =>) with this helper avoids
+ * stale-closure issues when reading current UIDs inside a useEffect.
  */
+function distributeEqually(total: number, uids: string[]): Split[] {
+  if (uids.length === 0) return []
+  const amount = round(total / uids.length, 3)
+  return uids.map((uid) => ({ uid, amount }))
+}
 
 
 // ---------------------------------------------------------------------------
@@ -682,6 +694,31 @@ export function TransactionForm({
     setBeneficiaries(soloSplit)
   }, [isSolo, currentUser.uid, totalAmount])
 
+  // --- Multi-user equal mode: keep amounts in sync with totalAmount --------
+  // The SplitEditor inside each Drawer has the same sync logic, but shadcn/vaul
+  // renders Drawer content lazily (only on first open). This means the SplitEditor's
+  // useEffect never runs until the user opens the drawer — leaving amounts at 0
+  // and causing validation to fail. These effects mirror that logic directly in the
+  // form so the splits are always valid in equal mode, even if the drawer is never opened.
+  // The functional updater form (prev =>) reads current state, not the stale closure.
+  useEffect(() => {
+    if (isSolo) return
+    if (paidByMode === 'equal') {
+      setPaidBy((prev) =>
+        prev.length === 0 ? prev : distributeEqually(totalAmount, prev.map((s) => s.uid))
+      )
+    }
+  }, [totalAmount, paidByMode, isSolo])
+
+  useEffect(() => {
+    if (isSolo) return
+    if (beneficiaryMode === 'equal') {
+      setBeneficiaries((prev) =>
+        prev.length === 0 ? prev : distributeEqually(totalAmount, prev.map((s) => s.uid))
+      )
+    }
+  }, [totalAmount, beneficiaryMode, isSolo])
+
   // --- Validation ---------------------------------------------------------
 
   // Validity rounds both sides to 2dp — absorbs 3dp drift (e.g. 33.333×3 = 99.999 → 100.00)
@@ -693,6 +730,8 @@ export function TransactionForm({
 
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [submitted, setSubmitted] = useState<boolean>(false)
+  // Briefly true after a failed save attempt — drives the red flash on the Save button
+  const [saveFlash, setSaveFlash] = useState<boolean>(false)
 
   function validate(): Record<string, string> {
     const errs: Record<string, string> = {}
@@ -715,7 +754,12 @@ export function TransactionForm({
     setSubmitted(true)
     const errs = validate()
     setErrors(errs)
-    if (Object.keys(errs).length > 0) return
+    if (Object.keys(errs).length > 0) {
+      // Flash the Save button red for 600ms to signal the problem
+      setSaveFlash(true)
+      setTimeout(() => setSaveFlash(false), 600)
+      return
+    }
 
     const user = currentUser!
     const profile = userProfile!
@@ -929,13 +973,28 @@ export function TransactionForm({
       )}
 
       {/* Actions */}
-      <div className="flex gap-2 pt-2">
-        <Button type="button" variant="outline" className="flex-1" onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button type="button" className="flex-1" onClick={handleSave}>
-          Save
-        </Button>
+      <div className="flex flex-col gap-2 pt-2">
+        <div className="flex gap-2">
+          <Button type="button" variant="outline" className="flex-1" onClick={onCancel}>
+            Cancel
+          </Button>
+          {/* saveFlash briefly applies destructive colours to signal invalid fields */}
+          <Button
+            type="button"
+            className={`flex-1 transition-colors ${saveFlash ? 'bg-destructive text-destructive-foreground hover:bg-destructive' : ''}`}
+            onClick={handleSave}
+          >
+            Save
+          </Button>
+        </div>
+        {/* After a failed save attempt, list which fields need attention */}
+        {submitted && Object.keys(errors).length > 0 && (
+          <p className="text-center text-xs text-destructive">
+            {'Please fix: ' + Object.keys(errors).map((k) =>
+              ({ date: 'Date', name: 'Name', amount: 'Amount', paidBy: 'Paid by', beneficiaries: 'Split' } as Record<string, string>)[k] ?? k
+            ).join(', ')}
+          </p>
+        )}
       </div>
 
       {/* Paid By bottom sheet */}
