@@ -401,6 +401,97 @@ function SmartCountrySelect({ value, onChange, orderedCountries, onCountryAdded 
 }
 
 // ---------------------------------------------------------------------------
+// SmartLabeledItemSelect — dropdown for category or payment method
+// ---------------------------------------------------------------------------
+// Shows existing items from the travel's per-travel list (or global fallback),
+// plus a "+ Add new…" option that opens an inline text input.
+// When the user confirms a new item, it is saved to the travel list and
+// the parent is notified via onAddNew so it can update local state.
+
+interface SmartLabeledItemSelectProps {
+  label: string
+  value: string                 // currently selected value (formatted "emoji label" string)
+  onChange: (val: string) => void
+  items: string[]               // formatted display strings (already "emoji label")
+  onAddNew: (label: string) => void  // called with just the label text (no emoji)
+  placeholder?: string
+}
+
+function SmartLabeledItemSelect({
+  label,
+  value,
+  onChange,
+  items,
+  onAddNew,
+  placeholder = '— optional —',
+}: SmartLabeledItemSelectProps) {
+  const [addingNew, setAddingNew] = useState(false)
+  const [newInput, setNewInput] = useState('')
+
+  function handleSelectChange(e: React.ChangeEvent<HTMLSelectElement>) {
+    if (e.target.value === '__add_new__') {
+      setAddingNew(true)
+      setNewInput('')
+    } else {
+      onChange(e.target.value)
+    }
+  }
+
+  function handleConfirm() {
+    const trimmed = newInput.trim()
+    if (trimmed) {
+      onAddNew(trimmed)   // persists to Firestore and updates parent state
+      onChange(trimmed)   // sets form field to the new value
+    }
+    setAddingNew(false)
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Enter') handleConfirm()
+    if (e.key === 'Escape') setAddingNew(false)
+  }
+
+  if (addingNew) {
+    return (
+      <div className="flex flex-col gap-1">
+        <label className="text-sm font-medium">{label}</label>
+        <div className="flex gap-2">
+          <Input
+            autoFocus
+            type="text"
+            placeholder={`New ${label.toLowerCase()}…`}
+            value={newInput}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+          />
+          <Button type="button" size="sm" onClick={handleConfirm}>OK</Button>
+          <Button type="button" size="sm" variant="outline" onClick={() => setAddingNew(false)}>
+            ✕
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-sm font-medium">{label}</label>
+      <select
+        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+        value={value}
+        onChange={handleSelectChange}
+      >
+        <option value="">{placeholder}</option>
+        {items.map((item) => (
+          <option key={item} value={item}>{item}</option>
+        ))}
+        <option value="__add_new__">+ Add new…</option>
+      </select>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Field wrapper
 // ---------------------------------------------------------------------------
 function FieldWrapper({
@@ -450,6 +541,10 @@ interface TransactionFormProps {
   // Called after save when a new country or city was introduced — so parent
   // (TravelDetailPage) can update travel.countries / travel.cities immediately
   onLocationAdded?: (newCountry: LabeledItem | null, newCity: LabeledItem | null) => void
+  // Called when user creates a new category from the form — parent updates travel.categories
+  onCategoryAdded?: (item: LabeledItem) => void
+  // Called when user creates a new payment method from the form — parent updates travel.paymentMethods
+  onPaymentMethodAdded?: (item: LabeledItem) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -468,6 +563,8 @@ export function TransactionForm({
   onSuccess,
   onCancel,
   onLocationAdded,
+  onCategoryAdded,
+  onPaymentMethodAdded,
 }: TransactionFormProps) {
   const { currentUser, userProfile } = useAuthStore()
 
@@ -682,6 +779,9 @@ export function TransactionForm({
           value={toInputFormat(date)}
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDate(fromInputFormat(e.target.value))}
           className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+          // colorScheme tells the browser to adapt the date picker's internal
+          // colours to the current theme — prevents invisible text in dark mode
+          style={{ colorScheme: 'light dark' }}
         />
         {submitted && errors.date && (
           <p className="text-xs text-destructive">{errors.date}</p>
@@ -756,45 +856,35 @@ export function TransactionForm({
         </>
       )}
 
-      {/* Category */}
-      <FieldWrapper label="Category">
-        {effectiveCategories.length === 0 ? (
-          <select disabled className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm text-muted-foreground shadow-sm opacity-60">
-            <option>No categories yet — add them in Parameters</option>
-          </select>
-        ) : (
-          <select
-            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-            value={category}
-            onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setCategory(e.target.value)}
-          >
-            <option value="">— optional —</option>
-            {effectiveCategories.map((cat: string) => (
-              <option key={cat} value={cat}>{cat}</option>
-            ))}
-          </select>
-        )}
-      </FieldWrapper>
+      {/* Category — "+ Add new…" creates a new LabeledItem in the travel list */}
+      <SmartLabeledItemSelect
+        label="Category"
+        value={category}
+        onChange={setCategory}
+        items={effectiveCategories}
+        onAddNew={(label) => {
+          // Build a new LabeledItem and persist it to the travel's categories list
+          const newItem: LabeledItem = { id: `cat-${Date.now()}`, label }
+          const updatedList = [...(travelCategories ?? []), newItem]
+          updateTravelList(travelId, 'categories', updatedList).catch(console.error)
+          // Notify parent so TravelDetailPage updates local travel state immediately
+          onCategoryAdded?.(newItem)
+        }}
+      />
 
-      {/* Payment Method */}
-      <FieldWrapper label="Payment Method">
-        {effectivePaymentMethods.length === 0 ? (
-          <select disabled className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm text-muted-foreground shadow-sm opacity-60">
-            <option>No payment methods yet — add them in Parameters</option>
-          </select>
-        ) : (
-          <select
-            className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-            value={paymentMethod}
-            onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setPaymentMethod(e.target.value)}
-          >
-            <option value="">— optional —</option>
-            {effectivePaymentMethods.map((pm: string) => (
-              <option key={pm} value={pm}>{pm}</option>
-            ))}
-          </select>
-        )}
-      </FieldWrapper>
+      {/* Payment Method — same "+ Add new…" pattern */}
+      <SmartLabeledItemSelect
+        label="Payment Method"
+        value={paymentMethod}
+        onChange={setPaymentMethod}
+        items={effectivePaymentMethods}
+        onAddNew={(label) => {
+          const newItem: LabeledItem = { id: `pm-${Date.now()}`, label }
+          const updatedList = [...(travelPaymentMethods ?? []), newItem]
+          updateTravelList(travelId, 'paymentMethods', updatedList).catch(console.error)
+          onPaymentMethodAdded?.(newItem)
+        }}
+      />
 
       {/* Notes */}
       <FieldWrapper label="Notes">

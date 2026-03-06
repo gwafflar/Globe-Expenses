@@ -65,6 +65,10 @@ export function TravelDetailPage() {
   const [loadingTravel, setLoadingTravel] = useState(true)
   const [travelError, setTravelError] = useState<string | null>(null)
   const [isFormOpen, setIsFormOpen] = useState(false)
+  // Incremented each time the form is opened — passed as `key` to TransactionForm
+  // so React unmounts and remounts it fresh, ensuring useState pre-fills (country,
+  // city, currency) pick up the latest values from existingTransactions.
+  const [formKey, setFormKey] = useState(0)
   const [watchedTxId, setWatchedTxId] = useState<string | null>(null)
   const [bannerState, setBannerState] = useState<BannerState>(null)
 
@@ -129,6 +133,12 @@ export function TravelDetailPage() {
     setTravel((prev) => prev ? { ...prev, ...updated } : prev)
   }
 
+  // Opens the new-expense form and forces TransactionForm to remount (fresh state).
+  function openForm() {
+    setFormKey((k) => k + 1)
+    setIsFormOpen(true)
+  }
+
   // Called by TransactionForm after a new transaction introduces a country/city
   // not yet in the travel's lists — updates local state immediately so dropdowns
   // and ParametersTab reflect the new value without a page reload.
@@ -158,6 +168,16 @@ export function TravelDetailPage() {
     setIsFormOpen(false)
     setWatchedTxId(newTxId)
     setBannerState(null)
+  }
+
+  // Called when user adds a new category from within the transaction form
+  function handleCategoryAdded(item: LabeledItem) {
+    setTravel((prev) => prev ? { ...prev, categories: [...prev.categories, item] } : prev)
+  }
+
+  // Called when user adds a new payment method from within the transaction form
+  function handlePaymentMethodAdded(item: LabeledItem) {
+    setTravel((prev) => prev ? { ...prev, paymentMethods: [...prev.paymentMethods, item] } : prev)
   }
 
   // ---------------------------------------------------------------------------
@@ -237,7 +257,7 @@ export function TravelDetailPage() {
           transactionsError={transactionsError}
           currentUserUid={currentUserUid}
           isSolo={isSolo}
-          onAddExpense={() => setIsFormOpen(true)}
+          onAddExpense={openForm}
           onTravelChange={handleTravelChange}
         />
       </main>
@@ -245,7 +265,7 @@ export function TravelDetailPage() {
       {/* FAB */}
       <button
         type="button"
-        onClick={() => setIsFormOpen(true)}
+        onClick={openForm}
         className="fixed bottom-6 right-6 flex h-12 w-12 items-center justify-center rounded-full bg-primary text-2xl font-bold text-primary-foreground shadow-lg shadow-primary/40 transition hover:bg-primary/90"
       >
         +
@@ -259,6 +279,7 @@ export function TravelDetailPage() {
           </DrawerHeader>
           <div className="overflow-y-auto px-4 pb-6">
             <TransactionForm
+              key={formKey}
               travelId={travelId!}
               members={travel.members}
               travelSettings={travel.settings}
@@ -271,6 +292,8 @@ export function TravelDetailPage() {
               onSuccess={handleTransactionSaved}
               onCancel={() => setIsFormOpen(false)}
               onLocationAdded={handleLocationAdded}
+              onCategoryAdded={handleCategoryAdded}
+              onPaymentMethodAdded={handlePaymentMethodAdded}
             />
           </div>
         </DrawerContent>
