@@ -506,24 +506,45 @@ At this point, fully usable for my own usage in my travel.
 
 ### What was built
 
-**Friends & invite system (carried over from Session 005.2 tail):**
-- `ProfilePage.tsx`: full profile management (identity, security, preferences, friends, contact dev, sign out)
-  - `@nametag` claim flow: availability pre-check → atomic sentinel batch write → Zustand cache update
-  - Friends: nametag search (debounced 300ms), send request, accept/decline incoming requests, share invite link
-- `src/friends/services/friendService.ts`: `createShareableInvite`, `sendFriendRequest`, `acceptFriendRequest`, `declineFriendRequest`, `sendTravelInvite`, `acceptTravelInvite`, `subscribeToIncomingRequests`, `fetchFriends`, `searchByNametag`
-- `src/friends/hooks/usePendingInvites.ts`: real-time snapshot for incoming invites, exposes `{ invites, count }`
-- `src/friends/types.ts`: `Invite`, `Friend`, `SearchUser` interfaces
-- `src/friends/pages/InvitePage.tsx`: invite acceptance page for `/invite/:inviteId` links
-- `ParametersTab.tsx` — `MembersSection`: current members list, invite friend picker (lazy), share travel invite link
-- `TravelDetailPage` header: profile avatar button with pending-invites badge (red dot)
-- `TravelsPage` header: profile avatar button with pending-invites badge
+**Profile page** (`src/auth/pages/ProfilePage.tsx`)
+- **Identity section**: display name inline edit (auto-save on blur), email display, profile avatar (hash-based color)
+- **Security section**: "Change password" sends a Firebase reset email; sign out with confirmation dialog (AlertDialog)
+- **Preferences section**: main currency picker (ISO 4217 selector)
+- **Nametag section**: real-time availability check as you type (debounced 300ms, Firestore prefix query on `nametags/`), claim/change flow with atomic batch write — creates `nametags/{tag}` sentinel + updates `users/{uid}` in one transaction so the claim is all-or-nothing. Zustand store updated in-memory after success. Error states for taken/invalid handles.
+- **Friends section**:
+  - Nametag search: live prefix search, results with avatars, "Add friend" button per result; sent-request tracked in local state for immediate button feedback
+  - Incoming requests: real-time list from `usePendingInvites`, each showing sender avatar + nametag + Accept / Decline buttons
+  - Friends list: loaded once on mount, refreshed after each accept; shows avatar + name + nametag for each friend
+  - "Share my link" button: generates a multi-use friend invite link via `createShareableInvite()`, copies to clipboard
+- **Contact developer section**: collapsible card with mail / Discord / Telegram links
+
+**Friends & invite service layer** (new module `src/friends/`):
+- `friendService.ts`: `searchByNametag` (prefix query, excludes self), `createShareableInvite`, `sendFriendRequest`, `acceptFriendRequest` (atomic batch: invite + bidirectional friend entries), `declineFriendRequest`, `sendTravelInvite`, `acceptTravelInvite`, `subscribeToIncomingRequests`, `fetchFriends`
+- `usePendingInvites.ts`: real-time `onSnapshot` on `invites` where `toUid == uid && status == active`; exposes `{ invites: Invite[], count: number }`
+- `types.ts`: `Invite`, `Friend`, `SearchUser` interfaces
+- `InvitePage.tsx`: full acceptance page for `/invite/:inviteId`. Validates invite (exists, active, not expired, not already used by this user, not own invite). Displays sender avatar + name + invite context (friend or travel name). Branches to `acceptFriendRequest` or `acceptTravelInvite` on confirm. Shows accepted state with deep-link to travel or travels list.
+
+**Travel member invite** (via Parameters tab):
+- `ParametersTab.tsx` — new `MembersSection`: displays current members with avatars and join dates. "Invite to travel" button calls `createShareableInvite(type='travel_member', travelId)` and copies the link. Reuses `InvitePage` for acceptance.
+- `sendTravelInvite`: targeted invite (to a specific friend, type='travel_member')
+- `acceptTravelInvite`: batch writes invite update + travel `members`/`memberUids` via `arrayUnion`. Passes `pendingInviteId` on the travel document for the Firestore rule to validate via `get()`. Friendship entries written fire-and-forget after the batch.
+
+**Firestore security rules** — major update covering all new collections:
+- `nametags/{tag}`: read = any auth user; create = claiming own UID; delete = owner; update = forbidden
+- `invites/{inviteId}`: read = any auth user (token = capability); create = fromUid == self; update = not in usedBy + valid target + fromUid immutable; delete = sender
+- `users/{userId}/friends/{friendId}`: read/delete = owner; create/update = owner OR self-addition (enables accepter to write into sender's list)
+- `travels/{travelId}`: non-member join rule uses `pendingInviteId` + `get()` for authorization; removed unreliable `arrayUnion` checks on `request.resource.data.memberUids`
+
+**App routing & header polish**:
+- `App.tsx`: added `/invite/:inviteId` route pointing to `InvitePage`
+- `TravelDetailPage` and `TravelsPage` headers: profile avatar button (hash-based color, initials) with pending-invites badge (red dot, count capped at 9+), navigates to `/profile`
+- `auth/services/userService.ts`: extended `UserProfile` with optional `nametag` field; `claimNametag` + `isNametagAvailable` functions
 
 **Transaction editing:**
-- `transactionService.ts`: added `updateTransaction(travelId, txId, data)` — fire-and-forget `updateDoc`, deletes optional fields via `deleteField()` when cleared (prevents stale category/city/notes after edits)
-- `TransactionForm.tsx`: dual-mode form — `initialValues?: TransactionWithStatus` prop; pre-fills all fields in edit mode; `detectSplitMode()` helper restores equal/custom mode from saved splits; `handleSave` branches to `updateTransaction` vs `createTransaction`
-- `TransactionsTab.tsx`: transaction rows are now tappable (`cursor-pointer`, hover/active states), `onEditTransaction` callback
-- `TravelTabs.tsx`: threads `onEditTransaction` from `TravelDetailPage` → `TransactionsTab`
-- `TravelDetailPage.tsx`: `editingTx` state; `handleEditTransaction()` opens edit drawer; unified drawer with dynamic "New expense"/"Edit expense" title; `handleTransactionSaved` skips save banner for edits
+- `transactionService.ts`: `updateTransaction(travelId, txId, data)` — fire-and-forget `updateDoc`; cleared optional fields (category, paymentMethod, country, city, notes) written with `deleteField()` so they are actually removed from the document rather than left stale
+- `TransactionForm.tsx`: dual create/edit mode via `initialValues?: TransactionWithStatus` prop; all `useState` initialisers read from `initialValues` when editing; `detectSplitMode()` reconstructs equal/custom mode from stored split amounts; `handleSave` branches to `updateTransaction` vs `createTransaction`; title of the drawer changes to "Edit expense"
+- `TransactionsTab.tsx`: rows now tappable (`cursor-pointer`, hover/active states), fires `onEditTransaction` callback on tap
+- `TravelDetailPage.tsx`: `editingTx: TransactionWithStatus | null` state; `handleEditTransaction()` sets it and bumps `formKey` to force form remount; `handleTransactionSaved` skips the save banner in edit mode (transaction already live in snapshot)
 
 ### Decisions made (binding)
 
@@ -552,4 +573,39 @@ At this point, fully usable for my own usage in my travel.
 
 - [ ] CSV export: download all transactions for a travel as a spreadsheet
 - [ ] Balance tab: per-member net balances + optimal settlement suggestions
-- [ ] Or: delete transaction feature
+- [ ] Delete transaction (swipe-to-delete or long-press context menu)
+- [ ] PWA icons: replace scaffold placeholders
+
+
+## ✨ Working Session 006.2 — March 6th 2026 (Continuation)
+
+**Type**: Bug fixes + documentation
+**Tools used**: Claude Code (claude-sonnet-4-6)
+
+### What was fixed
+
+**Travel invite acceptance** — three bugs prevented users from joining a travel via an invite link:
+
+1. **Firestore rules** (`firestore.rules`): non-member join rule checked `request.resource.data.memberUids` after an `arrayUnion` write — but FieldValue transforms are not reflected in `request.resource.data` at rule evaluation time. Rule always failed. Fixed: removed the check, rely solely on the invite token validated via `get()`. Deployed.
+2. **Batch isolation** (`friendService.ts`): friendship writes were inside the same batch as the core invite + travel update — a failure there aborted the whole join. Fixed: friendship writes moved outside the batch as fire-and-forget.
+3. **InvitePage error state** (`InvitePage.tsx`): catch block always showed "You're already friends" regardless of actual error. Fixed: dedicated `error` state with contextual message and a "Try again" button.
+
+### Decisions made (binding)
+
+| # | Decision | Notes |
+|---|----------|-------|
+| 43 | arrayUnion not reflected in request.resource.data | FieldValue transforms are evaluated after rules pass. Security rules must not check the post-transform value of an arrayUnion field. Use capability tokens (pendingInviteId + get()) instead. |
+| 44 | Invite acceptance: core batch + separate friendship writes | Batch = invite update + travel update (atomic). Friendship writes = fire-and-forget outside batch (cannot abort travel join). |
+
+### Documentation updated
+
+- `docs/GlobeExpenses_Architecture.md` → v0.5: integrated pending appendix, added friends/invite system (Invite + Friend models, nametags collection, updated security rules section, updated flows, updated roadmap and open questions)
+- `docs/GlobeExpenses_Specification.md` → v0.5: added nametag to User, updated Travel membership (invite-based join is v1), added Section 3.5 Friends & Invite System, updated Parameters tab Members section, updated Out of Scope, added 8 new decision log entries (#37–44)
+
+### Next steps (Session 007)
+
+- [ ] CSV export: download all transactions for a travel as a spreadsheet
+- [ ] Balance tab: per-member net balances + optimal settlement suggestions
+- [ ] Delete transaction
+- [ ] PWA icons: replace scaffold placeholders
+- [ ] Filter and Display Mode in Transactions tab (currently placeholders)
