@@ -29,6 +29,7 @@ import {
 } from '@/components/ui/drawer'
 import { TransactionForm } from '@/transactions/components/TransactionForm'
 import { TravelTabs } from '@/travels/components/TravelTabs'
+import { InstallPromptBanner } from '@/shared/components/InstallPromptBanner'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -296,6 +297,9 @@ export function TravelDetailPage() {
           )}
         </button>
       </header>
+
+      {/* Install PWA banner — shown on mobile browsers only, hidden once installed */}
+      <InstallPromptBanner />
 
       {/* Tab content */}
       <main className="mx-auto w-full max-w-2xl flex-1 px-4">

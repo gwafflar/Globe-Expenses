@@ -373,7 +373,8 @@ function MembersSection({ travel }: { travel: Travel }) {
 
   // Share invite link state
   const [shareLoading, setShareLoading] = useState(false)
-  const [shareFeedback, setShareFeedback] = useState<string | null>(null)
+  const [generatedInviteUrl, setGeneratedInviteUrl] = useState<string | null>(null)
+  const [copyFeedback, setCopyFeedback] = useState(false)
 
   // Load friends when the picker opens (lazy — not on mount)
   useEffect(() => {
@@ -399,29 +400,33 @@ function MembersSection({ travel }: { travel: Travel }) {
   async function handleShareLink() {
     if (!userProfile) return
     setShareLoading(true)
-    setShareFeedback(null)
     try {
       const inviteId = await createShareableInvite(
         userProfile, 'travel_member', travel.travelId, travel.name,
       )
       const url = `${window.location.origin}/invite/${inviteId}`
+      setGeneratedInviteUrl(url)
 
-      if (navigator.share) {
-        await navigator.share({
-          title: `Join ${travel.name} on GlobeExpenses`,
-          text: `${userProfile.displayName} invited you to track expenses on ${travel.name}!`,
-          url,
-        })
-      } else {
+      // Copy to clipboard automatically
+      try {
         await navigator.clipboard.writeText(url)
-        setShareFeedback('Link copied!')
-        setTimeout(() => setShareFeedback(null), 3000)
+        setCopyFeedback(true)
+        setTimeout(() => setCopyFeedback(false), 2500)
+      } catch {
+        // clipboard may be unavailable; user can copy manually from the displayed URL
       }
     } catch {
-      // user cancelled share sheet — ignore
+      // invite creation failed — ignore silently
     } finally {
       setShareLoading(false)
     }
+  }
+
+  async function handleCopyInviteUrl() {
+    if (!generatedInviteUrl) return
+    await navigator.clipboard.writeText(generatedInviteUrl)
+    setCopyFeedback(true)
+    setTimeout(() => setCopyFeedback(false), 2500)
   }
 
   return (
@@ -500,7 +505,7 @@ function MembersSection({ travel }: { travel: Travel }) {
       </div>
 
       {/* Share invite link */}
-      <div className="flex flex-col gap-1">
+      <div className="flex flex-col gap-2">
         <button
           type="button"
           onClick={handleShareLink}
@@ -508,14 +513,29 @@ function MembersSection({ travel }: { travel: Travel }) {
           className="flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent/20 disabled:opacity-50"
         >
           <Share2 className="h-4 w-4" />
-          {shareLoading ? 'Creating link…' : 'Share invite link'}
+          {shareLoading ? 'Creating link…' : 'Generate invite link'}
         </button>
-        {shareFeedback && (
-          <p className="text-xs text-green-600 pl-1">{shareFeedback}</p>
+
+        {/* Show the generated URL with a copy button — only visible after link is created */}
+        {generatedInviteUrl && (
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2">
+              <span className="flex-1 min-w-0 truncate text-xs text-muted-foreground font-mono">
+                {generatedInviteUrl}
+              </span>
+              <button
+                type="button"
+                onClick={handleCopyInviteUrl}
+                className="shrink-0 text-xs text-primary hover:underline"
+              >
+                {copyFeedback ? 'Copied!' : 'Copy'}
+              </button>
+            </div>
+            <p className="text-xs text-muted-foreground pl-1">
+              Anyone with this link can join this travel.
+            </p>
+          </div>
         )}
-        <p className="text-xs text-muted-foreground pl-1">
-          Anyone with the link can join this travel.
-        </p>
       </div>
     </div>
   )

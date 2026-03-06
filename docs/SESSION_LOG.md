@@ -607,5 +607,47 @@ At this point, fully usable for my own usage in my travel.
 - [ ] CSV export: download all transactions for a travel as a spreadsheet
 - [ ] Balance tab: per-member net balances + optimal settlement suggestions
 - [ ] Delete transaction
-- [ ] PWA icons: replace scaffold placeholders
+- [ ] PWA icons: replace scaffold placeholders (`public/icon-192.png`, `public/icon-512.png`, `public/apple-touch-icon.png`)
 - [ ] Filter and Display Mode in Transactions tab (currently placeholders)
+
+---
+
+## ✨ Working Session 007 — March 7th 2026
+
+**Type**: UI improvements
+**Tools used**: Claude Code (claude-sonnet-4-6)
+
+### What was built
+
+- **Invite link UX**: button renamed to "Generate invite link"; generated URL displayed in a monospace box with auto-copy and manual "Copy" button; "Anyone with this link…" label only shown after generation. Applied to both travel invites (`ParametersTab`) and friend invites (`ProfilePage`).
+- **PWA install banner** (`InstallPromptBanner.tsx` + `installPrompt.ts`): shown on `TravelDetailPage` and `ProfilePage`. Android Chrome → native "Install" button; Android Firefox/other → manual menu instructions; iOS Safari → "Tap Share → Add to Home Screen". Hidden when already installed or on desktop. Dismissable (localStorage). `beforeinstallprompt` captured in `main.tsx` before React renders so the component never misses it.
+- **Google sign-in fix (Android PWA)**: `LoginPage` now watches `currentUser` from the auth store and navigates as soon as it becomes non-null — fixes the case where Firebase's `onAuthStateChanged` fires after a Custom Tab returns but the page never reacted. Also uses `signInWithRedirect` in standalone mode with `getRedirectResult` on mount.
+- **Password eye toggle**: Eye/EyeOff button in the password field on Login and Register pages.
+- **App icon & HTML meta** (`index.html`): favicon → `icon-192.png`, `apple-touch-icon` link, PWA meta tags, title → `GlobeExpenses`.
+
+### Files created
+
+| File | Description |
+|------|-------------|
+| `src/shared/components/InstallPromptBanner.tsx` | PWA install banner component |
+| `src/shared/utils/installPrompt.ts` | Early-capture module for `beforeinstallprompt` event |
+
+### Files modified
+
+| File | Changes |
+|------|---------|
+| `src/main.tsx` | Side-effect import of `installPrompt.ts` before React renders |
+| `src/auth/pages/LoginPage.tsx` | Eye toggle, Google redirect fix, `currentUser` watcher |
+| `src/auth/pages/RegisterPage.tsx` | Eye toggle |
+| `src/auth/pages/ProfilePage.tsx` | Friend invite link display + install banner |
+| `src/travels/components/tabs/ParametersTab.tsx` | Travel invite link display |
+| `src/travels/pages/TravelDetailPage.tsx` | Install banner |
+| `index.html` | Title, favicon, apple-touch-icon, PWA meta tags |
+
+### Carry-forward items (open)
+
+- [ ] CSV export
+- [ ] Balance tab: settlement computation
+- [ ] Delete transaction
+- [ ] PWA icons: still scaffold placeholders — provide `public/icon-192.png` (192×192), `public/icon-512.png` (512×512), `public/apple-touch-icon.png` (180×180)
+- [ ] Filter and Display Mode in Transactions tab

@@ -41,6 +41,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { ChevronLeft, LogOut, Mail, UserPlus, Check, X, Search, Share2 } from 'lucide-react'
 import { createShareableInvite } from '@/friends/services/friendService'
+import { InstallPromptBanner } from '@/shared/components/InstallPromptBanner'
 
 // ---------------------------------------------------------------------------
 // Avatar color
@@ -138,7 +139,8 @@ export function ProfilePage() {
 
   // Share invite link state
   const [shareLoading, setShareLoading] = useState(false)
-  const [shareFeedback, setShareFeedback] = useState<string | null>(null)
+  const [generatedInviteUrl, setGeneratedInviteUrl] = useState<string | null>(null)
+  const [copyFeedback, setCopyFeedback] = useState(false)
 
   // Guard: should not reach this page without being authenticated
   if (!currentUser || !userProfile) return null
@@ -309,30 +311,32 @@ export function ProfilePage() {
   async function handleShareInvite() {
     if (!userProfile) return
     setShareLoading(true)
-    setShareFeedback(null)
     try {
       const inviteId = await createShareableInvite(userProfile, 'friend')
       // Build the absolute URL using the current origin (works on localhost and production)
       const url = `${window.location.origin}/invite/${inviteId}`
+      setGeneratedInviteUrl(url)
 
-      if (navigator.share) {
-        // Web Share API — opens the native share sheet on mobile
-        await navigator.share({
-          title: `${userProfile.displayName} wants to connect on GlobeExpenses`,
-          text: 'Join me on GlobeExpenses to track our travel expenses together!',
-          url,
-        })
-      } else {
-        // Fallback: copy to clipboard
+      // Copy to clipboard automatically
+      try {
         await navigator.clipboard.writeText(url)
-        setShareFeedback('Link copied to clipboard!')
-        setTimeout(() => setShareFeedback(null), 3000)
+        setCopyFeedback(true)
+        setTimeout(() => setCopyFeedback(false), 2500)
+      } catch {
+        // clipboard may be unavailable; user can copy manually from the displayed URL
       }
     } catch {
-      // navigator.share throws if user cancels the share sheet — ignore that case
+      // invite creation failed — ignore silently
     } finally {
       setShareLoading(false)
     }
+  }
+
+  async function handleCopyInviteUrl() {
+    if (!generatedInviteUrl) return
+    await navigator.clipboard.writeText(generatedInviteUrl)
+    setCopyFeedback(true)
+    setTimeout(() => setCopyFeedback(false), 2500)
   }
 
   // -------------------------------------------------------------------------
@@ -355,6 +359,9 @@ export function ProfilePage() {
         {/* Centered title */}
         <h1 className="absolute left-1/2 -translate-x-1/2 text-base font-semibold">Profile</h1>
       </header>
+
+      {/* Install PWA banner — shown on mobile browsers only, hidden once installed */}
+      <InstallPromptBanner />
 
       <main className="mx-auto w-full max-w-lg flex-1 px-4 py-6 flex flex-col gap-5">
 
@@ -478,14 +485,29 @@ export function ProfilePage() {
               disabled={shareLoading}
             >
               <Share2 className="h-4 w-4" />
-              {shareLoading ? 'Creating link…' : 'Share invite link'}
+              {shareLoading ? 'Creating link…' : 'Generate invite link'}
             </Button>
-            {shareFeedback && (
-              <p className="text-xs text-green-600">{shareFeedback}</p>
+
+            {/* Show the URL once generated — user can copy it manually too */}
+            {generatedInviteUrl && (
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2">
+                  <span className="flex-1 min-w-0 truncate text-xs text-muted-foreground font-mono">
+                    {generatedInviteUrl}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleCopyInviteUrl}
+                    className="shrink-0 text-xs text-primary hover:underline"
+                  >
+                    {copyFeedback ? 'Copied!' : 'Copy'}
+                  </button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Anyone who opens this link can add you as a friend.
+                </p>
+              </div>
             )}
-            <p className="text-xs text-muted-foreground">
-              Share a link — anyone who opens it can add you as a friend.
-            </p>
           </div>
 
           {/* Search by nametag */}

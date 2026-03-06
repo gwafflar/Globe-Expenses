@@ -2,9 +2,16 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <!-- Favicon: use the app icon instead of the default Vite logo -->
+    <link rel="icon" type="image/png" href="/icon-192.png" />
+    <!-- iOS home screen icon (used when the user taps "Add to Home Screen" in Safari) -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!-- Tells iOS Safari to launch the app in standalone mode (no browser chrome) -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <!-- Status bar colour in standalone iOS mode -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>globe-expenses</title>
+    <title>GlobeExpenses</title>
   </head>
   <body>
     <div id="root"></div>

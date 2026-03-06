@@ -4,6 +4,8 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import './services/firebase' // initialize Firebase at app startup
+// Capture beforeinstallprompt before React renders — the event fires very early.
+import './shared/utils/installPrompt'
 import './index.css'
 import App from './App'
 
