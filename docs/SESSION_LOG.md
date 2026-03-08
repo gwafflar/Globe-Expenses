@@ -651,3 +651,76 @@ At this point, fully usable for my own usage in my travel.
 - [ ] Delete transaction
 - [ ] PWA icons: still scaffold placeholders — provide `public/icon-192.png` (192×192), `public/icon-512.png` (512×512), `public/apple-touch-icon.png` (180×180)
 - [ ] Filter and Display Mode in Transactions tab
+
+---
+
+## ✨ Working Session 008 — March 8th 2026
+
+**Type**: Feature — xlsx import/export
+**Tools used**: Claude Code (claude-sonnet-4-6)
+
+### What was built
+
+**xlsx Export** — `exportTravelToXlsx(travel, transactions)` runs entirely in the browser (no server). Generates a styled 5-tab workbook:
+
+| Tab | Content |
+|-----|---------|
+| ⚙️ Parameters | Main currency, member slots (`Member_1`…`Member_N`), exchange rate table |
+| 📃 Expenses | One row per transaction, sorted by date. VLOOKUP formulas for cost in main ccy, ✔️/✅ check columns |
+| ⚖️ Balance | 2 000 pre-filled VLOOKUP rows, one 5-col block per member (cost/paid local, cost/paid main, balance) |
+| 💸 Balance Summary | SUM totals per member from Balance sheet |
+| 📊 Analysis | SUMPRODUCT+CHOOSE formulas for spending by country and category, member-selector cell |
+
+Styling matches the reference template exactly:
+- Dark navy `1F3864` headers with white bold text; section-specific accent colours (`1F4E79`, `375623`, `7B2D8B`, `843C0C`)
+- Per-member 6-colour pastel palette cycling (`DDEBF7`, `FCE4D6`, `E2EFDA`, `FFF2CC`, `E8D5F5`, `FCE4F3`)
+- Light blue `EBF3FB` for all computed/formula cells; grey `F2F2F2` for key/label cells
+- Thin/medium borders, Calibri 10pt, column widths tuned to the template
+
+Uses `xlsx-js-style` (CJS drop-in fork of SheetJS that supports writing cell styles). The community `xlsx` package is kept for parsing in import.
+
+**xlsx Import** — 2-function API:
+- `parseSheetFile(file)` — pure parse, no Firestore writes. Detects N dynamically from Parameters tab (`Member_N` pattern). Handles date formats: JS Date, Excel serial, DD/MM/YYYY string. Returns `ParseResult` with rows + active `SheetMemberSlot[]`.
+- `importParsedRows(...)` — calls `createTransaction` (fire-and-forget) per valid row. Optional fields spread conditionally to avoid `undefined → Firestore` error. Reports `{ imported, skipped, errors }`.
+
+**ImportXlsxDialog** — 3-step wizard:
+1. Upload (drag-and-drop), format notice ("GlobeExpenses files only"), parse preview
+2. Member mapping table: auto-match on display name, duplicate mapping blocked (red banner), skip warning (yellow banner), member count mismatch warning
+3. Result: imported count, skipped count, collapsible error list per row
+
+### Files created
+
+| File | Description |
+|------|-------------|
+| `src/shared/utils/sheetColumns.ts` | `buildColumnMap(N)` + `colLetter()` shared by import and export |
+| `src/shared/utils/sheetExport.ts` | `exportTravelToXlsx()` — 5-tab styled workbook generation |
+| `src/shared/utils/sheetImport.ts` | `parseSheetFile()` + `importParsedRows()` |
+| `src/shared/components/ImportXlsxDialog.tsx` | 3-step import wizard dialog |
+| `src/components/ui/dialog.tsx` | Radix UI Dialog wrapper in shadcn style |
+
+### Files modified
+
+| File | Changes |
+|------|---------|
+| `src/travels/components/tabs/TransactionsTab.tsx` | `members` prop → `travel` prop; Export + Import buttons in toolbar |
+| `src/travels/components/TravelTabs.tsx` | Passes full `travel` to `TransactionsTab` |
+| `package.json` / `pnpm-lock.yaml` | Added `xlsx` (parse) + `xlsx-js-style` (styled write) |
+
+### Key decisions
+
+- `xlsx-js-style` used for export (style writing); `xlsx` kept for import (parse only — no dep on style fork).
+- Column layout fully dynamic via `buildColumnMap(N)` — scales from N=1 to N=6+ without any hardcoded letters.
+- Optional fields omitted from `createTransaction` payload using conditional spread (`...(x !== undefined && { key: x })`), not passed as `undefined` (which Firestore rejects).
+- Format note in import Step 1 makes clear only GlobeExpenses-exported files are supported.
+
+### open problem
+Sheet re-import deduplication and write optimization (v1/v2)
+On export, tx.txId is written into col A of the Expenses sheet instead of a sequential integer; on re-import, rows carrying a Firestore-shaped ID use setDoc(..., { merge: true }) to overwrite the existing document rather than creating a duplicate, while rows without one fall back to createTransaction. Redundant writes for unchanged rows are accepted in v1 — a pre-read diff (fetch all existing transactions, compare field by field, skip unchanged rows) is deferred to v2, where it becomes the foundation for full bidirectional sync between the app and a Google Sheets-hosted version of the standard sheet.
+
+### Carry-forward items (open)
+
+- [ ] Balance tab: settlement computation
+- [ ] Delete transaction
+- [ ] PWA icons: `public/icon-192.png`, `public/icon-512.png`, `public/apple-touch-icon.png`
+- [ ] Filter and Display Mode in Transactions tab
+- [ ] Move composite indexes to `firestore.indexes.json`

@@ -1,0 +1,2031 @@
+[
+  {
+    "date": "10-07-2025",
+    "name": "Flights to Barcelona",
+    "totalAmount": 356.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 356.00,
+    "category": "Transport",
+    "paymentMethod": "Revolut",
+    "paidBy": [{ "uid": "MEMBER_1_UID", "amount": 356.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 89.00 },
+      { "uid": "MEMBER_2_UID", "amount": 89.00 },
+      { "uid": "MEMBER_3_UID", "amount": 89.00 },
+      { "uid": "MEMBER_4_UID", "amount": 89.00 }
+    ],
+    "country": "Spain",
+    "city": "Barcelona",
+    "notes": "Vueling from Paris CDG"
+  },
+  {
+    "date": "10-07-2025",
+    "name": "Taxi from El Prat airport",
+    "totalAmount": 38.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 38.00,
+    "category": "Transport",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_2_UID", "amount": 38.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 9.50 },
+      { "uid": "MEMBER_2_UID", "amount": 9.50 },
+      { "uid": "MEMBER_3_UID", "amount": 9.50 },
+      { "uid": "MEMBER_4_UID", "amount": 9.50 }
+    ],
+    "country": "Spain",
+    "city": "Barcelona",
+    "notes": ""
+  },
+  {
+    "date": "10-07-2025",
+    "name": "Airbnb Barcelona 3 nights",
+    "totalAmount": 480.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 480.00,
+    "category": "Accommodation",
+    "paymentMethod": "Revolut",
+    "paidBy": [
+      { "uid": "MEMBER_3_UID", "amount": 240.00 },
+      { "uid": "MEMBER_4_UID", "amount": 240.00 }
+    ],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 120.00 },
+      { "uid": "MEMBER_2_UID", "amount": 120.00 },
+      { "uid": "MEMBER_3_UID", "amount": 120.00 },
+      { "uid": "MEMBER_4_UID", "amount": 120.00 }
+    ],
+    "country": "Spain",
+    "city": "Barcelona",
+    "notes": "El Born neighbourhood"
+  },
+  {
+    "date": "10-07-2025",
+    "name": "Groceries & drinks day 1",
+    "totalAmount": 52.30,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 52.30,
+    "category": "Food",
+    "paymentMethod": "Revolut",
+    "paidBy": [{ "uid": "MEMBER_1_UID", "amount": 52.30 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 13.08 },
+      { "uid": "MEMBER_2_UID", "amount": 13.07 },
+      { "uid": "MEMBER_3_UID", "amount": 13.08 },
+      { "uid": "MEMBER_4_UID", "amount": 13.07 }
+    ],
+    "country": "Spain",
+    "city": "Barcelona",
+    "notes": "Mercadona run"
+  },
+  {
+    "date": "10-07-2025",
+    "name": "Metro T-Casual 10-trip cards",
+    "totalAmount": 43.20,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 43.20,
+    "category": "Transport",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_4_UID", "amount": 43.20 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 10.80 },
+      { "uid": "MEMBER_2_UID", "amount": 10.80 },
+      { "uid": "MEMBER_3_UID", "amount": 10.80 },
+      { "uid": "MEMBER_4_UID", "amount": 10.80 }
+    ],
+    "country": "Spain",
+    "city": "Barcelona",
+    "notes": ""
+  },
+  {
+    "date": "11-07-2025",
+    "name": "Paella lunch at La Barceloneta",
+    "totalAmount": 78.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 78.00,
+    "category": "Food",
+    "paymentMethod": "Credit Card",
+    "paidBy": [{ "uid": "MEMBER_2_UID", "amount": 78.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 19.50 },
+      { "uid": "MEMBER_2_UID", "amount": 19.50 },
+      { "uid": "MEMBER_3_UID", "amount": 19.50 },
+      { "uid": "MEMBER_4_UID", "amount": 19.50 }
+    ],
+    "country": "Spain",
+    "city": "Barcelona",
+    "notes": "Beach-front terrace"
+  },
+  {
+    "date": "11-07-2025",
+    "name": "Sangria & tapas bar",
+    "totalAmount": 64.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 64.00,
+    "category": "Drinks",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_1_UID", "amount": 64.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 16.00 },
+      { "uid": "MEMBER_2_UID", "amount": 16.00 },
+      { "uid": "MEMBER_3_UID", "amount": 16.00 },
+      { "uid": "MEMBER_4_UID", "amount": 16.00 }
+    ],
+    "country": "Spain",
+    "city": "Barcelona",
+    "notes": "El Xampanyet, El Born"
+  },
+  {
+    "date": "11-07-2025",
+    "name": "Pharmacy — sunscreen SPF50",
+    "totalAmount": 22.50,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 22.50,
+    "category": "Health",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_1_UID", "amount": 22.50 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 11.25 },
+      { "uid": "MEMBER_2_UID", "amount": 11.25 }
+    ],
+    "country": "Spain",
+    "city": "Barcelona",
+    "notes": "M1 + M2 only"
+  },
+  {
+    "date": "12-07-2025",
+    "name": "Sagrada Família tickets",
+    "totalAmount": 140.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 140.00,
+    "category": "Activities",
+    "paymentMethod": "Revolut",
+    "paidBy": [{ "uid": "MEMBER_3_UID", "amount": 140.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 35.00 },
+      { "uid": "MEMBER_2_UID", "amount": 35.00 },
+      { "uid": "MEMBER_3_UID", "amount": 35.00 },
+      { "uid": "MEMBER_4_UID", "amount": 35.00 }
+    ],
+    "country": "Spain",
+    "city": "Barcelona",
+    "notes": "Towers access included"
+  },
+  {
+    "date": "12-07-2025",
+    "name": "Bike rental half day",
+    "totalAmount": 30.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 30.00,
+    "category": "Activities",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_1_UID", "amount": 30.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 15.00 },
+      { "uid": "MEMBER_2_UID", "amount": 15.00 }
+    ],
+    "country": "Spain",
+    "city": "Barcelona",
+    "notes": "M3+M4 went to the beach instead"
+  },
+  {
+    "date": "12-07-2025",
+    "name": "Pacha Barcelona entry",
+    "totalAmount": 120.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 120.00,
+    "category": "Nightlife",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_4_UID", "amount": 120.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 30.00 },
+      { "uid": "MEMBER_2_UID", "amount": 30.00 },
+      { "uid": "MEMBER_3_UID", "amount": 30.00 },
+      { "uid": "MEMBER_4_UID", "amount": 30.00 }
+    ],
+    "country": "Spain",
+    "city": "Barcelona",
+    "notes": "Entry + 1 welcome drink"
+  },
+  {
+    "date": "13-07-2025",
+    "name": "Beach bar cocktails",
+    "totalAmount": 88.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 88.00,
+    "category": "Drinks",
+    "paymentMethod": "Cash",
+    "paidBy": [
+      { "uid": "MEMBER_2_UID", "amount": 44.00 },
+      { "uid": "MEMBER_3_UID", "amount": 44.00 }
+    ],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 22.00 },
+      { "uid": "MEMBER_2_UID", "amount": 22.00 },
+      { "uid": "MEMBER_3_UID", "amount": 22.00 },
+      { "uid": "MEMBER_4_UID", "amount": 22.00 }
+    ],
+    "country": "Spain",
+    "city": "Barcelona",
+    "notes": "Last afternoon, Barceloneta"
+  },
+  {
+    "date": "14-07-2025",
+    "name": "Ferry Barcelona → Ibiza",
+    "totalAmount": 212.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 212.00,
+    "category": "Transport",
+    "paymentMethod": "Revolut",
+    "paidBy": [{ "uid": "MEMBER_1_UID", "amount": 212.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 53.00 },
+      { "uid": "MEMBER_2_UID", "amount": 53.00 },
+      { "uid": "MEMBER_3_UID", "amount": 53.00 },
+      { "uid": "MEMBER_4_UID", "amount": 53.00 }
+    ],
+    "country": "Spain",
+    "city": "Ibiza",
+    "notes": "Baleària overnight ferry"
+  },
+  {
+    "date": "14-07-2025",
+    "name": "Villa rental Ibiza 3 nights",
+    "totalAmount": 960.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 960.00,
+    "category": "Accommodation",
+    "paymentMethod": "Wise",
+    "paidBy": [
+      { "uid": "MEMBER_1_UID", "amount": 500.00 },
+      { "uid": "MEMBER_2_UID", "amount": 460.00 }
+    ],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 240.00 },
+      { "uid": "MEMBER_2_UID", "amount": 240.00 },
+      { "uid": "MEMBER_3_UID", "amount": 240.00 },
+      { "uid": "MEMBER_4_UID", "amount": 240.00 }
+    ],
+    "country": "Spain",
+    "city": "Ibiza",
+    "notes": "Private pool, San José area"
+  },
+  {
+    "date": "14-07-2025",
+    "name": "Supermarket run & wine",
+    "totalAmount": 94.60,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 94.60,
+    "category": "Food",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_4_UID", "amount": 94.60 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 23.65 },
+      { "uid": "MEMBER_2_UID", "amount": 23.65 },
+      { "uid": "MEMBER_3_UID", "amount": 23.65 },
+      { "uid": "MEMBER_4_UID", "amount": 23.65 }
+    ],
+    "country": "Spain",
+    "city": "Ibiza",
+    "notes": "Rosé, cheese, jamón"
+  },
+  {
+    "date": "15-07-2025",
+    "name": "Scooter rental ×2",
+    "totalAmount": 120.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 120.00,
+    "category": "Transport",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_3_UID", "amount": 120.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 30.00 },
+      { "uid": "MEMBER_2_UID", "amount": 30.00 },
+      { "uid": "MEMBER_3_UID", "amount": 30.00 },
+      { "uid": "MEMBER_4_UID", "amount": 30.00 }
+    ],
+    "country": "Spain",
+    "city": "Ibiza",
+    "notes": "Island tour, 1 full day"
+  },
+  {
+    "date": "15-07-2025",
+    "name": "Ushuaïa Beach Club day pass",
+    "totalAmount": 200.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 200.00,
+    "category": "Activities",
+    "paymentMethod": "Revolut",
+    "paidBy": [{ "uid": "MEMBER_1_UID", "amount": 200.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 50.00 },
+      { "uid": "MEMBER_2_UID", "amount": 50.00 },
+      { "uid": "MEMBER_3_UID", "amount": 50.00 },
+      { "uid": "MEMBER_4_UID", "amount": 50.00 }
+    ],
+    "country": "Spain",
+    "city": "Ibiza",
+    "notes": "Sunbed + pool access"
+  },
+  {
+    "date": "15-07-2025",
+    "name": "Boat trip around the island",
+    "totalAmount": 280.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 280.00,
+    "category": "Activities",
+    "paymentMethod": "Cash",
+    "paidBy": [
+      { "uid": "MEMBER_3_UID", "amount": 140.00 },
+      { "uid": "MEMBER_4_UID", "amount": 140.00 }
+    ],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 70.00 },
+      { "uid": "MEMBER_2_UID", "amount": 70.00 },
+      { "uid": "MEMBER_3_UID", "amount": 70.00 },
+      { "uid": "MEMBER_4_UID", "amount": 70.00 }
+    ],
+    "country": "Spain",
+    "city": "Ibiza",
+    "notes": "Half-day with captain, snorkeling stop"
+  },
+  {
+    "date": "15-07-2025",
+    "name": "Seafood dinner Es Torrent",
+    "totalAmount": 180.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 180.00,
+    "category": "Food",
+    "paymentMethod": "Credit Card",
+    "paidBy": [{ "uid": "MEMBER_4_UID", "amount": 180.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 45.00 },
+      { "uid": "MEMBER_2_UID", "amount": 45.00 },
+      { "uid": "MEMBER_3_UID", "amount": 45.00 },
+      { "uid": "MEMBER_4_UID", "amount": 45.00 }
+    ],
+    "country": "Spain",
+    "city": "Ibiza",
+    "notes": "Grilled fish, feet in the sand"
+  },
+  {
+    "date": "16-07-2025",
+    "name": "Pacha Ibiza entry",
+    "totalAmount": 240.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 240.00,
+    "category": "Nightlife",
+    "paymentMethod": "Revolut",
+    "paidBy": [{ "uid": "MEMBER_2_UID", "amount": 240.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 60.00 },
+      { "uid": "MEMBER_2_UID", "amount": 60.00 },
+      { "uid": "MEMBER_3_UID", "amount": 60.00 },
+      { "uid": "MEMBER_4_UID", "amount": 60.00 }
+    ],
+    "country": "Spain",
+    "city": "Ibiza",
+    "notes": "Marco Carola night, queue was insane"
+  },
+  {
+    "date": "16-07-2025",
+    "name": "Cocktails inside Pacha",
+    "totalAmount": 135.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 135.00,
+    "category": "Drinks",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_2_UID", "amount": 135.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 45.00 },
+      { "uid": "MEMBER_2_UID", "amount": 45.00 },
+      { "uid": "MEMBER_3_UID", "amount": 45.00 }
+    ],
+    "country": "Spain",
+    "city": "Ibiza",
+    "notes": "M4 was already asleep lol"
+  },
+  {
+    "date": "16-07-2025",
+    "name": "Old town ice cream & drinks",
+    "totalAmount": 26.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 26.00,
+    "category": "Food",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_1_UID", "amount": 26.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 6.50 },
+      { "uid": "MEMBER_2_UID", "amount": 6.50 },
+      { "uid": "MEMBER_3_UID", "amount": 6.50 },
+      { "uid": "MEMBER_4_UID", "amount": 6.50 }
+    ],
+    "country": "Spain",
+    "city": "Ibiza",
+    "notes": "Dalt Vila afternoon stroll"
+  },
+  {
+    "date": "16-07-2025",
+    "name": "Snacks (solo)",
+    "totalAmount": 8.90,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 8.90,
+    "category": "Food",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_3_UID", "amount": 8.90 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_3_UID", "amount": 8.90 }
+    ],
+    "country": "Spain",
+    "city": "Ibiza",
+    "notes": "Gas station crisps at 4am"
+  },
+  {
+    "date": "17-07-2025",
+    "name": "Hangover breakfast café",
+    "totalAmount": 52.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 52.00,
+    "category": "Food",
+    "paymentMethod": "Revolut",
+    "paidBy": [{ "uid": "MEMBER_2_UID", "amount": 52.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 13.00 },
+      { "uid": "MEMBER_2_UID", "amount": 13.00 },
+      { "uid": "MEMBER_3_UID", "amount": 13.00 },
+      { "uid": "MEMBER_4_UID", "amount": 13.00 }
+    ],
+    "country": "Spain",
+    "city": "Ibiza",
+    "notes": "Nobody spoke until the coffee arrived"
+  },
+  {
+    "date": "18-07-2025",
+    "name": "Ferry Ibiza → Palma de Mallorca",
+    "totalAmount": 136.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 136.00,
+    "category": "Transport",
+    "paymentMethod": "Revolut",
+    "paidBy": [{ "uid": "MEMBER_3_UID", "amount": 136.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 34.00 },
+      { "uid": "MEMBER_2_UID", "amount": 34.00 },
+      { "uid": "MEMBER_3_UID", "amount": 34.00 },
+      { "uid": "MEMBER_4_UID", "amount": 34.00 }
+    ],
+    "country": "Spain",
+    "city": "Palma de Mallorca",
+    "notes": ""
+  },
+  {
+    "date": "18-07-2025",
+    "name": "Hostel Palma 2 nights",
+    "totalAmount": 240.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 240.00,
+    "category": "Accommodation",
+    "paymentMethod": "Wise",
+    "paidBy": [{ "uid": "MEMBER_4_UID", "amount": 240.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 60.00 },
+      { "uid": "MEMBER_2_UID", "amount": 60.00 },
+      { "uid": "MEMBER_3_UID", "amount": 60.00 },
+      { "uid": "MEMBER_4_UID", "amount": 60.00 }
+    ],
+    "country": "Spain",
+    "city": "Palma de Mallorca",
+    "notes": "Hostal Cuba, rooftop terrace"
+  },
+  {
+    "date": "18-07-2025",
+    "name": "Bodega wine tasting",
+    "totalAmount": 60.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 60.00,
+    "category": "Activities",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_4_UID", "amount": 60.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 15.00 },
+      { "uid": "MEMBER_2_UID", "amount": 15.00 },
+      { "uid": "MEMBER_3_UID", "amount": 15.00 },
+      { "uid": "MEMBER_4_UID", "amount": 15.00 }
+    ],
+    "country": "Spain",
+    "city": "Palma de Mallorca",
+    "notes": "Binissalem DO, 5 wines"
+  },
+  {
+    "date": "19-07-2025",
+    "name": "Catamaran excursion",
+    "totalAmount": 220.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 220.00,
+    "category": "Activities",
+    "paymentMethod": "Revolut",
+    "paidBy": [{ "uid": "MEMBER_1_UID", "amount": 220.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 55.00 },
+      { "uid": "MEMBER_2_UID", "amount": 55.00 },
+      { "uid": "MEMBER_3_UID", "amount": 55.00 },
+      { "uid": "MEMBER_4_UID", "amount": 55.00 }
+    ],
+    "country": "Spain",
+    "city": "Palma de Mallorca",
+    "notes": "Full day, lunch included"
+  },
+  {
+    "date": "19-07-2025",
+    "name": "Lunch at Cala d'Or beach restaurant",
+    "totalAmount": 112.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 112.00,
+    "category": "Food",
+    "paymentMethod": "Cash",
+    "paidBy": [
+      { "uid": "MEMBER_2_UID", "amount": 56.00 },
+      { "uid": "MEMBER_3_UID", "amount": 56.00 }
+    ],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 28.00 },
+      { "uid": "MEMBER_2_UID", "amount": 28.00 },
+      { "uid": "MEMBER_3_UID", "amount": 28.00 },
+      { "uid": "MEMBER_4_UID", "amount": 28.00 }
+    ],
+    "country": "Spain",
+    "city": "Palma de Mallorca",
+    "notes": "Lobster rice was incredible"
+  },
+  {
+    "date": "19-07-2025",
+    "name": "Kayak rental",
+    "totalAmount": 36.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 36.00,
+    "category": "Activities",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_1_UID", "amount": 36.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 18.00 },
+      { "uid": "MEMBER_3_UID", "amount": 18.00 }
+    ],
+    "country": "Spain",
+    "city": "Palma de Mallorca",
+    "notes": "M2+M4 stayed on the beach"
+  },
+  {
+    "date": "19-07-2025",
+    "name": "Churros breakfast",
+    "totalAmount": 28.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 28.00,
+    "category": "Food",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_1_UID", "amount": 28.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 7.00 },
+      { "uid": "MEMBER_2_UID", "amount": 7.00 },
+      { "uid": "MEMBER_3_UID", "amount": 7.00 },
+      { "uid": "MEMBER_4_UID", "amount": 7.00 }
+    ],
+    "country": "Spain",
+    "city": "Palma de Mallorca",
+    "notes": "Bar Cristal, old town"
+  },
+  {
+    "date": "20-07-2025",
+    "name": "Souvenir shopping (solo)",
+    "totalAmount": 34.50,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 34.50,
+    "category": "Shopping",
+    "paymentMethod": "Credit Card",
+    "paidBy": [{ "uid": "MEMBER_2_UID", "amount": 34.50 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_2_UID", "amount": 34.50 }
+    ],
+    "country": "Spain",
+    "city": "Palma de Mallorca",
+    "notes": "Ceramic tiles and olive oil"
+  },
+  {
+    "date": "21-07-2025",
+    "name": "Flight Palma → Nice",
+    "totalAmount": 316.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 316.00,
+    "category": "Transport",
+    "paymentMethod": "Revolut",
+    "paidBy": [{ "uid": "MEMBER_3_UID", "amount": 316.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 79.00 },
+      { "uid": "MEMBER_2_UID", "amount": 79.00 },
+      { "uid": "MEMBER_3_UID", "amount": 79.00 },
+      { "uid": "MEMBER_4_UID", "amount": 79.00 }
+    ],
+    "country": "France",
+    "city": "Nice",
+    "notes": "easyJet, 1h10"
+  },
+  {
+    "date": "21-07-2025",
+    "name": "Airbnb Nice 2 nights",
+    "totalAmount": 380.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 380.00,
+    "category": "Accommodation",
+    "paymentMethod": "Wise",
+    "paidBy": [
+      { "uid": "MEMBER_4_UID", "amount": 190.00 },
+      { "uid": "MEMBER_1_UID", "amount": 190.00 }
+    ],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 95.00 },
+      { "uid": "MEMBER_2_UID", "amount": 95.00 },
+      { "uid": "MEMBER_3_UID", "amount": 95.00 },
+      { "uid": "MEMBER_4_UID", "amount": 95.00 }
+    ],
+    "country": "France",
+    "city": "Nice",
+    "notes": "Old town, 5 min from Promenade"
+  },
+  {
+    "date": "21-07-2025",
+    "name": "Rosé wine & charcuterie board",
+    "totalAmount": 72.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 72.00,
+    "category": "Food",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_2_UID", "amount": 72.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 18.00 },
+      { "uid": "MEMBER_2_UID", "amount": 18.00 },
+      { "uid": "MEMBER_3_UID", "amount": 18.00 },
+      { "uid": "MEMBER_4_UID", "amount": 18.00 }
+    ],
+    "country": "France",
+    "city": "Nice",
+    "notes": "Cours Saleya market picnic"
+  },
+  {
+    "date": "22-07-2025",
+    "name": "Bus to Cannes",
+    "totalAmount": 16.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 16.00,
+    "category": "Transport",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_3_UID", "amount": 16.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 4.00 },
+      { "uid": "MEMBER_2_UID", "amount": 4.00 },
+      { "uid": "MEMBER_3_UID", "amount": 4.00 },
+      { "uid": "MEMBER_4_UID", "amount": 4.00 }
+    ],
+    "country": "France",
+    "city": "Cannes",
+    "notes": "Lignes d'Azur line 200"
+  },
+  {
+    "date": "22-07-2025",
+    "name": "Snorkeling gear rental",
+    "totalAmount": 54.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 54.00,
+    "category": "Activities",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_4_UID", "amount": 54.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 18.00 },
+      { "uid": "MEMBER_2_UID", "amount": 18.00 },
+      { "uid": "MEMBER_4_UID", "amount": 18.00 }
+    ],
+    "country": "France",
+    "city": "Cannes",
+    "notes": "M3 stayed on the beach reading"
+  },
+  {
+    "date": "22-07-2025",
+    "name": "Bouillabaisse dinner",
+    "totalAmount": 148.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 148.00,
+    "category": "Food",
+    "paymentMethod": "Credit Card",
+    "paidBy": [
+      { "uid": "MEMBER_2_UID", "amount": 74.00 },
+      { "uid": "MEMBER_3_UID", "amount": 74.00 }
+    ],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 37.00 },
+      { "uid": "MEMBER_2_UID", "amount": 37.00 },
+      { "uid": "MEMBER_3_UID", "amount": 37.00 },
+      { "uid": "MEMBER_4_UID", "amount": 37.00 }
+    ],
+    "country": "France",
+    "city": "Nice",
+    "notes": "Authentic, mandatory rouille"
+  },
+  {
+    "date": "22-07-2025",
+    "name": "Rooftop bar Nice",
+    "totalAmount": 96.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 96.00,
+    "category": "Drinks",
+    "paymentMethod": "Revolut",
+    "paidBy": [{ "uid": "MEMBER_1_UID", "amount": 96.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 24.00 },
+      { "uid": "MEMBER_2_UID", "amount": 24.00 },
+      { "uid": "MEMBER_3_UID", "amount": 24.00 },
+      { "uid": "MEMBER_4_UID", "amount": 24.00 }
+    ],
+    "country": "France",
+    "city": "Nice",
+    "notes": "Hotel Aston la Scala rooftop, sea view"
+  },
+  {
+    "date": "23-07-2025",
+    "name": "Ice creams on the Promenade",
+    "totalAmount": 18.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 18.00,
+    "category": "Food",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_4_UID", "amount": 18.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 4.50 },
+      { "uid": "MEMBER_2_UID", "amount": 4.50 },
+      { "uid": "MEMBER_3_UID", "amount": 4.50 },
+      { "uid": "MEMBER_4_UID", "amount": 4.50 }
+    ],
+    "country": "France",
+    "city": "Nice",
+    "notes": "Fenocchio, 2 scoops each"
+  },
+  {
+    "date": "24-07-2025",
+    "name": "Train Nice → Naples",
+    "totalAmount": 272.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 272.00,
+    "category": "Transport",
+    "paymentMethod": "Revolut",
+    "paidBy": [{ "uid": "MEMBER_1_UID", "amount": 272.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 68.00 },
+      { "uid": "MEMBER_2_UID", "amount": 68.00 },
+      { "uid": "MEMBER_3_UID", "amount": 68.00 },
+      { "uid": "MEMBER_4_UID", "amount": 68.00 }
+    ],
+    "country": "Italy",
+    "city": "Naples",
+    "notes": "Thello via Genoa, scenic coastal route"
+  },
+  {
+    "date": "24-07-2025",
+    "name": "Ferry Naples → Amalfi",
+    "totalAmount": 96.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 96.00,
+    "category": "Transport",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_2_UID", "amount": 96.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 24.00 },
+      { "uid": "MEMBER_2_UID", "amount": 24.00 },
+      { "uid": "MEMBER_3_UID", "amount": 24.00 },
+      { "uid": "MEMBER_4_UID", "amount": 24.00 }
+    ],
+    "country": "Italy",
+    "city": "Amalfi",
+    "notes": ""
+  },
+  {
+    "date": "24-07-2025",
+    "name": "Boutique hotel Amalfi 3 nights",
+    "totalAmount": 780.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 780.00,
+    "category": "Accommodation",
+    "paymentMethod": "Credit Card",
+    "paidBy": [
+      { "uid": "MEMBER_3_UID", "amount": 390.00 },
+      { "uid": "MEMBER_4_UID", "amount": 390.00 }
+    ],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 195.00 },
+      { "uid": "MEMBER_2_UID", "amount": 195.00 },
+      { "uid": "MEMBER_3_UID", "amount": 195.00 },
+      { "uid": "MEMBER_4_UID", "amount": 195.00 }
+    ],
+    "country": "Italy",
+    "city": "Amalfi",
+    "notes": "Hotel Centrale, lemon trees everywhere"
+  },
+  {
+    "date": "25-07-2025",
+    "name": "Limoncello tasting",
+    "totalAmount": 32.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 32.00,
+    "category": "Activities",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_1_UID", "amount": 32.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 8.00 },
+      { "uid": "MEMBER_2_UID", "amount": 8.00 },
+      { "uid": "MEMBER_3_UID", "amount": 8.00 },
+      { "uid": "MEMBER_4_UID", "amount": 8.00 }
+    ],
+    "country": "Italy",
+    "city": "Amalfi",
+    "notes": "Family distillery, 5 varieties"
+  },
+  {
+    "date": "25-07-2025",
+    "name": "Gelato & coffee on the go",
+    "totalAmount": 22.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 22.00,
+    "category": "Food",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_4_UID", "amount": 22.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 5.50 },
+      { "uid": "MEMBER_2_UID", "amount": 5.50 },
+      { "uid": "MEMBER_3_UID", "amount": 5.50 },
+      { "uid": "MEMBER_4_UID", "amount": 5.50 }
+    ],
+    "country": "Italy",
+    "city": "Positano",
+    "notes": "Mandatory Italian coffee stop"
+  },
+  {
+    "date": "25-07-2025",
+    "name": "Pizza dinner Positano",
+    "totalAmount": 88.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 88.00,
+    "category": "Food",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_2_UID", "amount": 88.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 22.00 },
+      { "uid": "MEMBER_2_UID", "amount": 22.00 },
+      { "uid": "MEMBER_3_UID", "amount": 22.00 },
+      { "uid": "MEMBER_4_UID", "amount": 22.00 }
+    ],
+    "country": "Italy",
+    "city": "Positano",
+    "notes": "Da Adolfo, wood-fired oven"
+  },
+  {
+    "date": "26-07-2025",
+    "name": "Boat trip to Capri",
+    "totalAmount": 200.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 200.00,
+    "category": "Activities",
+    "paymentMethod": "Revolut",
+    "paidBy": [{ "uid": "MEMBER_3_UID", "amount": 200.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 50.00 },
+      { "uid": "MEMBER_2_UID", "amount": 50.00 },
+      { "uid": "MEMBER_3_UID", "amount": 50.00 },
+      { "uid": "MEMBER_4_UID", "amount": 50.00 }
+    ],
+    "country": "Italy",
+    "city": "Amalfi",
+    "notes": "Private speedboat, 2h"
+  },
+  {
+    "date": "26-07-2025",
+    "name": "Blue Grotto entry — Capri",
+    "totalAmount": 39.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 39.00,
+    "category": "Activities",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_1_UID", "amount": 39.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 13.00 },
+      { "uid": "MEMBER_2_UID", "amount": 13.00 },
+      { "uid": "MEMBER_3_UID", "amount": 13.00 }
+    ],
+    "country": "Italy",
+    "city": "Amalfi",
+    "notes": "M4 skipped, claustrophobic"
+  },
+  {
+    "date": "26-07-2025",
+    "name": "Seafood pasta dinner Ravello",
+    "totalAmount": 152.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 152.00,
+    "category": "Food",
+    "paymentMethod": "Credit Card",
+    "paidBy": [
+      { "uid": "MEMBER_1_UID", "amount": 80.00 },
+      { "uid": "MEMBER_2_UID", "amount": 72.00 }
+    ],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 38.00 },
+      { "uid": "MEMBER_2_UID", "amount": 38.00 },
+      { "uid": "MEMBER_3_UID", "amount": 38.00 },
+      { "uid": "MEMBER_4_UID", "amount": 38.00 }
+    ],
+    "country": "Italy",
+    "city": "Amalfi",
+    "notes": "Garden terrace at 300m altitude"
+  },
+  {
+    "date": "27-07-2025",
+    "name": "Path of the Gods — guide tip",
+    "totalAmount": 40.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 40.00,
+    "category": "Activities",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_3_UID", "amount": 40.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 10.00 },
+      { "uid": "MEMBER_2_UID", "amount": 10.00 },
+      { "uid": "MEMBER_3_UID", "amount": 10.00 },
+      { "uid": "MEMBER_4_UID", "amount": 10.00 }
+    ],
+    "country": "Italy",
+    "city": "Amalfi",
+    "notes": "Sentiero degli Dei, guide was excellent"
+  },
+  {
+    "date": "28-07-2025",
+    "name": "Ferry Naples → Palermo",
+    "totalAmount": 188.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 188.00,
+    "category": "Transport",
+    "paymentMethod": "Revolut",
+    "paidBy": [{ "uid": "MEMBER_4_UID", "amount": 188.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 47.00 },
+      { "uid": "MEMBER_2_UID", "amount": 47.00 },
+      { "uid": "MEMBER_3_UID", "amount": 47.00 },
+      { "uid": "MEMBER_4_UID", "amount": 47.00 }
+    ],
+    "country": "Italy",
+    "city": "Palermo",
+    "notes": "GNV overnight ferry"
+  },
+  {
+    "date": "28-07-2025",
+    "name": "Airbnb Palermo 2 nights",
+    "totalAmount": 320.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 320.00,
+    "category": "Accommodation",
+    "paymentMethod": "Wise",
+    "paidBy": [
+      { "uid": "MEMBER_1_UID", "amount": 160.00 },
+      { "uid": "MEMBER_2_UID", "amount": 160.00 }
+    ],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 80.00 },
+      { "uid": "MEMBER_2_UID", "amount": 80.00 },
+      { "uid": "MEMBER_3_UID", "amount": 80.00 },
+      { "uid": "MEMBER_4_UID", "amount": 80.00 }
+    ],
+    "country": "Italy",
+    "city": "Palermo",
+    "notes": "Balcony in the Kalsa district"
+  },
+  {
+    "date": "28-07-2025",
+    "name": "Sicilian wine bottle",
+    "totalAmount": 18.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 18.00,
+    "category": "Drinks",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_2_UID", "amount": 18.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 4.50 },
+      { "uid": "MEMBER_2_UID", "amount": 4.50 },
+      { "uid": "MEMBER_3_UID", "amount": 4.50 },
+      { "uid": "MEMBER_4_UID", "amount": 4.50 }
+    ],
+    "country": "Italy",
+    "city": "Palermo",
+    "notes": "Nero d'Avola from a local cantina"
+  },
+  {
+    "date": "29-07-2025",
+    "name": "Street food tour Ballarò market",
+    "totalAmount": 80.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 80.00,
+    "category": "Activities",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_3_UID", "amount": 80.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 20.00 },
+      { "uid": "MEMBER_2_UID", "amount": 20.00 },
+      { "uid": "MEMBER_3_UID", "amount": 20.00 },
+      { "uid": "MEMBER_4_UID", "amount": 20.00 }
+    ],
+    "country": "Italy",
+    "city": "Palermo",
+    "notes": "Pani câ meusa, sfincione, stigghiola"
+  },
+  {
+    "date": "29-07-2025",
+    "name": "Arancini & cannoli lunch",
+    "totalAmount": 36.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 36.00,
+    "category": "Food",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_4_UID", "amount": 36.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 9.00 },
+      { "uid": "MEMBER_2_UID", "amount": 9.00 },
+      { "uid": "MEMBER_3_UID", "amount": 9.00 },
+      { "uid": "MEMBER_4_UID", "amount": 9.00 }
+    ],
+    "country": "Italy",
+    "city": "Palermo",
+    "notes": "Bar Touring, historic pasticceria"
+  },
+  {
+    "date": "30-07-2025",
+    "name": "Car rental 2 days",
+    "totalAmount": 140.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 140.00,
+    "category": "Transport",
+    "paymentMethod": "Credit Card",
+    "paidBy": [{ "uid": "MEMBER_1_UID", "amount": 140.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 35.00 },
+      { "uid": "MEMBER_2_UID", "amount": 35.00 },
+      { "uid": "MEMBER_3_UID", "amount": 35.00 },
+      { "uid": "MEMBER_4_UID", "amount": 35.00 }
+    ],
+    "country": "Italy",
+    "city": "Palermo",
+    "notes": "Sicily road trip"
+  },
+  {
+    "date": "30-07-2025",
+    "name": "Petrol",
+    "totalAmount": 58.40,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 58.40,
+    "category": "Transport",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_2_UID", "amount": 58.40 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 14.60 },
+      { "uid": "MEMBER_2_UID", "amount": 14.60 },
+      { "uid": "MEMBER_3_UID", "amount": 14.60 },
+      { "uid": "MEMBER_4_UID", "amount": 14.60 }
+    ],
+    "country": "Italy",
+    "city": "Agrigento",
+    "notes": ""
+  },
+  {
+    "date": "30-07-2025",
+    "name": "Valle dei Templi tickets — Agrigento",
+    "totalAmount": 60.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 60.00,
+    "category": "Activities",
+    "paymentMethod": "Revolut",
+    "paidBy": [{ "uid": "MEMBER_3_UID", "amount": 60.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 15.00 },
+      { "uid": "MEMBER_2_UID", "amount": 15.00 },
+      { "uid": "MEMBER_3_UID", "amount": 15.00 },
+      { "uid": "MEMBER_4_UID", "amount": 15.00 }
+    ],
+    "country": "Italy",
+    "city": "Agrigento",
+    "notes": "Golden hour visit, stunning"
+  },
+  {
+    "date": "30-07-2025",
+    "name": "Beach day Scala dei Turchi",
+    "totalAmount": 84.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 84.00,
+    "category": "Food",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_4_UID", "amount": 84.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 21.00 },
+      { "uid": "MEMBER_2_UID", "amount": 21.00 },
+      { "uid": "MEMBER_3_UID", "amount": 21.00 },
+      { "uid": "MEMBER_4_UID", "amount": 21.00 }
+    ],
+    "country": "Italy",
+    "city": "Agrigento",
+    "notes": "Beach bar food + drinks, white cliffs"
+  },
+  {
+    "date": "31-07-2025",
+    "name": "Dinner Taormina",
+    "totalAmount": 126.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 126.00,
+    "category": "Food",
+    "paymentMethod": "Credit Card",
+    "paidBy": [{ "uid": "MEMBER_1_UID", "amount": 126.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 42.00 },
+      { "uid": "MEMBER_2_UID", "amount": 42.00 },
+      { "uid": "MEMBER_4_UID", "amount": 42.00 }
+    ],
+    "country": "Italy",
+    "city": "Taormina",
+    "notes": "M3 had food poisoning, stayed at hotel"
+  },
+  {
+    "date": "01-08-2025",
+    "name": "Flight Catania → Athens",
+    "totalAmount": 348.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 348.00,
+    "category": "Transport",
+    "paymentMethod": "Revolut",
+    "paidBy": [{ "uid": "MEMBER_3_UID", "amount": 348.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 87.00 },
+      { "uid": "MEMBER_2_UID", "amount": 87.00 },
+      { "uid": "MEMBER_3_UID", "amount": 87.00 },
+      { "uid": "MEMBER_4_UID", "amount": 87.00 }
+    ],
+    "country": "Greece",
+    "city": "Athens",
+    "notes": "Ryanair"
+  },
+  {
+    "date": "01-08-2025",
+    "name": "Hostel Athens 1 night",
+    "totalAmount": 160.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 160.00,
+    "category": "Accommodation",
+    "paymentMethod": "Wise",
+    "paidBy": [{ "uid": "MEMBER_4_UID", "amount": 160.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 40.00 },
+      { "uid": "MEMBER_2_UID", "amount": 40.00 },
+      { "uid": "MEMBER_3_UID", "amount": 40.00 },
+      { "uid": "MEMBER_4_UID", "amount": 40.00 }
+    ],
+    "country": "Greece",
+    "city": "Athens",
+    "notes": "City Circus Hostel, Monastiraki"
+  },
+  {
+    "date": "01-08-2025",
+    "name": "Acropolis + museum tickets",
+    "totalAmount": 100.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 100.00,
+    "category": "Activities",
+    "paymentMethod": "Revolut",
+    "paidBy": [{ "uid": "MEMBER_1_UID", "amount": 100.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 25.00 },
+      { "uid": "MEMBER_2_UID", "amount": 25.00 },
+      { "uid": "MEMBER_3_UID", "amount": 25.00 },
+      { "uid": "MEMBER_4_UID", "amount": 25.00 }
+    ],
+    "country": "Greece",
+    "city": "Athens",
+    "notes": "Combined ticket"
+  },
+  {
+    "date": "01-08-2025",
+    "name": "Souvlaki lunch Monastiraki",
+    "totalAmount": 44.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 44.00,
+    "category": "Food",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_2_UID", "amount": 44.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 11.00 },
+      { "uid": "MEMBER_2_UID", "amount": 11.00 },
+      { "uid": "MEMBER_3_UID", "amount": 11.00 },
+      { "uid": "MEMBER_4_UID", "amount": 11.00 }
+    ],
+    "country": "Greece",
+    "city": "Athens",
+    "notes": "Thanasis, legendary skewers"
+  },
+  {
+    "date": "02-08-2025",
+    "name": "High-speed ferry Athens → Mykonos",
+    "totalAmount": 224.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 224.00,
+    "category": "Transport",
+    "paymentMethod": "Revolut",
+    "paidBy": [
+      { "uid": "MEMBER_1_UID", "amount": 112.00 },
+      { "uid": "MEMBER_3_UID", "amount": 112.00 }
+    ],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 56.00 },
+      { "uid": "MEMBER_2_UID", "amount": 56.00 },
+      { "uid": "MEMBER_3_UID", "amount": 56.00 },
+      { "uid": "MEMBER_4_UID", "amount": 56.00 }
+    ],
+    "country": "Greece",
+    "city": "Mykonos",
+    "notes": "SeaJets, 2h30"
+  },
+  {
+    "date": "02-08-2025",
+    "name": "Hotel Mykonos 3 nights",
+    "totalAmount": 1200.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 1200.00,
+    "category": "Accommodation",
+    "paymentMethod": "Credit Card",
+    "paidBy": [
+      { "uid": "MEMBER_4_UID", "amount": 600.00 },
+      { "uid": "MEMBER_2_UID", "amount": 600.00 }
+    ],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 300.00 },
+      { "uid": "MEMBER_2_UID", "amount": 300.00 },
+      { "uid": "MEMBER_3_UID", "amount": 300.00 },
+      { "uid": "MEMBER_4_UID", "amount": 300.00 }
+    ],
+    "country": "Greece",
+    "city": "Mykonos",
+    "notes": "Semeli Hotel, pool suite"
+  },
+  {
+    "date": "02-08-2025",
+    "name": "Paradise Beach Club day",
+    "totalAmount": 160.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 160.00,
+    "category": "Activities",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_1_UID", "amount": 160.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 40.00 },
+      { "uid": "MEMBER_2_UID", "amount": 40.00 },
+      { "uid": "MEMBER_3_UID", "amount": 40.00 },
+      { "uid": "MEMBER_4_UID", "amount": 40.00 }
+    ],
+    "country": "Greece",
+    "city": "Mykonos",
+    "notes": "Sunbed + umbrella per person"
+  },
+  {
+    "date": "03-08-2025",
+    "name": "Cocktails at Little Venice",
+    "totalAmount": 104.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 104.00,
+    "category": "Drinks",
+    "paymentMethod": "Revolut",
+    "paidBy": [{ "uid": "MEMBER_2_UID", "amount": 104.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 26.00 },
+      { "uid": "MEMBER_2_UID", "amount": 26.00 },
+      { "uid": "MEMBER_3_UID", "amount": 26.00 },
+      { "uid": "MEMBER_4_UID", "amount": 26.00 }
+    ],
+    "country": "Greece",
+    "city": "Mykonos",
+    "notes": "Sunset aperitivo, windmill view"
+  },
+  {
+    "date": "03-08-2025",
+    "name": "Dinner in Mykonos Town",
+    "totalAmount": 236.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 236.00,
+    "category": "Food",
+    "paymentMethod": "Credit Card",
+    "paidBy": [{ "uid": "MEMBER_3_UID", "amount": 236.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 59.00 },
+      { "uid": "MEMBER_2_UID", "amount": 59.00 },
+      { "uid": "MEMBER_3_UID", "amount": 59.00 },
+      { "uid": "MEMBER_4_UID", "amount": 59.00 }
+    ],
+    "country": "Greece",
+    "city": "Mykonos",
+    "notes": "Lobster pasta and fresh octopus"
+  },
+  {
+    "date": "04-08-2025",
+    "name": "ATV rental half day",
+    "totalAmount": 105.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 105.00,
+    "category": "Activities",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_3_UID", "amount": 105.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 35.00 },
+      { "uid": "MEMBER_3_UID", "amount": 35.00 },
+      { "uid": "MEMBER_4_UID", "amount": 35.00 }
+    ],
+    "country": "Greece",
+    "city": "Mykonos",
+    "notes": "M2 was too hungover, island tour"
+  },
+  {
+    "date": "04-08-2025",
+    "name": "Sunset cruise Mykonos",
+    "totalAmount": 280.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 280.00,
+    "category": "Activities",
+    "paymentMethod": "Revolut",
+    "paidBy": [{ "uid": "MEMBER_4_UID", "amount": 280.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 70.00 },
+      { "uid": "MEMBER_2_UID", "amount": 70.00 },
+      { "uid": "MEMBER_3_UID", "amount": 70.00 },
+      { "uid": "MEMBER_4_UID", "amount": 70.00 }
+    ],
+    "country": "Greece",
+    "city": "Mykonos",
+    "notes": "3h sail, champagne + meze included"
+  },
+  {
+    "date": "04-08-2025",
+    "name": "Gyros & beer lunch",
+    "totalAmount": 48.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 48.00,
+    "category": "Food",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_1_UID", "amount": 48.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 12.00 },
+      { "uid": "MEMBER_2_UID", "amount": 12.00 },
+      { "uid": "MEMBER_3_UID", "amount": 12.00 },
+      { "uid": "MEMBER_4_UID", "amount": 12.00 }
+    ],
+    "country": "Greece",
+    "city": "Mykonos",
+    "notes": "Vangelis, best gyros on the island"
+  },
+  {
+    "date": "04-08-2025",
+    "name": "Cavo Paradiso nightclub",
+    "totalAmount": 280.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 280.00,
+    "category": "Nightlife",
+    "paymentMethod": "Cash",
+    "paidBy": [
+      { "uid": "MEMBER_2_UID", "amount": 140.00 },
+      { "uid": "MEMBER_3_UID", "amount": 140.00 }
+    ],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 70.00 },
+      { "uid": "MEMBER_2_UID", "amount": 70.00 },
+      { "uid": "MEMBER_3_UID", "amount": 70.00 },
+      { "uid": "MEMBER_4_UID", "amount": 70.00 }
+    ],
+    "country": "Greece",
+    "city": "Mykonos",
+    "notes": "Open air cliff top party, David Guetta"
+  },
+  {
+    "date": "05-08-2025",
+    "name": "Delos island day trip",
+    "totalAmount": 60.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 60.00,
+    "category": "Activities",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_1_UID", "amount": 60.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 30.00 },
+      { "uid": "MEMBER_2_UID", "amount": 30.00 }
+    ],
+    "country": "Greece",
+    "city": "Mykonos",
+    "notes": "M3+M4 stayed at pool, their loss"
+  },
+  {
+    "date": "06-08-2025",
+    "name": "Ferry Mykonos → Santorini",
+    "totalAmount": 200.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 200.00,
+    "category": "Transport",
+    "paymentMethod": "Revolut",
+    "paidBy": [{ "uid": "MEMBER_4_UID", "amount": 200.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 50.00 },
+      { "uid": "MEMBER_2_UID", "amount": 50.00 },
+      { "uid": "MEMBER_3_UID", "amount": 50.00 },
+      { "uid": "MEMBER_4_UID", "amount": 50.00 }
+    ],
+    "country": "Greece",
+    "city": "Santorini",
+    "notes": "SeaJets Express"
+  },
+  {
+    "date": "06-08-2025",
+    "name": "Clifftop villa Oia 3 nights",
+    "totalAmount": 1800.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 1800.00,
+    "category": "Accommodation",
+    "paymentMethod": "Credit Card",
+    "paidBy": [
+      { "uid": "MEMBER_1_UID", "amount": 700.00 },
+      { "uid": "MEMBER_2_UID", "amount": 600.00 },
+      { "uid": "MEMBER_3_UID", "amount": 500.00 }
+    ],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 450.00 },
+      { "uid": "MEMBER_2_UID", "amount": 450.00 },
+      { "uid": "MEMBER_3_UID", "amount": 450.00 },
+      { "uid": "MEMBER_4_UID", "amount": 450.00 }
+    ],
+    "country": "Greece",
+    "city": "Santorini",
+    "notes": "Private plunge pool, caldera view. Worth every cent"
+  },
+  {
+    "date": "06-08-2025",
+    "name": "Donkey ride up from port",
+    "totalAmount": 20.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 20.00,
+    "category": "Activities",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_4_UID", "amount": 20.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_3_UID", "amount": 10.00 },
+      { "uid": "MEMBER_4_UID", "amount": 10.00 }
+    ],
+    "country": "Greece",
+    "city": "Santorini",
+    "notes": "M1+M2 took the cable car like sensible people"
+  },
+  {
+    "date": "07-08-2025",
+    "name": "Greek breakfast taverna",
+    "totalAmount": 64.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 64.00,
+    "category": "Food",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_3_UID", "amount": 64.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 16.00 },
+      { "uid": "MEMBER_2_UID", "amount": 16.00 },
+      { "uid": "MEMBER_3_UID", "amount": 16.00 },
+      { "uid": "MEMBER_4_UID", "amount": 16.00 }
+    ],
+    "country": "Greece",
+    "city": "Santorini",
+    "notes": "Fava, dakos, honey yoghurt"
+  },
+  {
+    "date": "07-08-2025",
+    "name": "Sunset wine tasting Oia",
+    "totalAmount": 160.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 160.00,
+    "category": "Activities",
+    "paymentMethod": "Revolut",
+    "paidBy": [{ "uid": "MEMBER_2_UID", "amount": 160.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 40.00 },
+      { "uid": "MEMBER_2_UID", "amount": 40.00 },
+      { "uid": "MEMBER_3_UID", "amount": 40.00 },
+      { "uid": "MEMBER_4_UID", "amount": 40.00 }
+    ],
+    "country": "Greece",
+    "city": "Santorini",
+    "notes": "Assyrtiko flights, volcano view"
+  },
+  {
+    "date": "07-08-2025",
+    "name": "Sunscreen & after-sun",
+    "totalAmount": 28.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 28.00,
+    "category": "Health",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_2_UID", "amount": 28.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_2_UID", "amount": 14.00 },
+      { "uid": "MEMBER_4_UID", "amount": 14.00 }
+    ],
+    "country": "Greece",
+    "city": "Santorini",
+    "notes": "Perivolos pharmacy"
+  },
+  {
+    "date": "08-08-2025",
+    "name": "Caldera volcano boat tour",
+    "totalAmount": 240.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 240.00,
+    "category": "Activities",
+    "paymentMethod": "Revolut",
+    "paidBy": [{ "uid": "MEMBER_1_UID", "amount": 240.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 60.00 },
+      { "uid": "MEMBER_2_UID", "amount": 60.00 },
+      { "uid": "MEMBER_3_UID", "amount": 60.00 },
+      { "uid": "MEMBER_4_UID", "amount": 60.00 }
+    ],
+    "country": "Greece",
+    "city": "Santorini",
+    "notes": "Volcano hike + hot springs"
+  },
+  {
+    "date": "08-08-2025",
+    "name": "Taxi back from Oia to Fira",
+    "totalAmount": 24.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 24.00,
+    "category": "Transport",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_4_UID", "amount": 24.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 6.00 },
+      { "uid": "MEMBER_2_UID", "amount": 6.00 },
+      { "uid": "MEMBER_3_UID", "amount": 6.00 },
+      { "uid": "MEMBER_4_UID", "amount": 6.00 }
+    ],
+    "country": "Greece",
+    "city": "Santorini",
+    "notes": "After watching the famous sunset"
+  },
+  {
+    "date": "08-08-2025",
+    "name": "Dinner with caldera view",
+    "totalAmount": 292.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 292.00,
+    "category": "Food",
+    "paymentMethod": "Credit Card",
+    "paidBy": [
+      { "uid": "MEMBER_1_UID", "amount": 150.00 },
+      { "uid": "MEMBER_2_UID", "amount": 142.00 }
+    ],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 73.00 },
+      { "uid": "MEMBER_2_UID", "amount": 73.00 },
+      { "uid": "MEMBER_3_UID", "amount": 73.00 },
+      { "uid": "MEMBER_4_UID", "amount": 73.00 }
+    ],
+    "country": "Greece",
+    "city": "Santorini",
+    "notes": "Ammoudi Bay, finest meal of the trip"
+  },
+  {
+    "date": "09-08-2025",
+    "name": "Souvenir shopping (solo)",
+    "totalAmount": 45.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 45.00,
+    "category": "Shopping",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_1_UID", "amount": 45.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 45.00 }
+    ],
+    "country": "Greece",
+    "city": "Santorini",
+    "notes": "Hand-painted ceramics from Fira"
+  },
+  {
+    "date": "10-08-2025",
+    "name": "Flight Santorini → Split",
+    "totalAmount": 480.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 480.00,
+    "category": "Transport",
+    "paymentMethod": "Revolut",
+    "paidBy": [{ "uid": "MEMBER_3_UID", "amount": 480.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 120.00 },
+      { "uid": "MEMBER_2_UID", "amount": 120.00 },
+      { "uid": "MEMBER_3_UID", "amount": 120.00 },
+      { "uid": "MEMBER_4_UID", "amount": 120.00 }
+    ],
+    "country": "Croatia",
+    "city": "Split",
+    "notes": "Via Athens, Ryanair"
+  },
+  {
+    "date": "10-08-2025",
+    "name": "Catamaran Split → Hvar",
+    "totalAmount": 60.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 60.00,
+    "category": "Transport",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_4_UID", "amount": 60.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 15.00 },
+      { "uid": "MEMBER_2_UID", "amount": 15.00 },
+      { "uid": "MEMBER_3_UID", "amount": 15.00 },
+      { "uid": "MEMBER_4_UID", "amount": 15.00 }
+    ],
+    "country": "Croatia",
+    "city": "Hvar",
+    "notes": ""
+  },
+  {
+    "date": "10-08-2025",
+    "name": "Hostel Hvar 2 nights",
+    "totalAmount": 320.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 320.00,
+    "category": "Accommodation",
+    "paymentMethod": "Wise",
+    "paidBy": [
+      { "uid": "MEMBER_1_UID", "amount": 160.00 },
+      { "uid": "MEMBER_2_UID", "amount": 160.00 }
+    ],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 80.00 },
+      { "uid": "MEMBER_2_UID", "amount": 80.00 },
+      { "uid": "MEMBER_3_UID", "amount": 80.00 },
+      { "uid": "MEMBER_4_UID", "amount": 80.00 }
+    ],
+    "country": "Croatia",
+    "city": "Hvar",
+    "notes": "Stari Grad area"
+  },
+  {
+    "date": "11-08-2025",
+    "name": "Hvar nightlife — entry & drinks",
+    "totalAmount": 120.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 120.00,
+    "category": "Nightlife",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_3_UID", "amount": 120.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 30.00 },
+      { "uid": "MEMBER_2_UID", "amount": 30.00 },
+      { "uid": "MEMBER_3_UID", "amount": 30.00 },
+      { "uid": "MEMBER_4_UID", "amount": 30.00 }
+    ],
+    "country": "Croatia",
+    "city": "Hvar",
+    "notes": "Hula Hula beach club afterparty"
+  },
+  {
+    "date": "11-08-2025",
+    "name": "Lavender market — honey & products",
+    "totalAmount": 48.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 48.00,
+    "category": "Shopping",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_1_UID", "amount": 48.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 24.00 },
+      { "uid": "MEMBER_3_UID", "amount": 24.00 }
+    ],
+    "country": "Croatia",
+    "city": "Hvar",
+    "notes": "Gifts for family"
+  },
+  {
+    "date": "11-08-2025",
+    "name": "Boat to Blue Cave — Biševo",
+    "totalAmount": 120.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 120.00,
+    "category": "Activities",
+    "paymentMethod": "Revolut",
+    "paidBy": [
+      { "uid": "MEMBER_2_UID", "amount": 60.00 },
+      { "uid": "MEMBER_4_UID", "amount": 60.00 }
+    ],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 30.00 },
+      { "uid": "MEMBER_2_UID", "amount": 30.00 },
+      { "uid": "MEMBER_3_UID", "amount": 30.00 },
+      { "uid": "MEMBER_4_UID", "amount": 30.00 }
+    ],
+    "country": "Croatia",
+    "city": "Hvar",
+    "notes": "Bright blue glow, absolutely surreal"
+  },
+  {
+    "date": "12-08-2025",
+    "name": "Ferry Hvar → Dubrovnik",
+    "totalAmount": 100.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 100.00,
+    "category": "Transport",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_3_UID", "amount": 100.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 25.00 },
+      { "uid": "MEMBER_2_UID", "amount": 25.00 },
+      { "uid": "MEMBER_3_UID", "amount": 25.00 },
+      { "uid": "MEMBER_4_UID", "amount": 25.00 }
+    ],
+    "country": "Croatia",
+    "city": "Dubrovnik",
+    "notes": ""
+  },
+  {
+    "date": "12-08-2025",
+    "name": "Old Town Airbnb Dubrovnik 2 nights",
+    "totalAmount": 520.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 520.00,
+    "category": "Accommodation",
+    "paymentMethod": "Credit Card",
+    "paidBy": [
+      { "uid": "MEMBER_4_UID", "amount": 260.00 },
+      { "uid": "MEMBER_1_UID", "amount": 260.00 }
+    ],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 130.00 },
+      { "uid": "MEMBER_2_UID", "amount": 130.00 },
+      { "uid": "MEMBER_3_UID", "amount": 130.00 },
+      { "uid": "MEMBER_4_UID", "amount": 130.00 }
+    ],
+    "country": "Croatia",
+    "city": "Dubrovnik",
+    "notes": "Inside the city walls, stone house"
+  },
+  {
+    "date": "13-08-2025",
+    "name": "Game of Thrones walking tour",
+    "totalAmount": 80.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 80.00,
+    "category": "Activities",
+    "paymentMethod": "Revolut",
+    "paidBy": [{ "uid": "MEMBER_2_UID", "amount": 80.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 20.00 },
+      { "uid": "MEMBER_2_UID", "amount": 20.00 },
+      { "uid": "MEMBER_3_UID", "amount": 20.00 },
+      { "uid": "MEMBER_4_UID", "amount": 20.00 }
+    ],
+    "country": "Croatia",
+    "city": "Dubrovnik",
+    "notes": "2h tour, everyone pretended to know GOT"
+  },
+  {
+    "date": "13-08-2025",
+    "name": "Cable car to Mt Srđ",
+    "totalAmount": 80.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 80.00,
+    "category": "Activities",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_3_UID", "amount": 80.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 20.00 },
+      { "uid": "MEMBER_2_UID", "amount": 20.00 },
+      { "uid": "MEMBER_3_UID", "amount": 20.00 },
+      { "uid": "MEMBER_4_UID", "amount": 20.00 }
+    ],
+    "country": "Croatia",
+    "city": "Dubrovnik",
+    "notes": "Panoramic view of the old town"
+  },
+  {
+    "date": "13-08-2025",
+    "name": "Oysters & white wine — Ston",
+    "totalAmount": 96.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 96.00,
+    "category": "Food",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_1_UID", "amount": 96.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 24.00 },
+      { "uid": "MEMBER_2_UID", "amount": 24.00 },
+      { "uid": "MEMBER_3_UID", "amount": 24.00 },
+      { "uid": "MEMBER_4_UID", "amount": 24.00 }
+    ],
+    "country": "Croatia",
+    "city": "Dubrovnik",
+    "notes": "Day trip to Ston, world-class oysters"
+  },
+  {
+    "date": "13-08-2025",
+    "name": "Kayaking around city walls",
+    "totalAmount": 75.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 75.00,
+    "category": "Activities",
+    "paymentMethod": "Revolut",
+    "paidBy": [
+      { "uid": "MEMBER_1_UID", "amount": 40.00 },
+      { "uid": "MEMBER_2_UID", "amount": 35.00 }
+    ],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 25.00 },
+      { "uid": "MEMBER_2_UID", "amount": 25.00 },
+      { "uid": "MEMBER_3_UID", "amount": 25.00 }
+    ],
+    "country": "Croatia",
+    "city": "Dubrovnik",
+    "notes": "M4 stayed at the beach bar"
+  },
+  {
+    "date": "13-08-2025",
+    "name": "Beach bar Banje",
+    "totalAmount": 88.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 88.00,
+    "category": "Drinks",
+    "paymentMethod": "Revolut",
+    "paidBy": [{ "uid": "MEMBER_4_UID", "amount": 88.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 22.00 },
+      { "uid": "MEMBER_2_UID", "amount": 22.00 },
+      { "uid": "MEMBER_3_UID", "amount": 22.00 },
+      { "uid": "MEMBER_4_UID", "amount": 22.00 }
+    ],
+    "country": "Croatia",
+    "city": "Dubrovnik",
+    "notes": "Old Town view from the water"
+  },
+  {
+    "date": "14-08-2025",
+    "name": "Last dinner — Dubrovnik",
+    "totalAmount": 196.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 196.00,
+    "category": "Food",
+    "paymentMethod": "Credit Card",
+    "paidBy": [
+      { "uid": "MEMBER_2_UID", "amount": 100.00 },
+      { "uid": "MEMBER_3_UID", "amount": 96.00 }
+    ],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 49.00 },
+      { "uid": "MEMBER_2_UID", "amount": 49.00 },
+      { "uid": "MEMBER_3_UID", "amount": 49.00 },
+      { "uid": "MEMBER_4_UID", "amount": 49.00 }
+    ],
+    "country": "Croatia",
+    "city": "Dubrovnik",
+    "notes": "Restaurant 360°, end of the adventure"
+  },
+  {
+    "date": "15-08-2025",
+    "name": "Taxi to Dubrovnik airport",
+    "totalAmount": 42.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 42.00,
+    "category": "Transport",
+    "paymentMethod": "Cash",
+    "paidBy": [{ "uid": "MEMBER_1_UID", "amount": 42.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_1_UID", "amount": 10.50 },
+      { "uid": "MEMBER_2_UID", "amount": 10.50 },
+      { "uid": "MEMBER_3_UID", "amount": 10.50 },
+      { "uid": "MEMBER_4_UID", "amount": 10.50 }
+    ],
+    "country": "Croatia",
+    "city": "Dubrovnik",
+    "notes": "6am, brutal"
+  },
+  {
+    "date": "15-08-2025",
+    "name": "Airport duty free (solo)",
+    "totalAmount": 67.00,
+    "currency": "EUR",
+    "exchangeRate": 1.0,
+    "totalAmountMain": 67.00,
+    "category": "Shopping",
+    "paymentMethod": "Credit Card",
+    "paidBy": [{ "uid": "MEMBER_2_UID", "amount": 67.00 }],
+    "beneficiaries": [
+      { "uid": "MEMBER_2_UID", "amount": 67.00 }
+    ],
+    "country": "Croatia",
+    "city": "Dubrovnik",
+    "notes": "Perfume and last-minute gifts"
+  }
+]
