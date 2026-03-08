@@ -724,3 +724,20 @@ On export, tx.txId is written into col A of the Expenses sheet instead of a sequ
 - [ ] PWA icons: `public/icon-192.png`, `public/icon-512.png`, `public/apple-touch-icon.png`
 - [ ] Filter and Display Mode in Transactions tab
 - [ ] Move composite indexes to `firestore.indexes.json`
+
+---
+
+## 🐛 Bugfix Session 008.1 — March 9th 2026
+
+**Type**: Bug fix (code only)
+
+### What was fixed
+
+- **Travel invite acceptance broken**: `handleAccept` in `ProfilePage.tsx` was calling `acceptFriendRequest()` for all invite types. Travel invites (`type='travel_member'`) now correctly dispatch to `acceptTravelInvite()`, which atomically writes the travel membership.
+- **UI separation**: pending invites section split into "Travel invitations" (shows travel name + Join button) and "Friend requests" (unchanged).
+
+### Files modified
+
+| File | Changes |
+|------|---------|
+| `src/auth/pages/ProfilePage.tsx` | Import `acceptTravelInvite`; fix `handleAccept` dispatch; split invite UI into two sections |

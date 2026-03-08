@@ -20,6 +20,7 @@ import {
   searchByNametag,
   sendFriendRequest,
   acceptFriendRequest,
+  acceptTravelInvite,
   declineFriendRequest,
   fetchFriends,
 } from '@/friends/services/friendService'
@@ -294,8 +295,15 @@ export function ProfilePage() {
     if (!userProfile) return
     const invite = pendingInvites.find(i => i.inviteId === inviteId)
     if (!invite) return
-    await acceptFriendRequest(invite, userProfile)
-    // Trigger friends list reload
+    // Dispatch to the correct acceptance function based on invite type.
+    // travel_member invites must call acceptTravelInvite() to write the travel membership —
+    // acceptFriendRequest() would only create friendship entries and never add the user to the travel.
+    if (invite.type === 'travel_member') {
+      await acceptTravelInvite(invite, userProfile)
+    } else {
+      await acceptFriendRequest(invite, userProfile)
+    }
+    // Trigger friends list reload (relevant for both types — travel join also creates friendship)
     setFriendsKey(k => k + 1)
   }
 
@@ -568,14 +576,53 @@ export function ProfilePage() {
             )}
           </div>
 
-          {/* Incoming friend requests */}
-          {pendingInvites.length > 0 && (
+          {/* Incoming travel invitations — type='travel_member' */}
+          {pendingInvites.filter(i => i.type === 'travel_member').length > 0 && (
             <div className="flex flex-col gap-2">
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Friend requests ({pendingInvites.length})
+                Travel invitations ({pendingInvites.filter(i => i.type === 'travel_member').length})
               </p>
               <ul className="flex flex-col gap-2">
-                {pendingInvites.map(invite => (
+                {pendingInvites.filter(i => i.type === 'travel_member').map(invite => (
+                  <li key={invite.inviteId} className="flex items-center gap-2 rounded-md border px-3 py-2">
+                    <MiniAvatar uid={invite.fromUid} name={invite.fromDisplayName} />
+                    <div className="flex-1 min-w-0">
+                      {/* Show the travel name prominently, sender as secondary info */}
+                      <p className="text-sm font-medium truncate">{invite.travelName ?? 'Unknown travel'}</p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        from {invite.fromDisplayName}{invite.fromNametag ? ` (@${invite.fromNametag})` : ''}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleAccept(invite.inviteId)}
+                      className="flex items-center gap-1 rounded-full bg-primary px-2 py-1 text-xs text-primary-foreground hover:bg-primary/90"
+                    >
+                      <Check className="h-3 w-3" />
+                      Join
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDecline(invite.inviteId)}
+                      className="flex items-center gap-1 rounded-full border px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
+                    >
+                      <X className="h-3 w-3" />
+                      Decline
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Incoming friend requests — type='friend' */}
+          {pendingInvites.filter(i => i.type === 'friend').length > 0 && (
+            <div className="flex flex-col gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Friend requests ({pendingInvites.filter(i => i.type === 'friend').length})
+              </p>
+              <ul className="flex flex-col gap-2">
+                {pendingInvites.filter(i => i.type === 'friend').map(invite => (
                   <li key={invite.inviteId} className="flex items-center gap-2 rounded-md border px-3 py-2">
                     <MiniAvatar uid={invite.fromUid} name={invite.fromDisplayName} />
                     <div className="flex-1 min-w-0">
@@ -584,7 +631,6 @@ export function ProfilePage() {
                         <p className="text-xs text-muted-foreground">@{invite.fromNametag}</p>
                       )}
                     </div>
-                    {/* Accept and Decline buttons */}
                     <button
                       type="button"
                       onClick={() => handleAccept(invite.inviteId)}
