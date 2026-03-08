@@ -135,10 +135,10 @@ export function TravelTabs({
             >
               {tab.id === 'transactions' && (
                 <TransactionsTab
+                  travel={travel}
                   transactions={transactions}
                   loading={loadingTransactions}
                   error={transactionsError}
-                  members={travel.members}
                   currentUserUid={currentUserUid}
                   isSolo={isSolo}
                   onAddExpense={onAddExpense}

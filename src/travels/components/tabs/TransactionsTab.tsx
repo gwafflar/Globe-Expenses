@@ -2,13 +2,16 @@
 //
 // Transactions tab for TravelDetailPage.
 // Displays the transaction list extracted from TravelDetailPage,
-// plus placeholder Filter and Display Mode controls.
+// plus placeholder Filter and Display Mode controls, and
+// Export / Import xlsx buttons.
 
 import { useRef, useState, useEffect } from 'react'
 import type { Travel } from '@/travels/types'
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
 import { Button } from '@/components/ui/button'
 import { Card, CardTitle, CardDescription } from '@/components/ui/card'
+import { exportTravelToXlsx } from '@/shared/utils/sheetExport'
+import { ImportXlsxDialog } from '@/shared/components/ImportXlsxDialog'
 
 // ---------------------------------------------------------------------------
 // Category emoji map
@@ -226,10 +229,10 @@ function PlaceholderButton({ label }: { label: string }) {
 // ---------------------------------------------------------------------------
 
 interface TransactionsTabProps {
+  travel: Travel
   transactions: TransactionWithStatus[]
   loading: boolean
   error: string | null
-  members: Travel['members']
   currentUserUid: string
   isSolo: boolean
   onAddExpense: () => void
@@ -237,24 +240,69 @@ interface TransactionsTabProps {
 }
 
 export function TransactionsTab({
+  travel,
   transactions,
   loading,
   error,
-  members,
   currentUserUid,
   isSolo,
   onAddExpense,
   onEditTransaction,
 }: TransactionsTabProps) {
+  // Export state — brief spinner while generating the xlsx
+  const [isExporting, setIsExporting] = useState(false)
+  // Import dialog visibility
+  const [importOpen, setImportOpen] = useState(false)
+
+  async function handleExport() {
+    setIsExporting(true)
+    try {
+      await exportTravelToXlsx(travel, transactions)
+    } catch (err) {
+      console.error('[TransactionsTab] export failed:', err)
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
   return (
     <div className="flex flex-col gap-3">
+      {/* Import dialog (portal, rendered outside the flex flow) */}
+      <ImportXlsxDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        travel={travel}
+        currentUserUid={currentUserUid}
+      />
+
       {/* Toolbar */}
       <div className="flex items-center justify-between">
         <div className="flex gap-2">
           <PlaceholderButton label="🔍 Filter" />
           <PlaceholderButton label="⊞ Display" />
         </div>
-        {error && <p className="text-xs text-destructive">{error}</p>}
+        <div className="flex gap-2">
+          {error && <p className="text-xs text-destructive">{error}</p>}
+          {/* Import — always available (user may want to populate an empty travel) */}
+          <button
+            type="button"
+            onClick={() => setImportOpen(true)}
+            className="rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors"
+          >
+            Import
+          </button>
+          {/* Export — only shown once there are transactions to export */}
+          {transactions.length > 0 && (
+            <button
+              type="button"
+              onClick={handleExport}
+              disabled={isExporting}
+              className="rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {isExporting ? 'Exporting…' : 'Export'}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* List */}
@@ -278,7 +326,7 @@ export function TransactionsTab({
             <TransactionRow
               key={tx.txId}
               transaction={tx}
-              members={members}
+              members={travel.members}
               currentUserUid={currentUserUid}
               isSolo={isSolo}
               onEdit={onEditTransaction}
