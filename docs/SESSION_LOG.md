@@ -741,3 +741,17 @@ On export, tx.txId is written into col A of the Expenses sheet instead of a sequ
 | File | Changes |
 |------|---------|
 | `src/auth/pages/ProfilePage.tsx` | Import `acceptTravelInvite`; fix `handleAccept` dispatch; split invite UI into two sections |
+
+---
+
+## 🐛 Bugfix Session 008.2 — March 9th 2026
+
+**Type**: Bug fix (code only)
+
+### What was fixed
+
+- **Transaction create silently failing**: `setDoc()` throws synchronously on `undefined` field values. Optional fields built as `x || undefined` in `handleSave` propagated into `createTransaction`, causing a synchronous throw that bypassed the `.catch()` handler — leaving the form open with no feedback. Fixed in `transactionService.ts` by stripping `undefined` entries from `data` before the `setDoc` call (`Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined))`). `updateTransaction` was unaffected as it already uses `deleteField()`.
+
+| File | Changes |
+|------|---------|
+| `src/transactions/services/transactionService.ts` | Strip `undefined` fields from `data` spread before `setDoc` call |

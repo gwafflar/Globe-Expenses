@@ -36,7 +36,9 @@ export function createTransaction(
   // .catch() only fires for unrecoverable errors (e.g. security rule violations).
   // Normal offline queuing never rejects.
   setDoc(newDocRef, {
-    ...data,
+    // Strip undefined optional fields — setDoc() throws synchronously on undefined values.
+    // (updateTransaction uses deleteField() instead, but that sentinel is only valid in updateDoc.)
+    ...Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined)),
     createdAt: serverTimestamp(),
     lastModifiedAt: serverTimestamp(),
   }).catch((err: unknown) => {
