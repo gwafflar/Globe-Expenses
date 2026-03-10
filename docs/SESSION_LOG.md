@@ -755,3 +755,85 @@ On export, tx.txId is written into col A of the Expenses sheet instead of a sequ
 | File | Changes |
 |------|---------|
 | `src/transactions/services/transactionService.ts` | Strip `undefined` fields from `data` spread before `setDoc` call |
+
+---
+
+## ✨ Working Session 009 — March 11th 2026
+
+**Type**: Feature implementation + bug fix
+**Tools used**: Claude Code (claude-sonnet-4-6)
+
+### What was built
+
+**TravelMember refactor** — replaced the UID-based `MemberRef` model with a stable `travelMemberId`-based `TravelMember` model that decouples travel membership from Firebase Auth. Enables unclaimed (name-only) members, claim/unclaim flows, and a post-invite identity resolution screen.
+
+**Data model changes:**
+- `travels/types.ts`: removed `MemberRef`, added `TravelMember` (`travelMemberId: string`, `userId: string | null`, `allowRename: boolean`, `joinedAt`). Added `normaliseMember()` for backward-compat with legacy Firestore docs.
+- `transactions/types.ts`: `Split.uid` → `Split.travelMemberId` (never a Firebase Auth UID).
+
+**Service layer:**
+- `travelService.ts`: added `serialiseMember()` helper (strips `undefined` for Firestore); `createTravel` now generates a nanoid `travelMemberId` for the creator; added `addUnclaimedMember`, `renameTravelMember`, `claimTravelMember` (transfer semantics — nulls prior slot), `unclaimTravelMember`, `setMemberAllowRename`. `memberUids` is access-control only — never modified by claim/unclaim.
+- `friendService.ts`: `acceptTravelInvite` now adds a full `TravelMember` shape (with nanoid) via batch; returns `TravelInviteResult { travelId }`.
+
+**Read path updates:**
+- `useTravels.ts`, `TravelDetailPage.tsx`: `normaliseMember()` applied to all members on snapshot/fetch.
+
+**Transaction components:**
+- `SplitEditor.tsx`, `SplitSummaryRow.tsx`, `TransactionForm.tsx`: all `uid` references replaced with `travelMemberId`. `currentUserTravelMemberId` derived from `members.find(m => m.userId === currentUser.uid)`.
+- `TransactionsTab.tsx`: derives `currentUserTravelMemberId` via `useMemo`; `buildPayerLabel` and `getSplitIcon` use `travelMemberId`.
+
+**ParametersTab — MembersSection rewrite:**
+- Member avatars: coloured for claimed (hue from `userId`), grey for unclaimed.
+- "No slot" nudge for users in `memberUids` with no claimed slot.
+- Claim / unclaim / rename / allowRename toggle / add unclaimed member UI.
+
+**Export/Import:**
+- `sheetExport.ts`: `deriveSplitLabel`, `derivePaidByLabel`, member loop — all use `travelMemberId`.
+- `sheetImport.ts`: `slotToTravelMemberId` param; `beneficiaries`/`paidBy` keyed by `travelMemberId`.
+- `ImportXlsxDialog.tsx`: `slotToTravelMemberId` state; `buildInitialMapping` and dropdown options use `m.travelMemberId`.
+
+**Post-invite identity resolution screen (`InvitePage.tsx`):**
+- After `acceptTravelInvite` commits the batch (user now in `memberUids`), reads the travel document to fetch unclaimed slots.
+- If unclaimed slots exist, shows a "Who are you in this trip?" screen with one card per slot + "None of these — I'm a new person" option.
+- Selecting a slot calls `claimTravelMember`; skipping goes straight to the accepted screen.
+
+### Bug fixed — `acceptTravelInvite` permissions error
+
+The original implementation did a `getDoc(travelRef)` *before* the batch write to check `memberUids` and collect unclaimed slots. This read failed with `Missing or insufficient permissions` because the user was not yet in `memberUids`. Fix: removed the pre-read entirely. The batch write goes straight through (Firestore rule uses `pendingInviteId + get()` for authorization). After the batch, `InvitePage` reads the travel — now permitted — to fetch unclaimed slots.
+
+### Decisions made (binding)
+
+| # | Decision | Notes |
+|---|----------|-------|
+| 48 | `travelMemberId` as stable split key | nanoid, never changes. Decoupled from Firebase Auth UID. |
+| 49 | `memberUids` is access-control only | Written on travel creation and invite acceptance only. Never touched by claim/unclaim. |
+| 50 | Claim = transfer semantics | `claimTravelMember` nulls the user's previous slot before claiming new one — one slot per user enforced. |
+| 51 | Post-invite identity read deferred until after batch | Pre-read would fail (not yet a member). Read after batch commit, when user is in `memberUids`. |
+
+### Files modified
+
+| File | Changes |
+|------|---------|
+| `src/travels/types.ts` | `MemberRef` → `TravelMember`, `normaliseMember()` |
+| `src/transactions/types.ts` | `Split.uid` → `Split.travelMemberId` |
+| `src/travels/services/travelService.ts` | `serialiseMember`, updated `createTravel`, 5 new member ops |
+| `src/friends/services/friendService.ts` | `acceptTravelInvite` returns `TravelInviteResult { travelId }`, removed pre-read |
+| `src/travels/hooks/useTravels.ts` | Apply `normaliseMember` on snapshot |
+| `src/travels/pages/TravelDetailPage.tsx` | Apply `normaliseMember` in `fetchTravel` |
+| `src/transactions/components/SplitEditor.tsx` | `travelMemberId` throughout |
+| `src/transactions/components/SplitSummaryRow.tsx` | `travelMemberId` throughout |
+| `src/transactions/components/TransactionForm.tsx` | `myTravelMemberId` derived from members |
+| `src/travels/components/tabs/TransactionsTab.tsx` | `currentUserTravelMemberId` via `useMemo` |
+| `src/travels/components/tabs/ParametersTab.tsx` | Full MembersSection rewrite |
+| `src/shared/utils/sheetExport.ts` | `travelMemberId` in split derivation |
+| `src/shared/utils/sheetImport.ts` | `slotToTravelMemberId` param |
+| `src/shared/components/ImportXlsxDialog.tsx` | `slotToTravelMemberId` state + mapping |
+| `src/friends/pages/InvitePage.tsx` | Identity pick screen, post-batch travel read |
+
+### Carry-forward items (open)
+
+- [ ] Balance tab: settlement computation (greedy debt simplification)
+- [ ] Delete transaction
+- [ ] PWA icons: `public/icon-192.png`, `public/icon-512.png`, `public/apple-touch-icon.png`
+- [ ] Filter and Display Mode in Transactions tab
+- [ ] Move composite indexes to `firestore.indexes.json`
