@@ -8,12 +8,24 @@
 //   1. Load the invite document from Firestore.
 //   2. Validate it (exists, not revoked, not expired, not already used by this user).
 //   3. Show invite info + Accept button.
-//   4. On accept: batch write (friendship + invite update) → navigate to /travels.
+//   4. On accept:
+//      - friend invite → batch write (friendship + invite update) → navigate to /travels
+//      - travel_member invite → acceptTravelInvite() which returns TravelInviteResult
+//        • if unclaimedSlots.length > 0 → show identity pick screen
+//        • else → show accepted screen
 
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import { doc, getDoc } from 'firebase/firestore'
+import { db } from '@/services/firebase'
 import { useAuthStore } from '@/auth/store/useAuthStore'
-import { getInvite, acceptFriendRequest, acceptTravelInvite } from '@/friends/services/friendService'
+import {
+  getInvite,
+  acceptFriendRequest,
+  acceptTravelInvite,
+} from '@/friends/services/friendService'
+import { claimTravelMember } from '@/travels/services/travelService'
+import { normaliseMember, type TravelMember } from '@/travels/types'
 import type { Invite } from '@/friends/types'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -42,7 +54,7 @@ function InviteAvatar({ uid, name }: { uid: string; name: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Page
+// Page state union
 // ---------------------------------------------------------------------------
 
 type PageState =
@@ -54,7 +66,11 @@ type PageState =
   | { status: 'error'; invite: Invite }
   | { status: 'ready'; invite: Invite }
   | { status: 'accepting'; invite: Invite }
-  | { status: 'accepted'; invite: Invite }
+  // After joining: show identity pick when there are unclaimed slots
+  | { status: 'identityPick'; invite: Invite; travelId: string; unclaimedSlots: TravelMember[] }
+  // While claiming a slot (brief loading state before redirect)
+  | { status: 'claiming'; invite: Invite; travelId: string }
+  | { status: 'accepted'; invite: Invite; travelId?: string }
 
 export function InvitePage() {
   // React Router gives us the :inviteId segment from the URL
@@ -122,16 +138,59 @@ export function InvitePage() {
     try {
       const { invite } = pageState
       if (invite.type === 'travel_member') {
-        await acceptTravelInvite(invite, userProfile)
+        // Batch write: user joins travel, invite is marked used.
+        // The pre-read of the travel is intentionally deferred to AFTER the batch
+        // because the user is not in memberUids until the batch commits.
+        const result = await acceptTravelInvite(invite, userProfile)
+
+        // User is now in memberUids — safe to read the travel document.
+        const travelSnap = await getDoc(doc(db, 'travels', result.travelId))
+        const members: TravelMember[] = (travelSnap.data()?.members ?? []).map(
+          (raw: Record<string, unknown>) => normaliseMember(raw),
+        )
+        // Exclude the slot we just created — candidates are those still unclaimed.
+        const unclaimedSlots = members.filter((m) => m.userId === null)
+
+        if (unclaimedSlots.length > 0) {
+          setPageState({
+            status: 'identityPick',
+            invite,
+            travelId: result.travelId,
+            unclaimedSlots,
+          })
+        } else {
+          setPageState({ status: 'accepted', invite, travelId: result.travelId })
+        }
       } else {
         await acceptFriendRequest(invite, userProfile)
+        setPageState({ status: 'accepted', invite })
       }
-      setPageState({ status: 'accepted', invite })
     } catch (err) {
       // Log the real error for debugging — surface a generic message to the user.
       console.error('[InvitePage] handleAccept failed:', err)
       setPageState({ status: 'error', invite: pageState.invite })
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Identity pick: claim an existing unclaimed slot
+  // ---------------------------------------------------------------------------
+
+  async function handleClaimSlot(travelId: string, travelMemberId: string, invite: Invite) {
+    if (!currentUser) return
+    setPageState({ status: 'claiming', invite, travelId })
+    try {
+      // claimTravelMember handles transfer semantics (nulls any previously claimed slot)
+      await claimTravelMember(travelId, travelMemberId, currentUser.uid)
+    } catch (err) {
+      console.error('[InvitePage] claimTravelMember failed:', err)
+      // Non-fatal: user still joined the travel, just proceed
+    }
+    setPageState({ status: 'accepted', invite, travelId })
+  }
+
+  function handleSkipClaim(travelId: string, invite: Invite) {
+    setPageState({ status: 'accepted', invite, travelId })
   }
 
   // ---------------------------------------------------------------------------
@@ -230,8 +289,62 @@ export function InvitePage() {
         )
       }
 
+      case 'identityPick': {
+        // Show after joining the travel: allow the user to claim an existing unclaimed slot
+        const { invite, travelId, unclaimedSlots } = pageState
+        return (
+          <div className="flex flex-col gap-4">
+            <div className="text-center">
+              <h2 className="text-lg font-semibold">Who are you in this trip?</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Some members were added before you joined. If one of them is you, select it — your
+                account will be linked to that member's expenses.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              {unclaimedSlots.map((member) => (
+                <button
+                  key={member.travelMemberId}
+                  type="button"
+                  className="flex w-full items-center justify-between rounded-lg border border-input bg-background px-4 py-3 text-left transition-colors hover:bg-accent active:bg-accent/70"
+                  onClick={() => handleClaimSlot(travelId, member.travelMemberId, invite)}
+                >
+                  <div className="flex items-center gap-3">
+                    {/* Grey avatar for unclaimed member */}
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-semibold text-muted-foreground">
+                      {(member.displayName || '?').charAt(0).toUpperCase()}
+                    </div>
+                    <span className="font-medium">{member.displayName}</span>
+                  </div>
+                  <span className="text-xs text-primary font-medium">Claim — this is me</span>
+                </button>
+              ))}
+
+              {/* Option to skip claiming */}
+              <button
+                type="button"
+                className="mt-1 w-full rounded-lg border border-dashed border-input px-4 py-3 text-sm text-muted-foreground transition-colors hover:bg-accent"
+                onClick={() => handleSkipClaim(travelId, invite)}
+              >
+                None of these — I'm a new person
+              </button>
+            </div>
+          </div>
+        )
+      }
+
+      case 'claiming': {
+        return (
+          <div className="flex flex-col items-center gap-3 py-12">
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+            <p className="text-sm text-muted-foreground">Linking your account…</p>
+          </div>
+        )
+      }
+
       case 'accepted': {
-        const { invite } = pageState
+        const { invite, travelId } = pageState
         const isTravelInvite = invite.type === 'travel_member'
         return (
           <Card className="text-center">
@@ -250,8 +363,8 @@ export function InvitePage() {
               <Button
                 className="w-full"
                 onClick={() =>
-                  navigate(isTravelInvite && invite.travelId
-                    ? `/travels/${invite.travelId}`
+                  navigate(isTravelInvite && travelId
+                    ? `/travels/${travelId}`
                     : '/travels')
                 }
               >

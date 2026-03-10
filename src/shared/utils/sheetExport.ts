@@ -14,7 +14,7 @@
 import XLSXStyleRaw from 'xlsx-js-style'
 import type * as XLSXTypes from 'xlsx'
 const XLSXStyle = XLSXStyleRaw as unknown as typeof XLSXTypes
-import type { Travel, MemberRef } from '@/travels/types'
+import type { Travel, TravelMember } from '@/travels/types'
 import type { Transaction } from '@/transactions/types'
 import { EXCHANGE_RATES } from '@/shared/utils/exchangeRates'
 import { buildColumnMap, colLetter } from '@/shared/utils/sheetColumns'
@@ -150,27 +150,27 @@ function fsDateToSheet(d: string): string { return d.replace(/-/g, '/') }
 // ---------------------------------------------------------------------------
 // Split / paidBy label derivation
 // ---------------------------------------------------------------------------
-function deriveSplitLabel(tx: Transaction, members: MemberRef[]): string {
+function deriveSplitLabel(tx: Transaction, members: TravelMember[]): string {
   const nonZero = tx.beneficiaries.filter((b) => b.amount > 0)
   if (nonZero.length === 0) return ''
-  const uids = [...new Set(nonZero.map((b) => b.uid))]
-  if (uids.length === 1) return members.find((m) => m.uid === uids[0])?.displayName ?? uids[0]
+  const ids = [...new Set(nonZero.map((b) => b.travelMemberId))]
+  if (ids.length === 1) return members.find((m) => m.travelMemberId === ids[0])?.displayName ?? ids[0]
   const expected = tx.totalAmount / members.length
   const allEqual = members.every((m) => {
-    const b = tx.beneficiaries.find((s) => s.uid === m.uid)
+    const b = tx.beneficiaries.find((s) => s.travelMemberId === m.travelMemberId)
     return Math.abs((b?.amount ?? 0) - expected) <= 0.01
   })
   return allEqual ? 'Split equal' : 'Custom'
 }
 
-function derivePaidByLabel(tx: Transaction, members: MemberRef[]): string {
+function derivePaidByLabel(tx: Transaction, members: TravelMember[]): string {
   const positive = tx.paidBy.filter((p) => p.amount > 0)
   const negative = tx.paidBy.filter((p) => p.amount < 0)
   if (positive.length === 1 && negative.length === 0)
-    return members.find((m) => m.uid === positive[0].uid)?.displayName ?? positive[0].uid
+    return members.find((m) => m.travelMemberId === positive[0].travelMemberId)?.displayName ?? positive[0].travelMemberId
   if (positive.length === 1 && negative.length === 1) {
-    const from = members.find((m) => m.uid === positive[0].uid)?.displayName ?? '?'
-    const to   = members.find((m) => m.uid === negative[0].uid)?.displayName ?? '?'
+    const from = members.find((m) => m.travelMemberId === positive[0].travelMemberId)?.displayName ?? '?'
+    const to   = members.find((m) => m.travelMemberId === negative[0].travelMemberId)?.displayName ?? '?'
     return `Transfer ${from}➡️${to}`
   }
   return 'Custom'
@@ -333,8 +333,8 @@ function buildExpensesSheet(
 
     // Cost/paid local per member (pastel cells — user-filled data)
     members.forEach((m, i) => {
-      const costSplit = tx.beneficiaries.find((s) => s.uid === m.uid)
-      const paidSplit = tx.paidBy.find((s) => s.uid === m.uid)
+      const costSplit = tx.beneficiaries.find((s) => s.travelMemberId === m.travelMemberId)
+      const paidSplit = tx.paidBy.find((s) => s.travelMemberId === m.travelMemberId)
       num(ws, cm.costLocal[i], r, costSplit?.amount ?? 0, memberCell(i))
       num(ws, cm.paidLocal[i], r, paidSplit?.amount ?? 0, memberCell(i))
     })

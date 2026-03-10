@@ -5,7 +5,7 @@
 // plus placeholder Filter and Display Mode controls, and
 // Export / Import xlsx buttons.
 
-import { useRef, useState, useEffect } from 'react'
+import { useRef, useState, useEffect, useMemo } from 'react'
 import type { Travel } from '@/travels/types'
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
 import { Button } from '@/components/ui/button'
@@ -76,19 +76,19 @@ function PendingBadge({ isPending }: { isPending: boolean }) {
 }
 
 // ---------------------------------------------------------------------------
-// Payer label
+// Payer label — uses travelMemberId for "You" detection
 // ---------------------------------------------------------------------------
 
 function buildPayerLabel(
   paidBy: TransactionWithStatus['paidBy'],
   members: Travel['members'],
-  currentUserUid: string,
+  currentUserTravelMemberId: string,
 ): string {
   if (paidBy.length === 0) return '?'
-  const includesMe = paidBy.some((s) => s.uid === currentUserUid)
+  const includesMe = paidBy.some((s) => s.travelMemberId === currentUserTravelMemberId)
   if (paidBy.length === 1) {
     if (includesMe) return 'You'
-    return members.find((m) => m.uid === paidBy[0].uid)?.displayName ?? 'Someone'
+    return members.find((m) => m.travelMemberId === paidBy[0].travelMemberId)?.displayName ?? 'Someone'
   }
   const othersCount = paidBy.length - (includesMe ? 1 : 0)
   if (includesMe) return othersCount === 1 ? 'You + 1 other' : `You + ${othersCount} others`
@@ -96,21 +96,22 @@ function buildPayerLabel(
 }
 
 // ---------------------------------------------------------------------------
-// Split icon
+// Split icon — uses travelMemberId for beneficiary detection
 // ---------------------------------------------------------------------------
 
 function getSplitIcon(
   tx: TransactionWithStatus,
   members: Travel['members'],
-  currentUserUid: string,
+  currentUserTravelMemberId: string,
 ): string {
-  const myBeneficiary = tx.beneficiaries.find((s) => s.uid === currentUserUid)
+  const myBeneficiary = tx.beneficiaries.find((s) => s.travelMemberId === currentUserTravelMemberId)
   if (!myBeneficiary) return '🙅'
-  const allMemberUids = members.map((m) => m.uid).sort()
-  const beneficiaryUids = tx.beneficiaries.map((s) => s.uid).sort()
+  // Check if all members are beneficiaries with equal shares
+  const allMemberIds = members.map((m) => m.travelMemberId).sort()
+  const beneficiaryIds = tx.beneficiaries.map((s) => s.travelMemberId).sort()
   const allIncluded =
-    allMemberUids.length === beneficiaryUids.length &&
-    allMemberUids.every((uid, i) => uid === beneficiaryUids[i])
+    allMemberIds.length === beneficiaryIds.length &&
+    allMemberIds.every((id, i) => id === beneficiaryIds[i])
   if (allIncluded) {
     const expected = tx.totalAmountMain / members.length
     const allEqual = tx.beneficiaries.every(
@@ -128,24 +129,24 @@ function getSplitIcon(
 function TransactionRow({
   transaction,
   members,
-  currentUserUid,
+  currentUserTravelMemberId,
   isSolo,
   onEdit,
 }: {
   transaction: TransactionWithStatus
   members: Travel['members']
-  currentUserUid: string
+  currentUserTravelMemberId: string
   isSolo: boolean
   onEdit: (tx: TransactionWithStatus) => void
 }) {
   const dateLabel = formatDateLabel(transaction.date)
   const categoryEmoji = getCategoryEmoji(transaction.category)
-  const payerLabel = buildPayerLabel(transaction.paidBy, members, currentUserUid)
-  const myBeneficiary = transaction.beneficiaries.find((s) => s.uid === currentUserUid)
+  const payerLabel = buildPayerLabel(transaction.paidBy, members, currentUserTravelMemberId)
+  const myBeneficiary = transaction.beneficiaries.find((s) => s.travelMemberId === currentUserTravelMemberId)
   const myCostMain = myBeneficiary
     ? Math.round(myBeneficiary.amount * transaction.exchangeRate * 100) / 100
     : null
-  const splitIcon = getSplitIcon(transaction, members, currentUserUid)
+  const splitIcon = getSplitIcon(transaction, members, currentUserTravelMemberId)
   const splitTitle =
     splitIcon === '🙅' ? 'Not your expense'
     : splitIcon === '➗' ? 'Split equally among all'
@@ -179,7 +180,12 @@ function TransactionRow({
 
       <div className="ml-3 shrink-0 text-right">
         <div className="text-sm font-semibold">
-          {transaction.totalAmount.toFixed(2)} {transaction.currency}
+          <span className="flex items-center gap-1.5">
+            {transaction.totalAmount.toFixed(2)} {transaction.currency}
+            {transaction.amountFormula && (
+              <FormulaBadge formula={transaction.amountFormula} />
+            )}
+          </span>        
         </div>
         {isSolo ? (
           transaction.currency !== 'EUR' && (
@@ -233,7 +239,7 @@ interface TransactionsTabProps {
   transactions: TransactionWithStatus[]
   loading: boolean
   error: string | null
-  currentUserUid: string
+  currentUserUid: string   // Firebase Auth UID — used to derive travelMemberId and for import
   isSolo: boolean
   onAddExpense: () => void
   onEditTransaction: (tx: TransactionWithStatus) => void
@@ -249,6 +255,13 @@ export function TransactionsTab({
   onAddExpense,
   onEditTransaction,
 }: TransactionsTabProps) {
+  // Derive the current user's travelMemberId from the travel's member list.
+  // This is what Split objects use — NOT the Firebase Auth UID.
+  const currentUserTravelMemberId = useMemo(
+    () => travel.members.find((m) => m.userId === currentUserUid)?.travelMemberId ?? '',
+    [travel.members, currentUserUid],
+  )
+
   // Export state — brief spinner while generating the xlsx
   const [isExporting, setIsExporting] = useState(false)
   // Import dialog visibility
@@ -327,7 +340,7 @@ export function TransactionsTab({
               key={tx.txId}
               transaction={tx}
               members={travel.members}
-              currentUserUid={currentUserUid}
+              currentUserTravelMemberId={currentUserTravelMemberId}
               isSolo={isSolo}
               onEdit={onEditTransaction}
             />

@@ -14,6 +14,7 @@ import {
 } from 'firebase/firestore'
 import { db } from '@/services/firebase'
 import type { Travel } from '@/travels/types'
+import { normaliseMember } from '@/travels/types'
 
 interface UseTravelsResult {
   travels: Travel[]
@@ -54,7 +55,8 @@ export function useTravels(userId: string | undefined): UseTravelsResult {
             description: data.description as string | undefined,
             startDate: data.startDate as Timestamp | undefined,
             endDate: data.endDate as Timestamp | undefined,
-            members: data.members ?? [],
+            // Apply normaliseMember to handle legacy MemberRef documents transparently
+            members: (data.members ?? []).map((raw: Record<string, unknown>) => normaliseMember(raw)),
             memberUids: data.memberUids ?? [],
             createdBy: data.createdBy as string,
             createdAt: data.createdAt as Timestamp,

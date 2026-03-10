@@ -2,8 +2,17 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { nanoid } from 'nanoid'
-import type { LabeledItem, Travel } from '@/travels/types'
-import { updateTravelCurrencies, updateTravelList, updateTravelMeta } from '@/travels/services/travelService'
+import type { LabeledItem, Travel, TravelMember } from '@/travels/types'
+import {
+  updateTravelCurrencies,
+  updateTravelList,
+  updateTravelMeta,
+  addUnclaimedMember,
+  renameTravelMember,
+  claimTravelMember,
+  unclaimTravelMember,
+  setMemberAllowRename,
+} from '@/travels/services/travelService'
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
 import { useAuthStore } from '@/auth/store/useAuthStore'
 import {
@@ -336,42 +345,86 @@ function EditableLabeledList({ items, travelId, field, placeholder, onItemsChang
 }
 
 // ---------------------------------------------------------------------------
-// MiniAvatar — color circle with initial, same hash as ProfilePage
+// Avatar helpers
 // ---------------------------------------------------------------------------
 
-function avatarHue(uid: string): number {
+function avatarHue(seed: string): number {
   let hash = 0
-  for (const ch of uid) hash = (hash * 31 + ch.charCodeAt(0)) & 0xffffffff
+  for (const ch of seed) hash = (hash * 31 + ch.charCodeAt(0)) & 0xffffffff
   return Math.abs(hash) % 360
 }
 
-function MiniAvatar({ uid, name }: { uid: string; name: string }) {
-  const hue = avatarHue(uid)
+// Claimed member: coloured avatar (using userId as seed so it matches the profile page).
+// Unclaimed member: grey avatar.
+function MemberAvatar({ member }: { member: TravelMember }) {
+  if (member.userId) {
+    const hue = avatarHue(member.userId)
+    return (
+      <div
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+        style={{ backgroundColor: `hsl(${hue}, 55%, 50%)` }}
+      >
+        {(member.displayName || '?').charAt(0).toUpperCase()}
+      </div>
+    )
+  }
+  // Unclaimed slot — grey avatar to visually distinguish from linked accounts
   return (
-    <div
-      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
-      style={{ backgroundColor: `hsl(${hue}, 55%, 50%)` }}
-    >
-      {(name || '?').charAt(0).toUpperCase()}
+    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold text-muted-foreground">
+      {(member.displayName || '?').charAt(0).toUpperCase()}
     </div>
   )
 }
 
 // ---------------------------------------------------------------------------
-// MembersSection — current members + invite friends + share link
+// MembersSection — member list with claim/unclaim/rename, invite picker, share link
 // ---------------------------------------------------------------------------
 
-function MembersSection({ travel }: { travel: Travel }) {
-  const { userProfile } = useAuthStore()
+function MembersSection({
+  travel,
+  onTravelChange,
+}: {
+  travel: Travel
+  onTravelChange: (updated: Partial<Travel>) => void
+}) {
+  const { currentUser, userProfile } = useAuthStore()
 
-  // Friend picker: lazy-loaded when "Invite a friend" is expanded
+  // The current user's linked TravelMember slot (null if they have no slot yet)
+  const myMember = travel.members.find((m) => m.userId === currentUser?.uid) ?? null
+  const isCreator = currentUser?.uid === travel.createdBy
+
+  // "No slot" nudge: user is in memberUids (has access) but has no slot with their userId
+  const hasNoSlot = !!currentUser && travel.memberUids.includes(currentUser.uid) && !myMember
+
+  // --- Inline rename state ---
+  // renamingId: travelMemberId of the slot being renamed
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+  const renameInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (renamingId && renameInputRef.current) {
+      renameInputRef.current.focus()
+      renameInputRef.current.select()
+    }
+  }, [renamingId])
+
+  // --- Add unclaimed member state ---
+  const [addingUnclaimed, setAddingUnclaimed] = useState(false)
+  const [newMemberName, setNewMemberName] = useState('')
+  const newMemberInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (addingUnclaimed && newMemberInputRef.current) newMemberInputRef.current.focus()
+  }, [addingUnclaimed])
+
+  // --- Friend picker state (for "Invite a friend") ---
   const [pickerOpen, setPickerOpen] = useState(false)
   const [friends, setFriends] = useState<Friend[]>([])
   const [friendsLoading, setFriendsLoading] = useState(false)
-  // Track which UIDs we just sent a travel invite to (for immediate button feedback)
   const [invitedUids, setInvitedUids] = useState<Set<string>>(new Set())
 
-  // Share invite link state
+  // --- Share invite link state ---
   const [shareLoading, setShareLoading] = useState(false)
   const [generatedInviteUrl, setGeneratedInviteUrl] = useState<string | null>(null)
   const [copyFeedback, setCopyFeedback] = useState(false)
@@ -391,6 +444,86 @@ function MembersSection({ travel }: { travel: Travel }) {
   const existingMemberUids = new Set(travel.memberUids)
   const invitableFriends = friends.filter(f => !existingMemberUids.has(f.uid))
 
+  // ---------------------------------------------------------------------------
+  // Permission checks
+  // ---------------------------------------------------------------------------
+
+  function canRename(member: TravelMember): boolean {
+    if (!currentUser) return false
+    if (member.userId === null) return true  // unclaimed: anyone can rename
+    if (member.userId === currentUser.uid) return true  // linked user always can
+    if (isCreator && member.allowRename) return true  // creator can if flag permits
+    return false
+  }
+
+  function canUnclaim(member: TravelMember): boolean {
+    if (!currentUser) return false
+    return member.userId === currentUser.uid || isCreator
+  }
+
+  function showAllowRenameToggle(member: TravelMember): boolean {
+    if (!currentUser) return false
+    if (member.userId === null) return false  // toggle only relevant for claimed slots
+    return member.userId === currentUser.uid || isCreator
+  }
+
+  // ---------------------------------------------------------------------------
+  // Action handlers
+  // ---------------------------------------------------------------------------
+
+  async function handleRenameCommit(member: TravelMember) {
+    const trimmed = renameValue.trim()
+    setRenamingId(null)
+    if (!trimmed || trimmed === member.displayName) return
+    await renameTravelMember(travel.travelId, member.travelMemberId, trimmed, travel.members)
+    onTravelChange({
+      members: travel.members.map((m) =>
+        m.travelMemberId === member.travelMemberId ? { ...m, displayName: trimmed } : m,
+      ),
+    })
+  }
+
+  async function handleClaim(member: TravelMember) {
+    if (!currentUser) return
+    await claimTravelMember(travel.travelId, member.travelMemberId, currentUser.uid, travel.members)
+    // Transfer semantics: null any slot the user previously owned, then set this one
+    onTravelChange({
+      members: travel.members.map((m) => {
+        if (m.travelMemberId === member.travelMemberId) return { ...m, userId: currentUser.uid }
+        if (m.userId === currentUser.uid) return { ...m, userId: null }
+        return m
+      }),
+    })
+  }
+
+  async function handleUnclaim(member: TravelMember) {
+    await unclaimTravelMember(travel.travelId, member.travelMemberId, travel.members)
+    // memberUids is NOT modified — access is retained
+    onTravelChange({
+      members: travel.members.map((m) =>
+        m.travelMemberId === member.travelMemberId ? { ...m, userId: null } : m,
+      ),
+    })
+  }
+
+  async function handleAllowRenameToggle(member: TravelMember) {
+    await setMemberAllowRename(travel.travelId, member.travelMemberId, !member.allowRename, travel.members)
+    onTravelChange({
+      members: travel.members.map((m) =>
+        m.travelMemberId === member.travelMemberId ? { ...m, allowRename: !m.allowRename } : m,
+      ),
+    })
+  }
+
+  async function handleAddUnclaimed() {
+    const trimmed = newMemberName.trim()
+    if (!trimmed) return
+    const newMember = await addUnclaimedMember(travel.travelId, trimmed, travel.members)
+    onTravelChange({ members: [...travel.members, newMember] })
+    setNewMemberName('')
+    setAddingUnclaimed(false)
+  }
+
   async function handleSendTravelInvite(toUid: string) {
     if (!userProfile) return
     setInvitedUids(prev => new Set(prev).add(toUid))
@@ -406,8 +539,6 @@ function MembersSection({ travel }: { travel: Travel }) {
       )
       const url = `${window.location.origin}/invite/${inviteId}`
       setGeneratedInviteUrl(url)
-
-      // Copy to clipboard automatically
       try {
         await navigator.clipboard.writeText(url)
         setCopyFeedback(true)
@@ -429,24 +560,151 @@ function MembersSection({ travel }: { travel: Travel }) {
     setTimeout(() => setCopyFeedback(false), 2500)
   }
 
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
+
   return (
     <div className="flex flex-col gap-3">
-      {/* Current members list */}
+
+      {/* "No slot" nudge — shown when user has travel access but no claimed slot */}
+      {hasNoSlot && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+          You haven&apos;t claimed a slot yet — pick who you are below.
+        </div>
+      )}
+
+      {/* Member list */}
       <ul className="flex flex-col gap-1.5">
-        {travel.members.map(member => (
-          <li key={member.uid} className="flex items-center gap-2 rounded-lg border bg-card px-3 py-2">
-            <MiniAvatar uid={member.uid} name={member.displayName} />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate">{member.displayName}</p>
-            </div>
-            {member.uid === travel.createdBy && (
-              <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
-                creator
-              </span>
-            )}
-          </li>
-        ))}
+        {travel.members.map((member) => {
+          const isMine = member.userId === currentUser?.uid
+          const isUnclaimed = member.userId === null
+          const isRenaming = renamingId === member.travelMemberId
+
+          return (
+            <li
+              key={member.travelMemberId}
+              className="flex flex-col gap-2 rounded-lg border bg-card px-3 py-2.5"
+            >
+              {/* Top row: avatar + name/rename + sub-label */}
+              <div className="flex items-center gap-2">
+                <MemberAvatar member={member} />
+
+                <div className="flex-1 min-w-0">
+                  {/* Inline rename input or display name */}
+                  {isRenaming ? (
+                    <input
+                      ref={renameInputRef}
+                      type="text"
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onBlur={() => handleRenameCommit(member)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleRenameCommit(member)
+                        if (e.key === 'Escape') setRenamingId(null)
+                      }}
+                      className="w-full rounded-md border bg-background px-2 py-0.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                    />
+                  ) : (
+                    <p className="text-sm font-medium truncate">{member.displayName}</p>
+                  )}
+
+                  {/* Sub-label: "You", "Linked account", or "Unclaimed" */}
+                  <p className="text-xs text-muted-foreground">
+                    {isMine ? 'You' : isUnclaimed ? 'Unclaimed' : 'Linked account'}
+                    {member.userId === travel.createdBy && (
+                      <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px]">creator</span>
+                    )}
+                  </p>
+                </div>
+
+                {/* Rename button — shown when permission exists and not currently renaming */}
+                {!isRenaming && canRename(member) && (
+                  <button
+                    type="button"
+                    onClick={() => { setRenamingId(member.travelMemberId); setRenameValue(member.displayName) }}
+                    aria-label={`Rename ${member.displayName}`}
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  >
+                    ✏️
+                  </button>
+                )}
+              </div>
+
+              {/* Action buttons row — only shown when relevant */}
+              {(isUnclaimed || canUnclaim(member) || showAllowRenameToggle(member)) && (
+                <div className="flex flex-wrap gap-1.5 pl-10">
+                  {/* Claim button — only on unclaimed slots */}
+                  {isUnclaimed && (
+                    <button
+                      type="button"
+                      onClick={() => handleClaim(member)}
+                      className="rounded-md border border-primary px-2 py-0.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
+                    >
+                      Claim — this is me
+                    </button>
+                  )}
+
+                  {/* Unclaim button — only shown to the linked user or creator */}
+                  {!isUnclaimed && canUnclaim(member) && (
+                    <button
+                      type="button"
+                      onClick={() => handleUnclaim(member)}
+                      className="rounded-md border border-muted-foreground/40 px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:border-destructive hover:text-destructive"
+                    >
+                      {isMine ? 'Unlink my account' : 'Unlink'}
+                    </button>
+                  )}
+
+                  {/* allowRename toggle — only on claimed slots for the linked user or creator */}
+                  {showAllowRenameToggle(member) && (
+                    <button
+                      type="button"
+                      onClick={() => handleAllowRenameToggle(member)}
+                      className="rounded-md border border-muted-foreground/40 px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted"
+                    >
+                      {member.allowRename ? '🔓 Others can rename' : '🔒 Rename locked'}
+                    </button>
+                  )}
+                </div>
+              )}
+            </li>
+          )
+        })}
       </ul>
+
+      {/* Add person without account — dashed button + inline input */}
+      {!addingUnclaimed ? (
+        <button
+          type="button"
+          onClick={() => setAddingUnclaimed(true)}
+          className="flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent/20"
+        >
+          <span>+</span>
+          Add person without account
+        </button>
+      ) : (
+        <div className="flex items-center gap-2 rounded-lg border border-dashed px-3 py-2">
+          <input
+            ref={newMemberInputRef}
+            type="text"
+            value={newMemberName}
+            onChange={(e) => setNewMemberName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleAddUnclaimed()
+              if (e.key === 'Escape') { setAddingUnclaimed(false); setNewMemberName('') }
+            }}
+            placeholder="Their name…"
+            className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+          <Button type="button" size="sm" onClick={handleAddUnclaimed} disabled={!newMemberName.trim()}>
+            Add
+          </Button>
+          <Button type="button" size="sm" variant="outline" onClick={() => { setAddingUnclaimed(false); setNewMemberName('') }}>
+            ✕
+          </Button>
+        </div>
+      )}
 
       {/* Invite a friend (collapsible friend picker) */}
       <div className="flex flex-col gap-2">
@@ -476,7 +734,12 @@ function MembersSection({ travel }: { travel: Travel }) {
               const alreadyInvited = invitedUids.has(friend.uid)
               return (
                 <div key={friend.uid} className="flex items-center gap-2 rounded px-2 py-1.5">
-                  <MiniAvatar uid={friend.uid} name={friend.displayName} />
+                  <div
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+                    style={{ backgroundColor: `hsl(${avatarHue(friend.uid)}, 55%, 50%)` }}
+                  >
+                    {(friend.displayName || '?').charAt(0).toUpperCase()}
+                  </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{friend.displayName}</p>
                     {friend.nametag && (
@@ -621,9 +884,9 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
         </div>
       </Section>
 
-      {/* Members */}
+      {/* Members — MembersSection receives onTravelChange so it can update members array */}
       <Section title="Members">
-        <MembersSection travel={travel} />
+        <MembersSection travel={travel} onTravelChange={onTravelChange} />
       </Section>
 
       {/* Currencies */}

@@ -11,9 +11,12 @@ import {
   Timestamp, onSnapshot,
   type Unsubscribe,
 } from 'firebase/firestore'
+import { nanoid } from 'nanoid'
 import { db } from '@/services/firebase'
 import type { UserProfile } from '@/auth/services/userService'
 import type { Invite, Friend, SearchUser } from '@/friends/types'
+import type { TravelMember } from '@/travels/types'
+import { normaliseMember } from '@/travels/types'
 
 // How long an invite stays active before it expires.
 const INVITE_EXPIRY_DAYS = 30
@@ -259,12 +262,29 @@ export async function sendTravelInvite(
 // ---------------------------------------------------------------------------
 
 /**
+ * Result returned by acceptTravelInvite — used by InvitePage to redirect
+ * and, after joining, fetch unclaimed slots for the identity resolution screen.
+ */
+export interface TravelInviteResult {
+  /** The travelId so InvitePage can redirect and read the travel after joining. */
+  travelId: string
+}
+
+/**
  * Accepts a travel_member invite.
+ *
+ * Goes straight to the batch write — no pre-read of the travel document.
+ * A pre-read would fail with "Missing or insufficient permissions" because the
+ * user is not yet in memberUids at that point. arrayUnion on memberUids is
+ * idempotent, so accepting the same invite twice is handled safely.
  *
  * Core batch (atomic — must succeed together):
  *   1. Marks the invite as used (usedBy or status)
- *   2. Adds the accepter to travel.members and travel.memberUids
- *      The Firestore rule verifies the invite via get() using pendingInviteId
+ *   2. Adds the accepter as a new TravelMember slot and appends their UID to memberUids.
+ *      The Firestore rule verifies the invite via get() using pendingInviteId.
+ *
+ * After the batch, the caller (InvitePage) reads the travel to fetch unclaimed slots —
+ * that read is now permitted because the user is in memberUids.
  *
  * Friendship writes are intentionally kept outside the batch (fire-and-forget).
  * They are idempotent (set() overwrites safely if already friends) and must not
@@ -277,9 +297,12 @@ export async function sendTravelInvite(
 export async function acceptTravelInvite(
   invite: Invite,
   currentUser: UserProfile,
-): Promise<void> {
+): Promise<TravelInviteResult> {
   if (!invite.travelId) throw new Error('Invite missing travelId')
 
+  const travelRef = doc(db, 'travels', invite.travelId)
+
+  // ── Core batch ─────────────────────────────────────────────────────────────
   const now = Timestamp.now()
   const batch = writeBatch(db)
 
@@ -290,15 +313,24 @@ export async function acceptTravelInvite(
     usedBy: arrayUnion(currentUser.uid),
   })
 
-  // 2. Join the travel. The security rule reads pendingInviteId via get() to
-  //    verify this update is authorised. Rule is evaluated against pre-batch state
-  //    so invite.status is still 'active' at rule evaluation time.
-  const travelRef = doc(db, 'travels', invite.travelId)
+  // 2. Add the accepter as a new TravelMember slot.
+  //    travelMemberId is a fresh nanoid — stable key for future Split[] references.
+  //    arrayUnion on members: Firestore will merge this object into the array.
+  //    pendingInviteId: read by the security rule to authorise the non-member write.
+  const newMember: TravelMember = {
+    travelMemberId: nanoid(),
+    displayName: currentUser.displayName,
+    userId: currentUser.uid,
+    allowRename: true,
+    joinedAt: now,
+  }
+
   batch.update(travelRef, {
-    // MemberRef object added to the members array
     members: arrayUnion({
-      uid: currentUser.uid,
-      displayName: currentUser.displayName,
+      travelMemberId: newMember.travelMemberId,
+      displayName: newMember.displayName,
+      userId: newMember.userId,
+      allowRename: newMember.allowRename,
       joinedAt: now,
     }),
     memberUids: arrayUnion(currentUser.uid),
@@ -330,6 +362,8 @@ export async function acceptTravelInvite(
   } satisfies Friend).catch((err) =>
     console.warn('[friendService] acceptTravelInvite: myFriend write failed', err),
   )
+
+  return { travelId: invite.travelId }
 }
 
 // ---------------------------------------------------------------------------

@@ -2,10 +2,42 @@
 
 import type { Timestamp } from 'firebase/firestore'
 
-export interface MemberRef {
-  uid: string
-  displayName: string
+// ---------------------------------------------------------------------------
+// TravelMember — replaces the old MemberRef shape.
+//
+// travelMemberId is a client-generated nanoid that is the stable key used in
+// Split[] objects throughout the app. It is NEVER a Firebase Auth UID.
+// userId links the slot to a Firebase Auth account; null means the slot is
+// "unclaimed" (a name-only placeholder added before or after the account holder joins).
+// ---------------------------------------------------------------------------
+
+export interface TravelMember {
+  travelMemberId: string   // client-generated nanoid — stable key in Split[]
+  displayName: string      // mutable per-travel nickname
+  userId: string | null    // null = unclaimed; string = linked Firebase Auth UID
+  allowRename: boolean     // if true, any travel member can rename this person
   joinedAt: Timestamp
+}
+
+// ---------------------------------------------------------------------------
+// normaliseMember — converts legacy MemberRef documents on read.
+//
+// Old documents stored { uid, displayName, joinedAt }.
+// New documents store the full TravelMember shape.
+// This function handles both so existing data keeps working transparently.
+// ---------------------------------------------------------------------------
+
+export function normaliseMember(raw: Record<string, unknown>): TravelMember {
+  return {
+    travelMemberId: (raw.travelMemberId as string | undefined) ?? (raw.uid as string) ?? '',
+    displayName: (raw.displayName as string | undefined) ?? '',
+    // New docs have an explicit userId field. Legacy docs have only uid (which was always a real Auth UID).
+    userId: raw.userId !== undefined
+      ? (raw.userId as string | null)
+      : (raw.uid as string | undefined) ?? null,
+    allowRename: (raw.allowRename as boolean | undefined) ?? true,
+    joinedAt: raw.joinedAt as Timestamp,
+  }
 }
 
 export interface TravelSettings {
@@ -27,7 +59,10 @@ export interface Travel {
   description?: string
   startDate?: Timestamp
   endDate?: Timestamp
-  members: MemberRef[]
+  // members[] uses the new TravelMember shape. normaliseMember() handles legacy docs on read.
+  members: TravelMember[]
+  // memberUids is access-control only: the flat array of Firebase Auth UIDs for security rules.
+  // It is written on travel creation and invite acceptance only — NEVER modified by claim/unclaim.
   memberUids: string[]
   createdBy: string
   createdAt: Timestamp

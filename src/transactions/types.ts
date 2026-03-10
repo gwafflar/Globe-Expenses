@@ -1,7 +1,9 @@
 import type { Timestamp } from 'firebase/firestore'
 
 export interface Split {
-  uid: string
+  // Stable travelMemberId (nanoid) — never a Firebase Auth UID.
+  // Use travel.members.find(m => m.travelMemberId === s.travelMemberId) to resolve display info.
+  travelMemberId: string
   amount: number // in transaction currency
 }
 
@@ -29,5 +31,5 @@ export interface Transaction {
   lastModifiedBy: string
   draftId?: string
   notes?: string
+  amountFormula?: string  // Raw formula string entered by the user (e.g. "2*2.5 + 1.5"). totalAmount is always the computed result. This field is display-only — it is never used in any calculation.
 }
-

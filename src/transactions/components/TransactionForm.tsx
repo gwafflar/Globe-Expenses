@@ -15,7 +15,7 @@ import { getExchangeRate } from '@/shared/utils/exchangeRates'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import type { LabeledItem, MemberRef, TravelSettings } from '@/travels/types'
+import type { LabeledItem, TravelMember, TravelSettings } from '@/travels/types'
 import { updateTravelCurrencies, updateTravelList, syncTransactionLocation } from '@/travels/services/travelService'
 import { ALL_CURRENCIES, ALL_COUNTRIES } from '@/shared/data/pickerData'
 import type { Split } from '@/transactions/types'
@@ -26,6 +26,7 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from '@/components/ui/drawer'
+import { FormulaBar } from './FormulaBar'
 import { SplitEditor } from '@/transactions/components/SplitEditor'
 import { SplitSummaryRow } from '@/transactions/components/SplitSummaryRow'
 
@@ -522,15 +523,15 @@ function round(x: number, dp: number): number {
 }
 
 /**
- * Splits `total` equally among `uids`, rounded to 3dp internally.
+ * Splits `total` equally among travelMemberIds, rounded to 3dp internally.
  * Validity is checked at 2dp — matches SplitEditor's rounding model.
  * Using the functional setState updater (prev =>) with this helper avoids
- * stale-closure issues when reading current UIDs inside a useEffect.
+ * stale-closure issues when reading current IDs inside a useEffect.
  */
-function distributeEqually(total: number, uids: string[]): Split[] {
-  if (uids.length === 0) return []
-  const amount = round(total / uids.length, 3)
-  return uids.map((uid) => ({ uid, amount }))
+function distributeEqually(total: number, ids: string[]): Split[] {
+  if (ids.length === 0) return []
+  const amount = round(total / ids.length, 3)
+  return ids.map((travelMemberId) => ({ travelMemberId, amount }))
 }
 
 
@@ -551,7 +552,7 @@ function detectSplitMode(splits: Split[]): 'equal' | 'custom' {
 // ---------------------------------------------------------------------------
 interface TransactionFormProps {
   travelId: string
-  members: MemberRef[]
+  members: TravelMember[]
   travelSettings?: TravelSettings
   travelCategories?: LabeledItem[]
   travelPaymentMethods?: LabeledItem[]
@@ -605,6 +606,17 @@ export function TransactionForm({
       </p>
     )
   }
+
+  // Resolve the current user's travelMemberId — used to initialise splits and to show "You".
+  // Pattern: find the slot where userId matches the Firebase Auth UID.
+  const myMember = members.find((m) => m.userId === currentUser.uid)
+  const myTravelMemberId = myMember?.travelMemberId ?? ''
+
+  // --- Formula mode state ---
+  // `formulaMode` — whether the formula bar is currently shown instead of the plain amount input
+  const [formulaMode, setFormulaMode] = useState(false)
+  // `formulaStr` — the raw formula string as typed by the user (e.g. "2*2.5 + 1.5")
+  const [formulaStr, setFormulaStr] = useState('')
 
   // Effective category and payment method lists:
   // use per-travel lists if available, else fall back to userProfile global lists.
@@ -711,14 +723,15 @@ export function TransactionForm({
   // In edit mode, restore the saved splits and detect whether they were equal or custom.
   // In create mode, default to the current user paying/benefiting the full amount.
   const [paidBy, setPaidBy] = useState<Split[]>(
-    isEdit ? initialValues!.paidBy : [{ uid: currentUser.uid, amount: totalAmount }]
+    // In create mode, default to the current user's travel slot paying the full amount
+    isEdit ? initialValues!.paidBy : [{ travelMemberId: myTravelMemberId, amount: totalAmount }]
   )
   const [paidByMode, setPaidByMode] = useState<'equal' | 'custom'>(
     isEdit ? detectSplitMode(initialValues!.paidBy) : 'equal'
   )
 
   const [beneficiaries, setBeneficiaries] = useState<Split[]>(
-    isEdit ? initialValues!.beneficiaries : [{ uid: currentUser.uid, amount: totalAmount }]
+    isEdit ? initialValues!.beneficiaries : [{ travelMemberId: myTravelMemberId, amount: totalAmount }]
   )
   const [beneficiaryMode, setBeneficiaryMode] = useState<'equal' | 'custom'>(
     isEdit ? detectSplitMode(initialValues!.beneficiaries) : 'equal'
@@ -733,10 +746,11 @@ export function TransactionForm({
   // keep both splits up to date whenever totalAmount changes.
   useEffect(() => {
     if (!isSolo) return
-    const soloSplit: Split[] = [{ uid: currentUser.uid, amount: totalAmount }]
+    // Use myTravelMemberId (the slot's stable id) rather than the Firebase Auth UID
+    const soloSplit: Split[] = [{ travelMemberId: myTravelMemberId, amount: totalAmount }]
     setPaidBy(soloSplit)
     setBeneficiaries(soloSplit)
-  }, [isSolo, currentUser.uid, totalAmount])
+  }, [isSolo, myTravelMemberId, totalAmount])
 
   // --- Multi-user equal mode: keep amounts in sync with totalAmount --------
   // The SplitEditor inside each Drawer has the same sync logic, but shadcn/vaul
@@ -749,7 +763,7 @@ export function TransactionForm({
     if (isSolo) return
     if (paidByMode === 'equal') {
       setPaidBy((prev) =>
-        prev.length === 0 ? prev : distributeEqually(totalAmount, prev.map((s) => s.uid))
+        prev.length === 0 ? prev : distributeEqually(totalAmount, prev.map((s) => s.travelMemberId))
       )
     }
   }, [totalAmount, paidByMode, isSolo])
@@ -758,7 +772,7 @@ export function TransactionForm({
     if (isSolo) return
     if (beneficiaryMode === 'equal') {
       setBeneficiaries((prev) =>
-        prev.length === 0 ? prev : distributeEqually(totalAmount, prev.map((s) => s.uid))
+        prev.length === 0 ? prev : distributeEqually(totalAmount, prev.map((s) => s.travelMemberId))
       )
     }
   }, [totalAmount, beneficiaryMode, isSolo])
@@ -858,6 +872,7 @@ export function TransactionForm({
       const newTxId = createTransaction(travelId, {
         ...sharedData,
         createdBy: { type: 'user' as const, uid: user.uid },
+        ...(formulaStr.trim() ? { amountFormula: formulaStr.trim() } : {}),
       })
       onSuccess(newTxId)
     }
@@ -899,38 +914,125 @@ export function TransactionForm({
       </FieldWrapper>
 
       {/* Amount + Currency */}
-      <div className="flex gap-2 items-start">
-        <div className="flex-1">
-          <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium">Amount</label>
-            <Input
-              type="number"
-              inputMode="decimal"
-              step={0.01}
-              min={0}
-              placeholder="0.00"
-              value={amountStr}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAmountStr(e.target.value)}
-            />
-            {submitted && errors.amount && (
-              <p className="text-xs text-destructive">{errors.amount}</p>
-            )}
-          </div>
-        </div>
-        <div className="w-28">
-          <SmartCurrencySelect
-            value={currency}
-            onChange={setCurrency}
-            travelId={travelId}
-            orderedCurrencies={orderedCurrencies}
-            onCurrencyAdded={(code) => {
-              // Persist new currency to travel list, then set it as selected
-              const next = [...(travelCurrencies ?? []), code]
-              updateTravelCurrencies(travelId, next).catch(console.error)
+      <div className="flex flex-col gap-2">
+
+        {/* Formula bar — rendered ABOVE the amount row when formula mode is active */}
+        {formulaMode && (
+          <FormulaBar
+            value={formulaStr}
+            onChange={setFormulaStr}
+            onEvaluated={(result) => {
+              // Whenever the formula produces a valid number, push it into amountStr
+              // so the rest of the form (validation, splits) sees it immediately.
+              if (result !== null) setAmountStr(result.toFixed(2))
             }}
           />
+        )}
+
+        {/* Amount input row: [number input] [formula toggle] [currency] */}
+        <div className="flex gap-2 items-start">
+
+          {/* Amount — shown as read-only preview when formula mode is active */}
+          <div className="flex-1">
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium">Amount</label>
+
+              {formulaMode ? (
+                // In formula mode: show the evaluated result as a read-only display.
+                // The real editing happens in the FormulaBar above.
+                <div className="flex h-9 items-center rounded-md border border-border bg-muted px-3 text-sm text-muted-foreground">
+                  {amountStr || <span className="italic">enter formula above</span>}
+                </div>
+              ) : (
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  step={0.01}
+                  min={0}
+                  placeholder="0.00"
+                  value={amountStr}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAmountStr(e.target.value)}
+                />
+              )}
+
+              {submitted && errors.amount && (
+                <p className="text-xs text-destructive">{errors.amount}</p>
+              )}
+            </div>
+          </div>
+
+          {/* Formula mode toggle button — sits between amount and currency */}
+          <div className="flex flex-col gap-1">
+            {/* Spacer to align button with the input (label takes up ~1.25rem) */}
+            <div className="h-5" aria-hidden />
+            <button
+              type="button"
+              onClick={() => {
+                if (formulaMode) {
+                  // Exiting formula mode: keep evaluated amount, clear formula state.
+                  // amountStr is already set to the evaluated result via onEvaluated.
+                  setFormulaMode(false)
+                  // We deliberately KEEP formulaStr in state so it's saved to Firestore
+                  // even after the bar is closed. Only clear it if amount is manually edited after.
+                } else {
+                  // Entering formula mode: pre-populate formula with current amount if set.
+                  if (amountStr && parseFloat(amountStr) > 0) {
+                    setFormulaStr(amountStr)
+                  }
+                  setFormulaMode(true)
+                }
+              }}
+              title={formulaMode ? 'Close formula mode' : 'Enter formula mode'}
+              aria-pressed={formulaMode}
+              // Highlighted (accent bg) when formula mode is active, muted when not.
+              className={[
+                'flex h-9 w-9 items-center justify-center rounded-md border text-base transition-colors',
+                formulaMode
+                  ? 'border-primary bg-primary/10 text-primary'
+                  : 'border-border bg-background text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+              ].join(' ')}
+            >
+              {/* Calculator emoji — universally understood, no icon library needed */}
+              🧮
+            </button>
+          </div>
+
+          {/* Currency selector — unchanged */}
+          <div className="w-28">
+            <SmartCurrencySelect
+              value={currency}
+              onChange={setCurrency}
+              travelId={travelId}
+              orderedCurrencies={orderedCurrencies}
+              onCurrencyAdded={(code) => {
+                const next = [...(travelCurrencies ?? []), code]
+                updateTravelCurrencies(travelId, next).catch(console.error)
+              }}
+            />
+          </div>
         </div>
-      </div>
+
+  {/* "Encode from ticket" — v2 placeholder */}
+  {/* This button is intentionally disabled and non-functional.       */}
+  {/* The tooltip communicates the v2 roadmap intent to the user.     */}
+  <div className="relative group w-fit">
+    <button
+      type="button"
+      disabled
+      className="flex items-center gap-1.5 rounded-md border border-dashed border-border bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground cursor-not-allowed opacity-60"
+    >
+      📷 Encode a transaction from a ticket
+    </button>
+    {/* Tooltip — appears on hover (or long-press on mobile via `title` fallback) */}
+    <div
+      role="tooltip"
+      className="pointer-events-none absolute bottom-full left-0 mb-1.5 w-52 rounded-md bg-popover px-3 py-2 text-xs text-popover-foreground shadow-md border border-border opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-10"
+    >
+      📅 Coming in v2 — snap a photo of your receipt and let the AI fill in the transaction for you.
+    </div>
+  </div>
+
+</div>
 
       {/* Country + City — only shown when travel.settings.trackLocation is true */}
       {trackLocation && (
@@ -1006,7 +1108,7 @@ export function TransactionForm({
             members={members}
             mode={paidByMode}
             isValid={paidByValid}
-            currentUserUid={currentUser.uid}
+            currentUserTravelMemberId={myTravelMemberId}
             onClick={() => setPaidByDrawerOpen(true)}
           />
           {submitted && errors.paidBy && (
@@ -1019,7 +1121,7 @@ export function TransactionForm({
             members={members}
             mode={beneficiaryMode}
             isValid={beneficiaryValid}
-            currentUserUid={currentUser.uid}
+            currentUserTravelMemberId={myTravelMemberId}
             onClick={() => setBeneficiaryDrawerOpen(true)}
           />
           {submitted && errors.beneficiaries && (

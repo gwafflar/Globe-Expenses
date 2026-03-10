@@ -10,9 +10,30 @@ import {
   serverTimestamp,
   updateDoc,
 } from 'firebase/firestore'
+import { nanoid } from 'nanoid'
 import { db } from '@/services/firebase'
-import type { LabeledItem, TravelSettings } from '@/travels/types'
+import type { LabeledItem, TravelMember, TravelSettings } from '@/travels/types'
 import { getFlagForCountry } from '@/shared/data/pickerData'
+
+// ---------------------------------------------------------------------------
+// serialiseMember — strips undefined field values before writing to Firestore.
+//
+// Firestore rejects `undefined` values. They can appear when spreading a
+// normalised legacy document that didn't have all TravelMember fields.
+// Use this in every updateDoc() call that writes the members array.
+// ---------------------------------------------------------------------------
+
+function serialiseMember(m: TravelMember): Record<string, unknown> {
+  const obj: Record<string, unknown> = {
+    travelMemberId: m.travelMemberId,
+    displayName: m.displayName,
+    userId: m.userId,       // null is valid in Firestore — do not strip
+    allowRename: m.allowRename,
+  }
+  // Only include joinedAt if it's defined (new docs always have it, some legacy may not)
+  if (m.joinedAt !== undefined) obj.joinedAt = m.joinedAt
+  return obj
+}
 
 // ---------------------------------------------------------------------------
 // Create
@@ -42,9 +63,19 @@ export async function createTravel(input: CreateTravelInput): Promise<void> {
 
   const travelsRef = collection(db, 'travels')
 
+  // Creator gets a stable travelMemberId (nanoid). Their Firebase Auth UID is stored in
+  // both userId (slot link) and memberUids (access control flat array).
+  const creatorMember: TravelMember = {
+    travelMemberId: nanoid(),
+    displayName,
+    userId: uid,
+    allowRename: true,
+    joinedAt: Timestamp.now(),
+  }
+
   const docData: Record<string, unknown> = {
     name,
-    members: [{ uid, displayName, joinedAt: Timestamp.now() }],
+    members: [serialiseMember(creatorMember)],
     memberUids: [uid],
     createdBy: uid,
     createdAt: serverTimestamp(),
@@ -168,4 +199,107 @@ export async function syncTransactionLocation(
   }
 
   return { newCountry, newCity }
+}
+
+// ---------------------------------------------------------------------------
+// TravelMember operations
+//
+// These functions write the full members array (via serialiseMember) so that
+// Firestore never receives undefined field values from normalised legacy docs.
+//
+// IMPORTANT invariants:
+//  - memberUids is NEVER modified by claim/unclaim — it is access control only.
+//  - claimTravelMember implements transfer semantics: if the userId already owns
+//    another slot, that slot is silently set to userId: null first.
+// ---------------------------------------------------------------------------
+
+/** Adds a name-only unclaimed member slot. memberUids unchanged. */
+export async function addUnclaimedMember(
+  travelId: string,
+  displayName: string,
+  currentMembers: TravelMember[],
+): Promise<TravelMember> {
+  const ref = doc(db, 'travels', travelId)
+  const newMember: TravelMember = {
+    travelMemberId: nanoid(),
+    displayName,
+    userId: null,           // unclaimed — no Auth account linked yet
+    allowRename: true,
+    joinedAt: Timestamp.now(),
+  }
+  const updated = [...currentMembers, newMember]
+  await updateDoc(ref, { members: updated.map(serialiseMember) })
+  return newMember
+}
+
+/** Renames a slot. Caller must verify permission before calling. */
+export async function renameTravelMember(
+  travelId: string,
+  travelMemberId: string,
+  newName: string,
+  currentMembers: TravelMember[],
+): Promise<void> {
+  const ref = doc(db, 'travels', travelId)
+  const updated = currentMembers.map((m) =>
+    m.travelMemberId === travelMemberId ? { ...m, displayName: newName } : m,
+  )
+  await updateDoc(ref, { members: updated.map(serialiseMember) })
+}
+
+/**
+ * Claims a slot for a Firebase Auth user.
+ * Transfer semantics: if the userId already owns another slot, that slot is
+ * silently set to userId: null before the target slot is claimed.
+ * memberUids is NOT modified — access was already granted on join.
+ */
+export async function claimTravelMember(
+  travelId: string,
+  travelMemberId: string,
+  userId: string,
+  currentMembers: TravelMember[],
+): Promise<void> {
+  const ref = doc(db, 'travels', travelId)
+  const updated = currentMembers.map((m) => {
+    if (m.travelMemberId === travelMemberId) {
+      // Claim this slot for the user
+      return { ...m, userId }
+    }
+    if (m.userId === userId) {
+      // The user previously owned this other slot — release it (transfer semantics)
+      return { ...m, userId: null }
+    }
+    return m
+  })
+  await updateDoc(ref, { members: updated.map(serialiseMember) })
+}
+
+/**
+ * Unclaims a slot — sets userId to null.
+ * memberUids is NOT modified. The person whose account was unlinked retains access.
+ */
+export async function unclaimTravelMember(
+  travelId: string,
+  travelMemberId: string,
+  currentMembers: TravelMember[],
+): Promise<void> {
+  const ref = doc(db, 'travels', travelId)
+  const updated = currentMembers.map((m) =>
+    m.travelMemberId === travelMemberId ? { ...m, userId: null } : m,
+  )
+  // memberUids intentionally NOT touched — access control is unchanged
+  await updateDoc(ref, { members: updated.map(serialiseMember) })
+}
+
+/** Toggles the allowRename flag on a slot. */
+export async function setMemberAllowRename(
+  travelId: string,
+  travelMemberId: string,
+  allowRename: boolean,
+  currentMembers: TravelMember[],
+): Promise<void> {
+  const ref = doc(db, 'travels', travelId)
+  const updated = currentMembers.map((m) =>
+    m.travelMemberId === travelMemberId ? { ...m, allowRename } : m,
+  )
+  await updateDoc(ref, { members: updated.map(serialiseMember) })
 }
