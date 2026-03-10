@@ -1,8 +1,8 @@
 import type { Timestamp } from 'firebase/firestore'
 
 export interface Split {
-  uid: string
-  amount: number // in transaction currency
+  travelMemberId: string  // stable travelMemberId — never a Firebase Auth UID
+  amount: number          // in transaction currency
 }
 
 export type CreatedByRef =

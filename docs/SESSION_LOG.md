@@ -755,3 +755,67 @@ On export, tx.txId is written into col A of the Expenses sheet instead of a sequ
 | File | Changes |
 |------|---------|
 | `src/transactions/services/transactionService.ts` | Strip `undefined` fields from `data` spread before `setDoc` call |
+
+---
+
+## ✨ Feature Session 009 — March 10th 2026
+
+**Type**: Structural refactor + feature (types, services, all UI)
+
+### What was implemented
+
+**TravelMember refactor** — Replace UID-based member model with a stable `travelMemberId`-based model that supports unclaimed (name-only) members.
+
+#### New types
+- `TravelMember` replaces `MemberRef` in `src/travels/types.ts`:
+  - `travelMemberId`: client-generated `nanoid()`, stable forever
+  - `userId: string | null` — null = unclaimed; non-null = linked Firebase Auth UID
+  - `allowRename: boolean` — any member can rename unclaimed; claimed obeys this flag
+- `Split.uid` renamed to `Split.travelMemberId` in `src/transactions/types.ts`
+- `normaliseMember()` exported from `types.ts` — converts legacy docs gracefully
+
+#### Backward compatibility
+- `normaliseMember()` applied in both `useTravels.ts` (onSnapshot) and `TravelDetailPage.tsx` (getDoc)
+- Legacy docs (with `uid` instead of `travelMemberId`) work without migration
+
+#### Member management UI (`ParametersTab` → `MembersSection`)
+- Add person without account (unclaimed member, `userId: null`)
+- Inline rename (respects `allowRename` flag; linked user can always rename themselves)
+- Claim slot (links current user's Auth UID to a member entry, updates `memberUids`)
+- Unclaim slot (resets `userId: null`, removes from `memberUids` — correction mechanism)
+- allowRename toggle (shown to member or travel creator)
+- Visual: claimed = coloured avatar, unclaimed = grey avatar
+
+#### New service functions (`travelService.ts`)
+- `addUnclaimedMember()`
+- `renameTravelMember()`
+- `claimTravelMember()`
+- `unclaimTravelMember()`
+- `setMemberAllowRename()`
+
+#### Files modified
+
+| File | Key changes |
+|------|-------------|
+| `src/travels/types.ts` | `MemberRef` → `TravelMember`; add `normaliseMember()` |
+| `src/transactions/types.ts` | `Split.uid` → `Split.travelMemberId` |
+| `src/travels/services/travelService.ts` | `createTravel` generates `travelMemberId`; 5 new member functions |
+| `src/friends/services/friendService.ts` | Invite acceptance writes full `TravelMember` shape |
+| `src/travels/hooks/useTravels.ts` | Apply `normaliseMember()` on all member reads |
+| `src/travels/pages/TravelDetailPage.tsx` | Apply `normaliseMember()` on all member reads |
+| `src/transactions/components/SplitEditor.tsx` | All `uid` → `travelMemberId`; type `TravelMember` |
+| `src/transactions/components/SplitSummaryRow.tsx` | `currentUserUid` → `currentUserTravelMemberId`; type `TravelMember` |
+| `src/transactions/components/TransactionForm.tsx` | "Who am I?" lookup via `userId`; type `TravelMember` |
+| `src/travels/components/tabs/TransactionsTab.tsx` | Resolve `currentUserTravelMemberId` from members; split comparisons use `travelMemberId` |
+| `src/travels/components/tabs/ParametersTab.tsx` | Full `MembersSection` rewrite with claim/unclaim/rename/add UI |
+| `src/shared/utils/sheetExport.ts` | Member lookups use `travelMemberId` |
+| `src/shared/utils/sheetImport.ts` | `slotToUid` → `slotToMemberId`; splits use `travelMemberId` |
+| `src/shared/components/ImportXlsxDialog.tsx` | `slotToUid` → `slotToMemberId`; dropdown uses `travelMemberId` as option value |
+
+### Open / carry-forward
+
+- Balance tab: settlement computation (uses new `travelMemberId` model from the start)
+- Delete transaction feature
+- Race condition protection on simultaneous claims (v2 — Cloud Function)
+- Activity feed for claim events (v2)
+- PWA icons still scaffold placeholders

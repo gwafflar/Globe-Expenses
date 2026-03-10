@@ -15,7 +15,7 @@ import { getExchangeRate } from '@/shared/utils/exchangeRates'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import type { LabeledItem, MemberRef, TravelSettings } from '@/travels/types'
+import type { LabeledItem, TravelMember, TravelSettings } from '@/travels/types'
 import { updateTravelCurrencies, updateTravelList, syncTransactionLocation } from '@/travels/services/travelService'
 import { ALL_CURRENCIES, ALL_COUNTRIES } from '@/shared/data/pickerData'
 import type { Split } from '@/transactions/types'
@@ -522,15 +522,15 @@ function round(x: number, dp: number): number {
 }
 
 /**
- * Splits `total` equally among `uids`, rounded to 3dp internally.
+ * Splits `total` equally among `memberIds` (travelMemberId values), rounded to 3dp internally.
  * Validity is checked at 2dp — matches SplitEditor's rounding model.
  * Using the functional setState updater (prev =>) with this helper avoids
- * stale-closure issues when reading current UIDs inside a useEffect.
+ * stale-closure issues when reading current IDs inside a useEffect.
  */
-function distributeEqually(total: number, uids: string[]): Split[] {
-  if (uids.length === 0) return []
-  const amount = round(total / uids.length, 3)
-  return uids.map((uid) => ({ uid, amount }))
+function distributeEqually(total: number, memberIds: string[]): Split[] {
+  if (memberIds.length === 0) return []
+  const amount = round(total / memberIds.length, 3)
+  return memberIds.map((travelMemberId) => ({ travelMemberId, amount }))
 }
 
 
@@ -551,7 +551,7 @@ function detectSplitMode(splits: Split[]): 'equal' | 'custom' {
 // ---------------------------------------------------------------------------
 interface TransactionFormProps {
   travelId: string
-  members: MemberRef[]
+  members: TravelMember[]
   travelSettings?: TravelSettings
   travelCategories?: LabeledItem[]
   travelPaymentMethods?: LabeledItem[]
@@ -605,6 +605,11 @@ export function TransactionForm({
       </p>
     )
   }
+
+  // "Which member am I?" — find my TravelMember entry by matching Firebase Auth UID.
+  // This is the stable travelMemberId used in Split[] references.
+  const myMember = members.find((m) => m.userId === currentUser.uid)
+  const myTravelMemberId = myMember?.travelMemberId ?? ''
 
   // Effective category and payment method lists:
   // use per-travel lists if available, else fall back to userProfile global lists.
@@ -710,15 +715,17 @@ export function TransactionForm({
 
   // In edit mode, restore the saved splits and detect whether they were equal or custom.
   // In create mode, default to the current user paying/benefiting the full amount.
+  // Default splits: current user pays and benefits the full amount.
+  // Uses travelMemberId (not Firebase Auth UID) as the stable member reference.
   const [paidBy, setPaidBy] = useState<Split[]>(
-    isEdit ? initialValues!.paidBy : [{ uid: currentUser.uid, amount: totalAmount }]
+    isEdit ? initialValues!.paidBy : [{ travelMemberId: myTravelMemberId, amount: totalAmount }]
   )
   const [paidByMode, setPaidByMode] = useState<'equal' | 'custom'>(
     isEdit ? detectSplitMode(initialValues!.paidBy) : 'equal'
   )
 
   const [beneficiaries, setBeneficiaries] = useState<Split[]>(
-    isEdit ? initialValues!.beneficiaries : [{ uid: currentUser.uid, amount: totalAmount }]
+    isEdit ? initialValues!.beneficiaries : [{ travelMemberId: myTravelMemberId, amount: totalAmount }]
   )
   const [beneficiaryMode, setBeneficiaryMode] = useState<'equal' | 'custom'>(
     isEdit ? detectSplitMode(initialValues!.beneficiaries) : 'equal'
@@ -733,10 +740,11 @@ export function TransactionForm({
   // keep both splits up to date whenever totalAmount changes.
   useEffect(() => {
     if (!isSolo) return
-    const soloSplit: Split[] = [{ uid: currentUser.uid, amount: totalAmount }]
+    // Use travelMemberId (not Firebase Auth UID) for the split reference
+    const soloSplit: Split[] = [{ travelMemberId: myTravelMemberId, amount: totalAmount }]
     setPaidBy(soloSplit)
     setBeneficiaries(soloSplit)
-  }, [isSolo, currentUser.uid, totalAmount])
+  }, [isSolo, myTravelMemberId, totalAmount])
 
   // --- Multi-user equal mode: keep amounts in sync with totalAmount --------
   // The SplitEditor inside each Drawer has the same sync logic, but shadcn/vaul
@@ -748,8 +756,9 @@ export function TransactionForm({
   useEffect(() => {
     if (isSolo) return
     if (paidByMode === 'equal') {
+      // Recompute equal split when totalAmount changes — uses travelMemberId as the stable key
       setPaidBy((prev) =>
-        prev.length === 0 ? prev : distributeEqually(totalAmount, prev.map((s) => s.uid))
+        prev.length === 0 ? prev : distributeEqually(totalAmount, prev.map((s) => s.travelMemberId))
       )
     }
   }, [totalAmount, paidByMode, isSolo])
@@ -758,7 +767,7 @@ export function TransactionForm({
     if (isSolo) return
     if (beneficiaryMode === 'equal') {
       setBeneficiaries((prev) =>
-        prev.length === 0 ? prev : distributeEqually(totalAmount, prev.map((s) => s.uid))
+        prev.length === 0 ? prev : distributeEqually(totalAmount, prev.map((s) => s.travelMemberId))
       )
     }
   }, [totalAmount, beneficiaryMode, isSolo])
@@ -1006,7 +1015,7 @@ export function TransactionForm({
             members={members}
             mode={paidByMode}
             isValid={paidByValid}
-            currentUserUid={currentUser.uid}
+            currentUserTravelMemberId={myTravelMemberId}
             onClick={() => setPaidByDrawerOpen(true)}
           />
           {submitted && errors.paidBy && (
@@ -1019,7 +1028,7 @@ export function TransactionForm({
             members={members}
             mode={beneficiaryMode}
             isValid={beneficiaryValid}
-            currentUserUid={currentUser.uid}
+            currentUserTravelMemberId={myTravelMemberId}
             onClick={() => setBeneficiaryDrawerOpen(true)}
           />
           {submitted && errors.beneficiaries && (

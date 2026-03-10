@@ -12,6 +12,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore'
 import { db } from '@/services/firebase'
+import { nanoid } from 'nanoid'
 import type { UserProfile } from '@/auth/services/userService'
 import type { Invite, Friend, SearchUser } from '@/friends/types'
 
@@ -295,10 +296,13 @@ export async function acceptTravelInvite(
   //    so invite.status is still 'active' at rule evaluation time.
   const travelRef = doc(db, 'travels', invite.travelId)
   batch.update(travelRef, {
-    // MemberRef object added to the members array
+    // Write a full TravelMember shape (new model).
+    // normaliseMember() in useTravels/TravelDetailPage handles any legacy docs gracefully.
     members: arrayUnion({
-      uid: currentUser.uid,
+      travelMemberId: nanoid(),
       displayName: currentUser.displayName,
+      userId: currentUser.uid,
+      allowRename: true,
       joinedAt: now,
     }),
     memberUids: arrayUnion(currentUser.uid),

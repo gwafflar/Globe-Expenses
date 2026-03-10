@@ -41,7 +41,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import type { MemberRef } from '@/travels/types'
+import type { TravelMember } from '@/travels/types'
 import type { Split } from '@/transactions/types'
 
 // ---------------------------------------------------------------------------
@@ -56,11 +56,12 @@ function round(x: number, dp: number): number {
 /**
  * Equal split to 3dp — no remainder redistribution.
  * Validity check at 2dp absorbs the tiny drift.
+ * Uses travelMemberId as the stable key in each Split.
  */
-function splitEqually(total: number, uids: string[]): Split[] {
-  if (uids.length === 0) return []
-  const amount = round(total / uids.length, 3)
-  return uids.map((uid) => ({ uid, amount }))
+function splitEqually(total: number, memberIds: string[]): Split[] {
+  if (memberIds.length === 0) return []
+  const amount = round(total / memberIds.length, 3)
+  return memberIds.map((travelMemberId) => ({ travelMemberId, amount }))
 }
 
 // ---------------------------------------------------------------------------
@@ -68,7 +69,7 @@ function splitEqually(total: number, uids: string[]): Split[] {
 // ---------------------------------------------------------------------------
 
 interface SplitEditorProps {
-  members: MemberRef[]
+  members: TravelMember[]
   totalAmount: number
   value: Split[]
   onChange: (splits: Split[]) => void
@@ -94,20 +95,24 @@ export function SplitEditor({
   // mode is controlled by the parent — no local useState needed.
   // This means the selected tab (Equal/Custom) persists across drawer open/close.
 
-  const [selectedUids, setSelectedUids] = useState<string[]>(() =>
-    value.length > 0 ? value.map((s) => s.uid) : members.map((m) => m.uid),
+  // selectedIds holds the travelMemberId of currently selected members
+  const [selectedIds, setSelectedIds] = useState<string[]>(() =>
+    value.length > 0
+      ? value.map((s) => s.travelMemberId)
+      : members.map((m) => m.travelMemberId),
   )
 
+  // customInputs is keyed by travelMemberId
   const [customInputs, setCustomInputs] = useState<Record<string, string>>({})
   const [totalChangedWarning, setTotalChangedWarning] = useState(false)
   const prevTotalRef = useRef(totalAmount)
 
-  // Equal mode: recompute on totalAmount or selectedUids change
+  // Equal mode: recompute on totalAmount or selectedIds change
   useEffect(() => {
     if (mode !== 'equal') return
-    onChange(splitEqually(totalAmount, selectedUids))
+    onChange(splitEqually(totalAmount, selectedIds))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, totalAmount, selectedUids])
+  }, [mode, totalAmount, selectedIds])
 
   // Custom mode: detect external totalAmount change → freeze + warn
   useEffect(() => {
@@ -128,7 +133,7 @@ export function SplitEditor({
 
   function handleSwitchToCustom() {
     const inputs: Record<string, string> = {}
-    value.forEach((s) => { inputs[s.uid] = s.amount.toFixed(2) })
+    value.forEach((s) => { inputs[s.travelMemberId] = s.amount.toFixed(2) })
     setCustomInputs(inputs)
     prevTotalRef.current = totalAmount
     setTotalChangedWarning(false)
@@ -144,24 +149,24 @@ export function SplitEditor({
   // Member add / remove
   // -------------------------------------------------------------------------
 
-  function handleRemoveMember(uid: string) {
-    if (selectedUids.length <= 1) return
-    const next = selectedUids.filter((u) => u !== uid)
-    setSelectedUids(next)
+  function handleRemoveMember(memberId: string) {
+    if (selectedIds.length <= 1) return
+    const next = selectedIds.filter((id) => id !== memberId)
+    setSelectedIds(next)
     if (mode === 'custom') {
       const nextInputs = { ...customInputs }
-      delete nextInputs[uid]
+      delete nextInputs[memberId]
       setCustomInputs(nextInputs)
       emitCustom(nextInputs, next)
     }
   }
 
-  function handleAddMember(uid: string) {
-    if (selectedUids.includes(uid)) return
-    const next = [...selectedUids, uid]
-    setSelectedUids(next)
+  function handleAddMember(memberId: string) {
+    if (selectedIds.includes(memberId)) return
+    const next = [...selectedIds, memberId]
+    setSelectedIds(next)
     if (mode === 'custom') {
-      const nextInputs = { ...customInputs, [uid]: '0.00' }
+      const nextInputs = { ...customInputs, [memberId]: '0.00' }
       setCustomInputs(nextInputs)
       emitCustom(nextInputs, next)
     }
@@ -172,22 +177,22 @@ export function SplitEditor({
   // Custom amount editing
   // -------------------------------------------------------------------------
 
-  function handleCustomChange(uid: string, raw: string) {
+  function handleCustomChange(memberId: string, raw: string) {
     // Round to 2dp on every keystroke so stored amounts are always 2dp in custom mode.
     // We still store the raw string in customInputs so the input field stays responsive
     // while typing (e.g. "3." doesn't snap to "3.00" mid-entry). The rounding happens
     // in emitCustom when we convert to numbers for the Split[].
-    const nextInputs = { ...customInputs, [uid]: raw }
+    const nextInputs = { ...customInputs, [memberId]: raw }
     setCustomInputs(nextInputs)
-    emitCustom(nextInputs, selectedUids)
+    emitCustom(nextInputs, selectedIds)
     setTotalChangedWarning(false)
   }
 
-  function emitCustom(inputs: Record<string, string>, uids: string[]) {
+  function emitCustom(inputs: Record<string, string>, memberIds: string[]) {
     // Custom mode amounts are rounded to 2dp (user enters money amounts, not sub-cent)
-    onChange(uids.map((uid) => ({
-      uid,
-      amount: round(parseFloat(inputs[uid] ?? '0') || 0, 2),
+    onChange(memberIds.map((travelMemberId) => ({
+      travelMemberId,
+      amount: round(parseFloat(inputs[travelMemberId] ?? '0') || 0, 2),
     })))
   }
 
@@ -198,7 +203,7 @@ export function SplitEditor({
   const currentSum = value.reduce((acc, s) => acc + s.amount, 0)
   const remaining = round(totalAmount - currentSum, 3)
   const isValid = Math.abs(round(currentSum, 2) - round(totalAmount, 2)) < 0.01
-  const unselectedMembers = members.filter((m) => !selectedUids.includes(m.uid))
+  const unselectedMembers = members.filter((m) => !selectedIds.includes(m.travelMemberId))
 
   // -------------------------------------------------------------------------
   // Render
@@ -246,14 +251,14 @@ export function SplitEditor({
 
       {/* Member rows */}
       <div className="flex flex-col gap-2">
-        {selectedUids.map((uid) => {
-          const member = members.find((m) => m.uid === uid)
-          const displayName = member?.displayName ?? uid
-          const amount = value.find((s) => s.uid === uid)?.amount ?? 0
+        {selectedIds.map((memberId) => {
+          const member = members.find((m) => m.travelMemberId === memberId)
+          const displayName = member?.displayName ?? memberId
+          const amount = value.find((s) => s.travelMemberId === memberId)?.amount ?? 0
 
           return (
             <div
-              key={uid}
+              key={memberId}
               className="flex items-center justify-between gap-2 rounded-lg border bg-card px-3 py-2.5"
             >
               {/* Avatar + name */}
@@ -277,8 +282,8 @@ export function SplitEditor({
                       inputMode="decimal"
                       step="0.01"
                       min="0"
-                      value={customInputs[uid] ?? amount.toFixed(2)}
-                      onChange={(e) => handleCustomChange(uid, e.target.value)}
+                      value={customInputs[memberId] ?? amount.toFixed(2)}
+                      onChange={(e) => handleCustomChange(memberId, e.target.value)}
                       className="w-20 rounded-md border bg-background px-2 py-1 text-right tabular-nums text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-ring"
                     />
                     {/* Absorb chip: always visible, greyed when balanced */}
@@ -287,9 +292,9 @@ export function SplitEditor({
                       disabled={isValid}
                       onClick={() => {
                         const newAmount = round(amount + remaining, 2)
-                        const nextInputs = { ...customInputs, [uid]: newAmount.toFixed(2) }
+                        const nextInputs = { ...customInputs, [memberId]: newAmount.toFixed(2) }
                         setCustomInputs(nextInputs)
-                        emitCustom(nextInputs, selectedUids)
+                        emitCustom(nextInputs, selectedIds)
                         setTotalChangedWarning(false)
                       }}
                       aria-label={`Absorb ${round(remaining, 2).toFixed(2)} into ${displayName}`}
@@ -306,10 +311,10 @@ export function SplitEditor({
                   </>
                 )}
 
-                {selectedUids.length > 1 && (
+                {selectedIds.length > 1 && (
                   <button
                     type="button"
-                    onClick={() => handleRemoveMember(uid)}
+                    onClick={() => handleRemoveMember(memberId)}
                     aria-label={`Remove ${displayName}`}
                     className="flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"
                   >
@@ -328,9 +333,9 @@ export function SplitEditor({
           <p className="text-xs font-medium text-muted-foreground">Add member</p>
           {unselectedMembers.map((m) => (
             <button
-              key={m.uid}
+              key={m.travelMemberId}
               type="button"
-              onClick={() => handleAddMember(m.uid)}
+              onClick={() => handleAddMember(m.travelMemberId)}
               className="flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground transition-colors hover:border-primary hover:text-primary"
             >
               <span>+</span>
