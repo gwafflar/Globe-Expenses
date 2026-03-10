@@ -18,17 +18,16 @@
  * Shows a red dot when !isValid.
  */
 
-import type { TravelMember } from '@/travels/types'
+import type { MemberRef } from '@/travels/types'
 import type { Split } from '@/transactions/types'
 
 interface SplitSummaryRowProps {
   label: string
   splits: Split[]
-  members: TravelMember[]
+  members: MemberRef[]
   mode: 'equal' | 'custom'
   isValid: boolean
-  /** travelMemberId of the current user — used to render "You" in summary text */
-  currentUserTravelMemberId: string
+  currentUserUid: string
   onClick: () => void
 }
 
@@ -38,10 +37,10 @@ export function SplitSummaryRow({
   members,
   mode,
   isValid,
-  currentUserTravelMemberId,
+  currentUserUid,
   onClick,
 }: SplitSummaryRowProps) {
-  const summary = buildSummary(splits, members, mode, currentUserTravelMemberId, label)
+  const summary = buildSummary(splits, members, mode, currentUserUid, label)
 
   return (
     <button
@@ -87,15 +86,14 @@ export function SplitSummaryRow({
 
 function buildSummary(
   splits: Split[],
-  members: TravelMember[],
+  members: MemberRef[],
   mode: 'equal' | 'custom',
-  currentUserTravelMemberId: string,
+  currentUserUid: string,
   label: string,
 ): string {
   if (splits.length === 0) return 'Not set'
 
-  // Compare using travelMemberId (stable key in Split)
-  const includesMe = splits.some((s) => s.travelMemberId === currentUserTravelMemberId)
+  const includesMe = splits.some((s) => s.uid === currentUserUid)
   const othersCount = splits.length - (includesMe ? 1 : 0)
 
   // Name part
@@ -103,7 +101,7 @@ function buildSummary(
   if (splits.length === 1) {
     namePart = includesMe
       ? 'You'
-      : (members.find((m) => m.travelMemberId === splits[0].travelMemberId)?.displayName ?? splits[0].travelMemberId)
+      : (members.find((m) => m.uid === splits[0].uid)?.displayName ?? splits[0].uid)
   } else if (includesMe) {
     namePart = othersCount === 1 ? 'You + 1 other' : `You + ${othersCount} others`
   } else {

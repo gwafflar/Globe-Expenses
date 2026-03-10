@@ -134,26 +134,26 @@ function UploadStep({
 function MappingStep({
   parseResult,
   travel,
-  slotToMemberId,
+  slotToUid,
   onChange,
 }: {
   parseResult: ParseResult
   travel: Travel
-  slotToMemberId: Record<number, string | undefined>
+  slotToUid: Record<number, string | undefined>
   onChange: (updated: Record<number, string | undefined>) => void
 }) {
   const { slots, nMembersInSheet } = parseResult
   const members = travel.members
 
-  // Check for duplicate mappings (two slots → same non-undefined travelMemberId)
-  const assignedIds = Object.values(slotToMemberId).filter((id): id is string => id !== undefined)
-  const hasDuplicates = assignedIds.length !== new Set(assignedIds).size
+  // Check for duplicate mappings (two slots → same non-undefined UID)
+  const assignedUids = Object.values(slotToUid).filter((uid): uid is string => uid !== undefined)
+  const hasDuplicates = assignedUids.length !== new Set(assignedUids).size
 
   // Count how many slots are mapped to "skip"
-  const skippedCount = slots.filter((s) => slotToMemberId[s.slotIndex] === undefined).length
+  const skippedCount = slots.filter((s) => slotToUid[s.slotIndex] === undefined).length
 
-  function setMapping(slotIndex: number, memberId: string | undefined) {
-    onChange({ ...slotToMemberId, [slotIndex]: memberId })
+  function setMapping(slotIndex: number, uid: string | undefined) {
+    onChange({ ...slotToUid, [slotIndex]: uid })
   }
 
   return (
@@ -199,17 +199,17 @@ function MappingStep({
               </p>
             </div>
 
-            {/* Right: dropdown — value is travelMemberId */}
+            {/* Right: dropdown */}
             <select
               className="min-w-0 flex-1 max-w-[180px] rounded-md border border-input bg-background px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              value={slotToMemberId[slot.slotIndex] ?? '__skip__'}
+              value={slotToUid[slot.slotIndex] ?? '__skip__'}
               onChange={(e) =>
                 setMapping(slot.slotIndex, e.target.value === '__skip__' ? undefined : e.target.value)
               }
             >
               <option value="__skip__">— Skip this member's transactions —</option>
               {members.map((m) => (
-                <option key={m.travelMemberId} value={m.travelMemberId}>
+                <option key={m.uid} value={m.uid}>
                   {m.displayName}
                 </option>
               ))}
@@ -302,19 +302,18 @@ function buildInitialMapping(
   members: Travel['members'],
 ): Record<number, string | undefined> {
   const mapping: Record<number, string | undefined> = {}
-  // Track which travelMemberIds have already been auto-matched (prevent duplicates)
+  // Track which travel member UIDs have already been auto-matched
   const claimed = new Set<string>()
 
   slots.forEach((slot) => {
     const match = members.find(
       (m) =>
         m.displayName.toLowerCase() === slot.nameInSheet.toLowerCase() &&
-        !claimed.has(m.travelMemberId),
+        !claimed.has(m.uid),
     )
     if (match) {
-      // Store travelMemberId — not uid — since Split now uses travelMemberId
-      mapping[slot.slotIndex] = match.travelMemberId
-      claimed.add(match.travelMemberId)
+      mapping[slot.slotIndex] = match.uid
+      claimed.add(match.uid)
     } else {
       mapping[slot.slotIndex] = undefined
     }
@@ -333,19 +332,18 @@ export function ImportXlsxDialog({
   travel,
   currentUserUid,
 }: ImportXlsxDialogProps) {
-  const [step, setStep]                       = useState<1 | 2 | 3>(1)
-  const [parseResult, setParseResult]         = useState<ParseResult | null>(null)
-  // slotToMemberId: maps sheet slot index → travelMemberId (or undefined = skip)
-  const [slotToMemberId, setSlotToMemberId]   = useState<Record<number, string | undefined>>({})
-  const [importResult, setImportResult]       = useState<ImportResult | null>(null)
-  const [isImporting, setIsImporting]         = useState(false)
+  const [step, setStep]                 = useState<1 | 2 | 3>(1)
+  const [parseResult, setParseResult]   = useState<ParseResult | null>(null)
+  const [slotToUid, setSlotToUid]       = useState<Record<number, string | undefined>>({})
+  const [importResult, setImportResult] = useState<ImportResult | null>(null)
+  const [isImporting, setIsImporting]   = useState(false)
 
   // Reset all state when the dialog closes
   function handleOpenChange(nextOpen: boolean) {
     if (!nextOpen) {
       setStep(1)
       setParseResult(null)
-      setSlotToMemberId({})
+      setSlotToUid({})
       setImportResult(null)
       setIsImporting(false)
     }
@@ -356,9 +354,9 @@ export function ImportXlsxDialog({
   const handleParsed = useCallback(
     (result: ParseResult) => {
       setParseResult(result)
-      // Auto-match slot names to travel member display names → store travelMemberId
+      // Auto-match slot names to travel member display names
       const autoMapping = buildInitialMapping(result.slots, travel.members)
-      setSlotToMemberId(autoMapping)
+      setSlotToUid(autoMapping)
       setStep(2)
     },
     [travel.members],
@@ -375,7 +373,7 @@ export function ImportXlsxDialog({
     const result = await importParsedRows(
       travel.travelId,
       parseResult.rows,
-      slotToMemberId,
+      slotToUid,
       currentUserUid,
       mainCurrency,
     )
@@ -385,8 +383,8 @@ export function ImportXlsxDialog({
   }
 
   // Derive duplicate-mapping status for the import button
-  const assignedIds = Object.values(slotToMemberId).filter((id): id is string => id !== undefined)
-  const hasDuplicates = assignedIds.length !== new Set(assignedIds).size
+  const assignedUids = Object.values(slotToUid).filter((uid): uid is string => uid !== undefined)
+  const hasDuplicates = assignedUids.length !== new Set(assignedUids).size
 
   const stepLabel = { 1: 'Step 1 of 3 — Upload', 2: 'Step 2 of 3 — Member mapping', 3: 'Step 3 of 3 — Done' }
 
@@ -405,8 +403,8 @@ export function ImportXlsxDialog({
           <MappingStep
             parseResult={parseResult}
             travel={travel}
-            slotToMemberId={slotToMemberId}
-            onChange={setSlotToMemberId}
+            slotToUid={slotToUid}
+            onChange={setSlotToUid}
           />
         )}
 

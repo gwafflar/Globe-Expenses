@@ -82,14 +82,13 @@ function PendingBadge({ isPending }: { isPending: boolean }) {
 function buildPayerLabel(
   paidBy: TransactionWithStatus['paidBy'],
   members: Travel['members'],
-  currentUserTravelMemberId: string,  // travelMemberId of the viewing user
+  currentUserUid: string,
 ): string {
   if (paidBy.length === 0) return '?'
-  // Compare against travelMemberId (Split now uses travelMemberId, not uid)
-  const includesMe = paidBy.some((s) => s.travelMemberId === currentUserTravelMemberId)
+  const includesMe = paidBy.some((s) => s.uid === currentUserUid)
   if (paidBy.length === 1) {
     if (includesMe) return 'You'
-    return members.find((m) => m.travelMemberId === paidBy[0].travelMemberId)?.displayName ?? 'Someone'
+    return members.find((m) => m.uid === paidBy[0].uid)?.displayName ?? 'Someone'
   }
   const othersCount = paidBy.length - (includesMe ? 1 : 0)
   if (includesMe) return othersCount === 1 ? 'You + 1 other' : `You + ${othersCount} others`
@@ -103,15 +102,15 @@ function buildPayerLabel(
 function getSplitIcon(
   tx: TransactionWithStatus,
   members: Travel['members'],
-  currentUserTravelMemberId: string,  // travelMemberId of the viewing user
+  currentUserUid: string,
 ): string {
-  const myBeneficiary = tx.beneficiaries.find((s) => s.travelMemberId === currentUserTravelMemberId)
+  const myBeneficiary = tx.beneficiaries.find((s) => s.uid === currentUserUid)
   if (!myBeneficiary) return '🙅'
-  const allMemberIds = members.map((m) => m.travelMemberId).sort()
-  const beneficiaryIds = tx.beneficiaries.map((s) => s.travelMemberId).sort()
+  const allMemberUids = members.map((m) => m.uid).sort()
+  const beneficiaryUids = tx.beneficiaries.map((s) => s.uid).sort()
   const allIncluded =
-    allMemberIds.length === beneficiaryIds.length &&
-    allMemberIds.every((id, i) => id === beneficiaryIds[i])
+    allMemberUids.length === beneficiaryUids.length &&
+    allMemberUids.every((uid, i) => uid === beneficiaryUids[i])
   if (allIncluded) {
     const expected = tx.totalAmountMain / members.length
     const allEqual = tx.beneficiaries.every(
@@ -129,24 +128,24 @@ function getSplitIcon(
 function TransactionRow({
   transaction,
   members,
-  currentUserTravelMemberId,
+  currentUserUid,
   isSolo,
   onEdit,
 }: {
   transaction: TransactionWithStatus
   members: Travel['members']
-  currentUserTravelMemberId: string  // travelMemberId of the viewing user
+  currentUserUid: string
   isSolo: boolean
   onEdit: (tx: TransactionWithStatus) => void
 }) {
   const dateLabel = formatDateLabel(transaction.date)
   const categoryEmoji = getCategoryEmoji(transaction.category)
-  const payerLabel = buildPayerLabel(transaction.paidBy, members, currentUserTravelMemberId)
-  const myBeneficiary = transaction.beneficiaries.find((s) => s.travelMemberId === currentUserTravelMemberId)
+  const payerLabel = buildPayerLabel(transaction.paidBy, members, currentUserUid)
+  const myBeneficiary = transaction.beneficiaries.find((s) => s.uid === currentUserUid)
   const myCostMain = myBeneficiary
     ? Math.round(myBeneficiary.amount * transaction.exchangeRate * 100) / 100
     : null
-  const splitIcon = getSplitIcon(transaction, members, currentUserTravelMemberId)
+  const splitIcon = getSplitIcon(transaction, members, currentUserUid)
   const splitTitle =
     splitIcon === '🙅' ? 'Not your expense'
     : splitIcon === '➗' ? 'Split equally among all'
@@ -250,10 +249,6 @@ export function TransactionsTab({
   onAddExpense,
   onEditTransaction,
 }: TransactionsTabProps) {
-  // Resolve "which TravelMember am I?" from the Firebase Auth UID.
-  // All split comparisons use travelMemberId — not the raw Auth UID.
-  const currentUserTravelMemberId =
-    travel.members.find((m) => m.userId === currentUserUid)?.travelMemberId ?? ''
   // Export state — brief spinner while generating the xlsx
   const [isExporting, setIsExporting] = useState(false)
   // Import dialog visibility
@@ -332,7 +327,7 @@ export function TransactionsTab({
               key={tx.txId}
               transaction={tx}
               members={travel.members}
-              currentUserTravelMemberId={currentUserTravelMemberId}
+              currentUserUid={currentUserUid}
               isSolo={isSolo}
               onEdit={onEditTransaction}
             />

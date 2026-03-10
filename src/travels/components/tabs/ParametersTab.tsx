@@ -2,17 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { nanoid } from 'nanoid'
-import type { LabeledItem, Travel, TravelMember } from '@/travels/types'
-import {
-  updateTravelCurrencies,
-  updateTravelList,
-  updateTravelMeta,
-  addUnclaimedMember,
-  renameTravelMember,
-  claimTravelMember,
-  unclaimTravelMember,
-  setMemberAllowRename,
-} from '@/travels/services/travelService'
+import type { LabeledItem, Travel } from '@/travels/types'
+import { updateTravelCurrencies, updateTravelList, updateTravelMeta } from '@/travels/services/travelService'
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
 import { useAuthStore } from '@/auth/store/useAuthStore'
 import {
@@ -345,67 +336,39 @@ function EditableLabeledList({ items, travelId, field, placeholder, onItemsChang
 }
 
 // ---------------------------------------------------------------------------
-// MiniAvatar — color circle with initial.
-// For claimed members uses userId as the hash seed (stable across renames).
-// For unclaimed members uses travelMemberId as the hash seed.
+// MiniAvatar — color circle with initial, same hash as ProfilePage
 // ---------------------------------------------------------------------------
 
-function avatarHue(seed: string): number {
+function avatarHue(uid: string): number {
   let hash = 0
-  for (const ch of seed) hash = (hash * 31 + ch.charCodeAt(0)) & 0xffffffff
+  for (const ch of uid) hash = (hash * 31 + ch.charCodeAt(0)) & 0xffffffff
   return Math.abs(hash) % 360
 }
 
-function MiniAvatar({ member }: { member: TravelMember }) {
-  // Claimed members get a saturated colour; unclaimed get a muted grey-ish one
-  const seed = member.userId ?? member.travelMemberId
-  const hue = avatarHue(seed)
-  const saturation = member.userId !== null ? '55%' : '15%'
+function MiniAvatar({ uid, name }: { uid: string; name: string }) {
+  const hue = avatarHue(uid)
   return (
     <div
       className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
-      style={{ backgroundColor: `hsl(${hue}, ${saturation}, 50%)` }}
-      title={member.userId !== null ? 'Claimed account' : 'Unclaimed — no account linked'}
+      style={{ backgroundColor: `hsl(${hue}, 55%, 50%)` }}
     >
-      {(member.displayName || '?').charAt(0).toUpperCase()}
+      {(name || '?').charAt(0).toUpperCase()}
     </div>
   )
 }
 
 // ---------------------------------------------------------------------------
-// MembersSection — current members + management + invite friends + share link
-//
-// New in this refactor:
-//  - Inline rename (respecting allowRename / ownership)
-//  - Add unclaimed member (name-only, no Firebase Auth account)
-//  - Claim a slot (links your Firebase Auth UID to an unclaimed or any slot)
-//  - Unclaim a slot (sets userId back to null — correction mechanism)
-//  - allowRename toggle for claimed members
-//  - Visual distinction: claimed (coloured avatar) vs unclaimed (grey avatar)
+// MembersSection — current members + invite friends + share link
 // ---------------------------------------------------------------------------
 
-interface MembersSectionProps {
-  travel: Travel
-  onMembersChange: (members: TravelMember[], memberUids: string[]) => void
-}
-
-function MembersSection({ travel, onMembersChange }: MembersSectionProps) {
-  const { currentUser, userProfile } = useAuthStore()
-
-  // Per-member rename state: travelMemberId → draft name string
-  const [renamingId, setRenamingId] = useState<string | null>(null)
-  const [renameValue, setRenameValue] = useState('')
-  const renameInputRef = useRef<HTMLInputElement>(null)
-
-  // Add unclaimed member form
-  const [addingUnclaimed, setAddingUnclaimed] = useState(false)
-  const [newMemberName, setNewMemberName] = useState('')
-  const [addingLoading, setAddingLoading] = useState(false)
+function MembersSection({ travel }: { travel: Travel }) {
+  const { userProfile } = useAuthStore()
 
   // Friend picker: lazy-loaded when "Invite a friend" is expanded
   const [pickerOpen, setPickerOpen] = useState(false)
   const [friends, setFriends] = useState<Friend[]>([])
   const [friendsLoading, setFriendsLoading] = useState(false)
+  // Track which UIDs we just sent a travel invite to (for immediate button feedback)
   const [invitedUids, setInvitedUids] = useState<Set<string>>(new Set())
 
   // Share invite link state
@@ -413,18 +376,10 @@ function MembersSection({ travel, onMembersChange }: MembersSectionProps) {
   const [generatedInviteUrl, setGeneratedInviteUrl] = useState<string | null>(null)
   const [copyFeedback, setCopyFeedback] = useState(false)
 
-  // Focus rename input when it opens
-  useEffect(() => {
-    if (renamingId && renameInputRef.current) {
-      renameInputRef.current.focus()
-      renameInputRef.current.select()
-    }
-  }, [renamingId])
-
-  // Load friends lazily when picker opens
+  // Load friends when the picker opens (lazy — not on mount)
   useEffect(() => {
     if (!pickerOpen || !userProfile) return
-    if (friends.length > 0) return
+    if (friends.length > 0) return  // already loaded
     setFriendsLoading(true)
     fetchFriends(userProfile.uid).then(list => {
       setFriends(list)
@@ -432,72 +387,7 @@ function MembersSection({ travel, onMembersChange }: MembersSectionProps) {
     })
   }, [pickerOpen, userProfile]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Helpers to check rename permissions for a given member
-  function canRename(member: TravelMember): boolean {
-    if (!currentUser) return false
-    // Claimed member's linked user can always rename themselves
-    if (member.userId === currentUser.uid) return true
-    // Unclaimed members can always be renamed by anyone
-    if (member.userId === null) return true
-    // Claimed by someone else: allowed only if allowRename is true
-    return member.allowRename
-  }
-
-  async function handleRenameCommit(member: TravelMember) {
-    const trimmed = renameValue.trim()
-    setRenamingId(null)
-    if (!trimmed || trimmed === member.displayName) return
-    await renameTravelMember(travel.travelId, member.travelMemberId, trimmed, travel.members)
-    const updated = travel.members.map((m) =>
-      m.travelMemberId === member.travelMemberId ? { ...m, displayName: trimmed } : m,
-    )
-    const memberUids = updated.filter((m) => m.userId !== null).map((m) => m.userId!)
-    onMembersChange(updated, memberUids)
-  }
-
-  async function handleAddUnclaimed() {
-    const trimmed = newMemberName.trim()
-    if (!trimmed) return
-    setAddingLoading(true)
-    const newMember = await addUnclaimedMember(travel.travelId, trimmed, travel.members)
-    const updated = [...travel.members, newMember]
-    // memberUids unchanged — unclaimed members have no Auth UID
-    const memberUids = updated.filter((m) => m.userId !== null).map((m) => m.userId!)
-    onMembersChange(updated, memberUids)
-    setNewMemberName('')
-    setAddingUnclaimed(false)
-    setAddingLoading(false)
-  }
-
-  async function handleClaim(member: TravelMember) {
-    if (!currentUser) return
-    await claimTravelMember(travel.travelId, member.travelMemberId, currentUser.uid, travel.members)
-    const updated = travel.members.map((m) =>
-      m.travelMemberId === member.travelMemberId ? { ...m, userId: currentUser.uid } : m,
-    )
-    const memberUids = updated.filter((m) => m.userId !== null).map((m) => m.userId!)
-    onMembersChange(updated, memberUids)
-  }
-
-  async function handleUnclaim(member: TravelMember) {
-    await unclaimTravelMember(travel.travelId, member.travelMemberId, travel.members)
-    const updated = travel.members.map((m) =>
-      m.travelMemberId === member.travelMemberId ? { ...m, userId: null } : m,
-    )
-    const memberUids = updated.filter((m) => m.userId !== null).map((m) => m.userId!)
-    onMembersChange(updated, memberUids)
-  }
-
-  async function handleToggleAllowRename(member: TravelMember) {
-    const next = !member.allowRename
-    await setMemberAllowRename(travel.travelId, member.travelMemberId, next, travel.members)
-    const updated = travel.members.map((m) =>
-      m.travelMemberId === member.travelMemberId ? { ...m, allowRename: next } : m,
-    )
-    const memberUids = updated.filter((m) => m.userId !== null).map((m) => m.userId!)
-    onMembersChange(updated, memberUids)
-  }
-
+  // Friends already in this travel (filter them out of the picker)
   const existingMemberUids = new Set(travel.memberUids)
   const invitableFriends = friends.filter(f => !existingMemberUids.has(f.uid))
 
@@ -516,12 +406,18 @@ function MembersSection({ travel, onMembersChange }: MembersSectionProps) {
       )
       const url = `${window.location.origin}/invite/${inviteId}`
       setGeneratedInviteUrl(url)
+
+      // Copy to clipboard automatically
       try {
         await navigator.clipboard.writeText(url)
         setCopyFeedback(true)
         setTimeout(() => setCopyFeedback(false), 2500)
-      } catch { /* clipboard may be unavailable */ }
-    } catch { /* invite creation failed */ } finally {
+      } catch {
+        // clipboard may be unavailable; user can copy manually from the displayed URL
+      }
+    } catch {
+      // invite creation failed — ignore silently
+    } finally {
       setShareLoading(false)
     }
   }
@@ -537,141 +433,20 @@ function MembersSection({ travel, onMembersChange }: MembersSectionProps) {
     <div className="flex flex-col gap-3">
       {/* Current members list */}
       <ul className="flex flex-col gap-1.5">
-        {travel.members.map(member => {
-          const isRenaming = renamingId === member.travelMemberId
-          const isMine = member.userId === currentUser?.uid
-          const isUnclaimed = member.userId === null
-          // Can this viewer claim this slot? Yes if the slot is unclaimed OR if no current user has claimed it
-          const canClaimThis = !isMine && currentUser !== null
-          return (
-            <li key={member.travelMemberId} className="flex flex-col gap-1 rounded-lg border bg-card px-3 py-2">
-              <div className="flex items-center gap-2">
-                <MiniAvatar member={member} />
-                <div className="flex-1 min-w-0">
-                  {isRenaming ? (
-                    // Inline rename input
-                    <input
-                      ref={renameInputRef}
-                      type="text"
-                      value={renameValue}
-                      onChange={(e) => setRenameValue(e.target.value)}
-                      onBlur={() => handleRenameCommit(member)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleRenameCommit(member)
-                        if (e.key === 'Escape') setRenamingId(null)
-                      }}
-                      className="w-full rounded border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                    />
-                  ) : (
-                    <p className="text-sm font-medium truncate">{member.displayName}</p>
-                  )}
-                  {/* Sub-line: claimed status */}
-                  <p className="text-[10px] text-muted-foreground">
-                    {isUnclaimed ? 'Unclaimed' : isMine ? 'You' : 'Linked account'}
-                    {member.userId !== null && !member.allowRename && (
-                      <span className="ml-1">· rename locked</span>
-                    )}
-                  </p>
-                </div>
-
-                {/* Action buttons */}
-                <div className="flex shrink-0 items-center gap-1">
-                  {/* Rename — shown when allowed and not already renaming */}
-                  {!isRenaming && canRename(member) && (
-                    <button
-                      type="button"
-                      onClick={() => { setRenamingId(member.travelMemberId); setRenameValue(member.displayName) }}
-                      className="rounded p-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-                      aria-label={`Rename ${member.displayName}`}
-                      title="Rename"
-                    >
-                      ✏️
-                    </button>
-                  )}
-
-                  {/* Claim — shown when this slot is not already claimed by me */}
-                  {canClaimThis && (
-                    <button
-                      type="button"
-                      onClick={() => handleClaim(member)}
-                      className="rounded px-1.5 py-0.5 text-[10px] text-primary hover:underline"
-                      title={isUnclaimed ? 'Claim this slot as yourself' : 'Override claim to yourself'}
-                    >
-                      {isUnclaimed ? 'Claim' : 'Re-claim'}
-                    </button>
-                  )}
-
-                  {/* Unclaim — shown when this slot is claimed (by anyone) */}
-                  {member.userId !== null && (
-                    <button
-                      type="button"
-                      onClick={() => handleUnclaim(member)}
-                      className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-destructive"
-                      title="Unclaim — removes account link from this slot"
-                    >
-                      Unclaim
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* allowRename toggle — only shown for claimed members by that member or by travel creator */}
-              {member.userId !== null && (isMine || currentUser?.uid === travel.createdBy) && (
-                <button
-                  type="button"
-                  onClick={() => handleToggleAllowRename(member)}
-                  className="self-start text-[10px] text-muted-foreground hover:text-foreground"
-                  title="Toggle whether other members can rename this person"
-                >
-                  {member.allowRename ? '🔓 Others can rename' : '🔒 Rename locked'}
-                </button>
-              )}
-            </li>
-          )
-        })}
+        {travel.members.map(member => (
+          <li key={member.uid} className="flex items-center gap-2 rounded-lg border bg-card px-3 py-2">
+            <MiniAvatar uid={member.uid} name={member.displayName} />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium truncate">{member.displayName}</p>
+            </div>
+            {member.uid === travel.createdBy && (
+              <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+                creator
+              </span>
+            )}
+          </li>
+        ))}
       </ul>
-
-      {/* Add unclaimed member */}
-      {addingUnclaimed ? (
-        <div className="flex items-center gap-2 rounded-lg border border-dashed px-3 py-2">
-          <input
-            autoFocus
-            type="text"
-            value={newMemberName}
-            onChange={(e) => setNewMemberName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleAddUnclaimed()
-              if (e.key === 'Escape') { setAddingUnclaimed(false); setNewMemberName('') }
-            }}
-            placeholder="Person's name…"
-            className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-          />
-          <button
-            type="button"
-            onClick={handleAddUnclaimed}
-            disabled={!newMemberName.trim() || addingLoading}
-            className="shrink-0 rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground disabled:opacity-50"
-          >
-            {addingLoading ? '…' : 'Add'}
-          </button>
-          <button
-            type="button"
-            onClick={() => { setAddingUnclaimed(false); setNewMemberName('') }}
-            className="shrink-0 text-xs text-muted-foreground hover:text-foreground"
-          >
-            ✕
-          </button>
-        </div>
-      ) : (
-        <button
-          type="button"
-          onClick={() => setAddingUnclaimed(true)}
-          className="flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent/20"
-        >
-          <UserPlus className="h-4 w-4" />
-          Add person without account
-        </button>
-      )}
 
       {/* Invite a friend (collapsible friend picker) */}
       <div className="flex flex-col gap-2">
@@ -701,12 +476,7 @@ function MembersSection({ travel, onMembersChange }: MembersSectionProps) {
               const alreadyInvited = invitedUids.has(friend.uid)
               return (
                 <div key={friend.uid} className="flex items-center gap-2 rounded px-2 py-1.5">
-                  <div
-                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
-                    style={{ backgroundColor: `hsl(${avatarHue(friend.uid)}, 55%, 50%)` }}
-                  >
-                    {(friend.displayName || '?').charAt(0).toUpperCase()}
-                  </div>
+                  <MiniAvatar uid={friend.uid} name={friend.displayName} />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{friend.displayName}</p>
                     {friend.nametag && (
@@ -746,6 +516,7 @@ function MembersSection({ travel, onMembersChange }: MembersSectionProps) {
           {shareLoading ? 'Creating link…' : 'Generate invite link'}
         </button>
 
+        {/* Show the generated URL with a copy button — only visible after link is created */}
         {generatedInviteUrl && (
           <div className="flex flex-col gap-1">
             <div className="flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2">
@@ -852,10 +623,7 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
 
       {/* Members */}
       <Section title="Members">
-        <MembersSection
-          travel={travel}
-          onMembersChange={(members, memberUids) => onTravelChange({ members, memberUids })}
-        />
+        <MembersSection travel={travel} />
       </Section>
 
       {/* Currencies */}

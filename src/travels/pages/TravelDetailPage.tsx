@@ -10,7 +10,6 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { doc, getDoc, Timestamp } from 'firebase/firestore'
 import { db } from '@/services/firebase'
 import type { LabeledItem, Travel } from '@/travels/types'
-import { normaliseMember } from '@/travels/types'
 import { useAuthStore } from '@/auth/store/useAuthStore'
 import { usePendingInvites } from '@/friends/hooks/usePendingInvites'
 import { ChevronLeft } from 'lucide-react'
@@ -120,8 +119,7 @@ export function TravelDetailPage() {
             description: d.description as string | undefined,
             startDate: d.startDate as Timestamp | undefined,
             endDate: d.endDate as Timestamp | undefined,
-            // normaliseMember converts legacy MemberRef shape to TravelMember on read
-            members: (d.members ?? []).map(normaliseMember),
+            members: d.members ?? [],
             memberUids: d.memberUids ?? [],
             createdBy: d.createdBy as string,
             createdAt: d.createdAt as Timestamp,

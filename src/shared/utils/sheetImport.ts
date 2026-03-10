@@ -233,13 +233,13 @@ export interface ImportResult {
 /**
  * Writes parsed rows to Firestore as new Transaction documents.
  *
- * @param slotToMemberId  Maps slotIndex → travelMemberId.
- *                        undefined value = skip that slot's transactions.
+ * @param slotToUid  Maps slotIndex → travel member UID.
+ *                   undefined value = skip that slot's transactions.
  */
 export async function importParsedRows(
   travelId: string,
   rows: ParsedSheetRow[],
-  slotToMemberId: Record<number, string | undefined>,
+  slotToUid: Record<number, string | undefined>,
   currentUserUid: string,
   mainCurrency: string,
 ): Promise<ImportResult> {
@@ -258,33 +258,33 @@ export async function importParsedRows(
       }
     }
 
-    // Build beneficiaries from costPerSlot — Split now uses travelMemberId
-    const beneficiaries: { travelMemberId: string; amount: number }[] = []
+    // Build beneficiaries from costPerSlot
+    const beneficiaries: { uid: string; amount: number }[] = []
     let hasUnmappedCost = false
 
     row.costPerSlot.forEach((amount, slotIdx) => {
       if (!amount || amount <= 0) return
-      const travelMemberId = slotToMemberId[slotIdx]
-      if (travelMemberId === undefined) {
+      const uid = slotToUid[slotIdx]
+      if (uid === undefined) {
         errors.push(`${rowLabel} (${row.name}): slot ${slotIdx + 1} not mapped — cost skipped`)
         hasUnmappedCost = true
       } else {
-        beneficiaries.push({ travelMemberId, amount })
+        beneficiaries.push({ uid, amount })
       }
     })
 
-    // Build paidBy from paidPerSlot — Split now uses travelMemberId
-    const paidBy: { travelMemberId: string; amount: number }[] = []
+    // Build paidBy from paidPerSlot
+    const paidBy: { uid: string; amount: number }[] = []
     let hasUnmappedPaid = false
 
     row.paidPerSlot.forEach((amount, slotIdx) => {
       if (!amount || amount === 0) return
-      const travelMemberId = slotToMemberId[slotIdx]
-      if (travelMemberId === undefined) {
+      const uid = slotToUid[slotIdx]
+      if (uid === undefined) {
         errors.push(`${rowLabel} (${row.name}): slot ${slotIdx + 1} not mapped — paid skipped`)
         hasUnmappedPaid = true
       } else {
-        paidBy.push({ travelMemberId, amount })
+        paidBy.push({ uid, amount })
       }
     })
 
