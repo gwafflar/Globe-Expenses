@@ -6,31 +6,25 @@
 // Export / Import xlsx buttons.
 
 import { useRef, useState, useEffect, useMemo } from 'react'
-import type { Travel } from '@/travels/types'
+import type { Travel, LabeledItem } from '@/travels/types'
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
 import { Button } from '@/components/ui/button'
 import { Card, CardTitle, CardDescription } from '@/components/ui/card'
 import { exportTravelToXlsx } from '@/shared/utils/sheetExport'
 import { ImportXlsxDialog } from '@/shared/components/ImportXlsxDialog'
+import { FormulaBadge } from '@/transactions/components/FormulaBadge'
 
 // ---------------------------------------------------------------------------
-// Category emoji map
+// Category emoji — resolved from the travel's per-travel category list
 // ---------------------------------------------------------------------------
 
-const CATEGORY_EMOJIS: Record<string, string> = {
-  Transport: '🚗',
-  Accommodation: '🏨',
-  Food: '🍽️',
-  Activities: '🎭',
-  Shopping: '🛍️',
-  Health: '💊',
-  Communication: '📱',
-  Other: '💸',
-}
-
-function getCategoryEmoji(category?: string): string {
+function getCategoryEmoji(category: string | undefined, categories: LabeledItem[]): string {
   if (!category) return '💸'
-  return CATEGORY_EMOJIS[category] ?? '💸'
+  // Category may be stored as "🍽️ Food" (emoji + label) when the LabeledItem had an emoji at save time
+  const byFull = categories.find((c) => c.emoji && category === `${c.emoji} ${c.label}`)
+  if (byFull?.emoji) return byFull.emoji
+  // Or stored as plain label "Food" — look up the emoji from the list
+  return categories.find((c) => c.label === category)?.emoji ?? '💸'
 }
 
 function formatDateLabel(dateString: string): string {
@@ -129,18 +123,20 @@ function getSplitIcon(
 function TransactionRow({
   transaction,
   members,
+  categories,
   currentUserTravelMemberId,
   isSolo,
   onEdit,
 }: {
   transaction: TransactionWithStatus
   members: Travel['members']
+  categories: LabeledItem[]
   currentUserTravelMemberId: string
   isSolo: boolean
   onEdit: (tx: TransactionWithStatus) => void
 }) {
   const dateLabel = formatDateLabel(transaction.date)
-  const categoryEmoji = getCategoryEmoji(transaction.category)
+  const categoryEmoji = getCategoryEmoji(transaction.category, categories)
   const payerLabel = buildPayerLabel(transaction.paidBy, members, currentUserTravelMemberId)
   const myBeneficiary = transaction.beneficiaries.find((s) => s.travelMemberId === currentUserTravelMemberId)
   const myCostMain = myBeneficiary
@@ -340,6 +336,7 @@ export function TransactionsTab({
               key={tx.txId}
               transaction={tx}
               members={travel.members}
+              categories={travel.categories ?? []}
               currentUserTravelMemberId={currentUserTravelMemberId}
               isSolo={isSolo}
               onEdit={onEditTransaction}

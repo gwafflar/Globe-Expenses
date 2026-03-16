@@ -67,7 +67,7 @@ type PageState =
   | { status: 'ready'; invite: Invite }
   | { status: 'accepting'; invite: Invite }
   // After joining: show identity pick when there are unclaimed slots
-  | { status: 'identityPick'; invite: Invite; travelId: string; unclaimedSlots: TravelMember[] }
+  | { status: 'identityPick'; invite: Invite; travelId: string; unclaimedSlots: TravelMember[]; allMembers: TravelMember[] }
   // While claiming a slot (brief loading state before redirect)
   | { status: 'claiming'; invite: Invite; travelId: string }
   | { status: 'accepted'; invite: Invite; travelId?: string }
@@ -157,6 +157,7 @@ export function InvitePage() {
             invite,
             travelId: result.travelId,
             unclaimedSlots,
+            allMembers: members,
           })
         } else {
           setPageState({ status: 'accepted', invite, travelId: result.travelId })
@@ -176,12 +177,12 @@ export function InvitePage() {
   // Identity pick: claim an existing unclaimed slot
   // ---------------------------------------------------------------------------
 
-  async function handleClaimSlot(travelId: string, travelMemberId: string, invite: Invite) {
+  async function handleClaimSlot(travelId: string, travelMemberId: string, invite: Invite, allMembers: TravelMember[]) {
     if (!currentUser) return
     setPageState({ status: 'claiming', invite, travelId })
     try {
       // claimTravelMember handles transfer semantics (nulls any previously claimed slot)
-      await claimTravelMember(travelId, travelMemberId, currentUser.uid)
+      await claimTravelMember(travelId, travelMemberId, currentUser.uid, allMembers)
     } catch (err) {
       console.error('[InvitePage] claimTravelMember failed:', err)
       // Non-fatal: user still joined the travel, just proceed
@@ -291,7 +292,7 @@ export function InvitePage() {
 
       case 'identityPick': {
         // Show after joining the travel: allow the user to claim an existing unclaimed slot
-        const { invite, travelId, unclaimedSlots } = pageState
+        const { invite, travelId, unclaimedSlots, allMembers } = pageState
         return (
           <div className="flex flex-col gap-4">
             <div className="text-center">
@@ -308,7 +309,7 @@ export function InvitePage() {
                   key={member.travelMemberId}
                   type="button"
                   className="flex w-full items-center justify-between rounded-lg border border-input bg-background px-4 py-3 text-left transition-colors hover:bg-accent active:bg-accent/70"
-                  onClick={() => handleClaimSlot(travelId, member.travelMemberId, invite)}
+                  onClick={() => handleClaimSlot(travelId, member.travelMemberId, invite, allMembers)}
                 >
                   <div className="flex items-center gap-3">
                     {/* Grey avatar for unclaimed member */}

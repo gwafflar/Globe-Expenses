@@ -16,7 +16,6 @@ import { db } from '@/services/firebase'
 import type { UserProfile } from '@/auth/services/userService'
 import type { Invite, Friend, SearchUser } from '@/friends/types'
 import type { TravelMember } from '@/travels/types'
-import { normaliseMember } from '@/travels/types'
 
 // How long an invite stays active before it expires.
 const INVITE_EXPIRY_DAYS = 30

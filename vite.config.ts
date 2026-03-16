@@ -1,9 +1,7 @@
-/// <reference types="vitest" />
-
 import path from 'path'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
@@ -44,6 +42,8 @@ export default defineConfig({
       workbox: {
         // Cache all JS, CSS, HTML, and image files (the app shell)
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+        // The main bundle exceeds Workbox's default 2 MiB limit; raise it to 3 MiB
+        maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
       },
     }),
   ],

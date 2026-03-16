@@ -758,9 +758,9 @@ On export, tx.txId is written into col A of the Expenses sheet instead of a sequ
 
 ---
 
-## ✨ Working Session 009 — March 11th 2026
+## ✨ Working Session 009 — March 10th 2026
 
-**Type**: Feature implementation + bug fix
+**Type**: Refactoring + Feature implementation
 **Tools used**: Claude Code (claude-sonnet-4-6)
 
 ### What was built
@@ -837,3 +837,37 @@ The original implementation did a `getDoc(travelRef)` *before* the batch write t
 - [ ] PWA icons: `public/icon-192.png`, `public/icon-512.png`, `public/apple-touch-icon.png`
 - [ ] Filter and Display Mode in Transactions tab
 - [ ] Move composite indexes to `firestore.indexes.json`
+
+
+## ✨ Working Session 009.2 — March 10th 2026
+### What was built
+
+**Formula mode for amount encoding in `TransactionForm`:**
+
+- **`src/shared/utils/formulaUtils.ts`**: safe arithmetic formula evaluator — no `eval()`. Implements a recursive-descent parser supporting `+`, `-`, `*`, `/`, parentheses, decimal numbers (dot and comma). Returns `null` on invalid input or division by zero. Exports `evaluateFormula(raw: string): number | null` and `isValidFormula(raw: string): boolean`.
+
+- **`src/shared/utils/formulaUtils.test.ts`**: 16 unit tests covering basic arithmetic, operator precedence (`*` before `+`), parentheses, the real-world roti chanai example (`2*2.5 + 1.5 = 6.5`), comma as decimal separator, and all invalid input edge cases.
+
+- **`src/transactions/components/FormulaBar.tsx`**: self-contained inline formula editor. Expands **above** the amount row when formula mode is active. Layout: operator chip row (`( ) * / + -`) → `= [text input]` → live evaluated preview. Chips insert at cursor position (not just end of string). Input auto-focuses on open. Red border + error message on invalid formula. Accepts `value`/`onChange`/`onEvaluated` props — parent receives computed number, not raw string.
+
+- **`src/shared/components/FormulaBadge.tsx`**: small `fx` pill badge shown on transaction list items when `amountFormula` is set. Shows the raw formula in a hover tooltip (`= 2*2.5 + 1.5`).
+
+**Changes to existing files:**
+
+- **`src/transactions/types.ts`**: added `amountFormula?: string` to the `Transaction` interface. Optional field — display-only, never used in any computation. Non-breaking (old transactions simply lack the field).
+
+- **`src/transactions/components/TransactionForm.tsx`**:
+  - Added `formulaMode: boolean` and `formulaStr: string` state variables.
+  - 🧮 toggle button inserted between amount input and currency selector. Highlighted (primary tint) when active, muted when inactive.
+  - When formula mode is ON: `FormulaBar` renders above the amount row; amount input replaced by a read-only display of the evaluated result.
+  - When formula mode toggled OFF: `amountStr` is pre-filled with the last evaluated result; formula bar closes.
+  - `amountFormula` conditionally spread into the Firestore payload on save (omitted if empty).
+  - "📷 Encode a transaction from a ticket" greyed-out placeholder button added below the amount row, with a hover tooltip: *"Coming in v2 — snap a photo of your receipt and let the AI fill in the transaction for you."*
+
+- **`src/travels/components/tabs/TransactionsTab.tsx`**: `FormulaBadge` rendered inline next to the amount when `transaction.amountFormula` is set.
+
+**Testing infrastructure restored:**
+- Vitest was missing from the project. Installed: `vitest`, `@vitest/ui`, `jsdom`, `@testing-library/react`, `@testing-library/jest-dom`.
+- Added `test` block to `vite.config.ts` (`environment: 'jsdom'`, `globals: true`).
+- Added `/// <reference types="vitest" />` to top of `vite.config.ts`.
+- Added `test`, `test:watch`, `test:ui` scripts to `package.json`.
