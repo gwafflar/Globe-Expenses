@@ -14,6 +14,7 @@ import type { Travel } from '@/travels/types'
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
 import { TransactionsTab } from '@/travels/components/tabs/TransactionsTab'
 import { BalanceTab } from '@/travels/components/tabs/BalanceTab'
+import { DashboardTab } from '@/travels/components/tabs/DashboardTab'
 import { ParametersTab } from '@/travels/components/tabs/ParametersTab'
 
 // ---------------------------------------------------------------------------
@@ -23,6 +24,7 @@ import { ParametersTab } from '@/travels/components/tabs/ParametersTab'
 const TABS = [
   { id: 'transactions', label: 'Transactions' },
   { id: 'balance',      label: 'Balance' },
+  { id: 'dashboard',    label: 'Dashboard' },
   { id: 'parameters',   label: 'Parameters' },
 ] as const
 
@@ -146,6 +148,14 @@ export function TravelTabs({
                 />
               )}
               {tab.id === 'balance' && <BalanceTab />}
+              {tab.id === 'dashboard' && (
+                <DashboardTab
+                  travel={travel}
+                  transactions={transactions}
+                  currentUserUid={currentUserUid}
+                  isSolo={isSolo}
+                />
+              )}
               {tab.id === 'parameters' && (
                 <ParametersTab
                   travel={travel}

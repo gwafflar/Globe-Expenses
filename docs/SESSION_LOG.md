@@ -871,3 +871,103 @@ The original implementation did a `getDoc(travelRef)` *before* the batch write t
 - Added `test` block to `vite.config.ts` (`environment: 'jsdom'`, `globals: true`).
 - Added `/// <reference types="vitest" />` to top of `vite.config.ts`.
 - Added `test`, `test:watch`, `test:ui` scripts to `package.json`.
+
+
+---
+
+## ✨ Working Session 010 — March 17th 2026
+
+### What was built
+
+**Dashboard tab — read-only analytics view inside TravelDetailPage.**
+
+A new fourth tab "Dashboard" was added between Balance and Parameters in `TravelTabs`. All statistics are computed client-side from the `transactions` array already in memory — no new Firestore queries.
+
+---
+
+#### New files
+
+**`src/travels/components/tabs/dashboardHelpers.ts`** — pure TypeScript, no React. All helper functions for the Dashboard. Pure functions only, enabling easy unit testing without a DOM environment.
+
+Key exports:
+- `PeriodFilter` discriminated union: `all | today | days:n | custom(from, to)`
+- `filterTransactions(txs, period)` — returns only transactions in the active window
+- `getTripDurationDays(travel, txs)` — trip length from travel dates → tx span → 30-day fallback
+- `computeMemberStats(txs, travelMemberId)` — sums consumed (beneficiaries) and paid (paidBy) for a member, in main currency via `* exchangeRate`
+- `normalizeTransactionSplits(txs, members)` — backward-compat: remaps pre-refactor `split.uid` → `split.travelMemberId` using the members list as lookup (see bug fix section below)
+- `categoryColor(name)` / `CATEGORY_PALETTE` — deterministic 6-colour palette from a simple hash
+- `formatAmount(amount, currency)` — `€ 42.50` style with symbol map
+- `formatDayLabel(dateStr)` — Today / Yest. / Mar 12 (input is DD-MM-YYYY)
+- `dateRangeLabel`, `numberOfDaysInRange` — hero card subtitle helpers
+
+**`src/travels/components/CollapsibleCard.tsx`** — reusable collapsible card component with title, summary line, and chevron toggle. Used by Dashboard; designed to be reused by the Balance tab later.
+
+**`src/travels/components/tabs/DashboardTab.tsx`** — main Dashboard component.
+
+Props: `travel`, `transactions`, `currentUserUid`, `isSolo`.
+
+Six cards:
+1. **Hero** (always visible) — total spent (large), avg/day, focus-member stat (consumed bold + paid muted), transaction count
+2. **Spending over time** (CollapsibleCard) — day-by-day bar chart using plain `div`s; always shows group totals regardless of member filter; "not enough data" fallback
+3. **Recent days by category** (CollapsibleCard) — configurable look-back (1/3/7/15d presets + custom range slider capped at trip duration); per-day horizontal category bars (width ∝ amount, 160px max, colour from `categoryColor`)
+4. **By category** (CollapsibleCard) — sorted category list with coloured dot, amount, and percentage; Uncategorized row always last
+5. **Per person** (CollapsibleCard, hidden when `isSolo`) — member rows with avatar circle, progress bar, consumed (bold) + paid (muted); current user floats to top; highlighted amber left-border for selected member
+6. **Currencies** (CollapsibleCard) — grouped by `tx.currency`, pill per currency with converted total; "≈" suffix for non-main currencies
+
+**Controls bar** (above all cards):
+- Period filter pills: All · Today · 7d · 30d · Custom. Custom opens an inline date-range panel with two `input[type="date"]` fields and an Apply button.
+- Member picker button (hidden when `isSolo`): shows "👤 All" or selected member's avatar + name. Opens a vaul `Drawer` (bottom sheet) — `Sheet` component is not installed. Sheet rows: "All members" + one row per `travel.members` entry with checkmark on active selection. Selecting a row sets `selectedTravelMemberId` and closes the sheet.
+
+Member selection (`selectedTravelMemberId: string | null`) affects: hero focus stat, category chart, recent days bars, currencies card, and the accent row in per-person card. Does **not** affect spending-over-time (always group totals).
+
+`MemberAvatar` — small inline component (local to DashboardTab): initials circle coloured by member index via `CATEGORY_PALETTE`. Used in member picker button, sheet rows, and per-person card.
+
+**`src/travels/components/tabs/__tests__/dashboardHelpers.test.ts`** — 19 unit tests (40 total in suite including formula tests).
+
+Describe blocks:
+- `filterTransactions` — all / today / days:7 / custom inclusive
+- `getTripDurationDays` — travel dates / tx span / no data fallback
+- `computeMemberStats` — consumed+paid / member not present / multi-beneficiary / exchangeRate applied
+- `normalizeTransactionSplits` — same-reference when no change needed / remaps legacy uid / computeMemberStats finds paid after normalization / fallback to raw uid
+- `categoryColor` — deterministic / palette variety / never out-of-palette
+- `parseTxDate` — DD-MM-YYYY parsing
+
+---
+
+#### Modified files
+
+| File | Changes |
+|------|---------|
+| `src/travels/components/TravelTabs.tsx` | Added `{ id: 'dashboard', label: 'Dashboard' }` to `TABS` (between balance and parameters); render branch for `DashboardTab` |
+
+---
+
+#### Bug fixed — pre-refactor split IDs producing paid=0
+
+**Root cause:** Transactions created before the Session 009 TravelMember refactor stored splits as `{ uid: 'firebase-auth-uid', amount: X }`. `useTransactions` casts Firestore data as `Split[]` (TypeScript cast, no field transformation), so `split.travelMemberId` is `undefined` at runtime for old documents. `normaliseMember` correctly maps `uid → travelMemberId` for the member list, but splits inside transactions were never normalized. `computeMemberStats` checked `split.travelMemberId === member.travelMemberId` → `undefined === 'uid-string'` → false → `paid = 0` for all pre-refactor paidBy splits.
+
+**Why consumed could still be non-zero:** a user whose paying transactions pre-date the refactor but whose consuming (beneficiary) splits come from newer transactions would see consumed > 0 but paid = 0.
+
+**Fix:** `normalizeTransactionSplits(txs, members)` remaps any split where `travelMemberId` is absent but `uid` is present, using `member.userId === split.uid` as the lookup key. Applied as the first `useMemo` in `DashboardTab` before all downstream computations. Returns the same array reference when no remapping is needed (avoids unnecessary `useMemo` invalidations).
+
+---
+
+#### Decisions made (binding)
+
+| # | Decision | Notes |
+|---|----------|-------|
+| 52 | Dashboard is client-side only | All stats computed from the in-memory `transactions` array. No new Firestore queries. |
+| 53 | `travelMemberId` is the member selector key | `selectedTravelMemberId: string \| null` (not Firebase Auth UID) — matches `Split.travelMemberId` directly. |
+| 54 | Spending-over-time always shows group totals | Member filter does not affect the time chart — keeps time context intact. |
+| 55 | Split normalization at read time (dashboard layer) | `normalizeTransactionSplits` in DashboardTab. Not in `useTransactions` (which has no members access). Handles pre-refactor `{ uid }` splits transparently. |
+| 56 | Member picker uses vaul Drawer, not Sheet | `Sheet` component not installed. Vaul `Drawer` (direction=bottom) provides equivalent bottom-sheet UX. |
+
+---
+
+### Carry-forward items (open)
+
+- [ ] Balance tab: settlement computation (greedy debt simplification) — `CollapsibleCard` is ready to reuse
+- [ ] Delete transaction
+- [ ] PWA icons: `public/icon-192.png`, `public/icon-512.png`, `public/apple-touch-icon.png`
+- [ ] Filter and Display Mode in Transactions tab
+- [ ] Move composite indexes to `firestore.indexes.json`

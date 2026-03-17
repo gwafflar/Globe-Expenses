@@ -123,7 +123,7 @@ When a transaction is saved with a country or city not yet in the travel's lists
 
 ## 3.4 Travel Detail View — Tabs
 
-The travel detail view is organised into three tabs accessible by tapping the tab bar or by horizontal swipe gesture (50px threshold).
+The travel detail view is organised into four tabs accessible by tapping the tab bar or by horizontal swipe gesture (50px threshold).
 
 ### Transactions tab
 
@@ -137,6 +137,10 @@ The travel detail view is organised into three tabs accessible by tapping the ta
 ### Balance tab
 
 Placeholder. Will display net balance per member and optimal settlement suggestions (greedy debt-simplification algorithm).
+
+### Dashboard tab
+
+Read-only analytics tab. All computations are client-side (no additional Firestore queries — reuses the transaction snapshot already loaded). See section 3.8 for full spec.
 
 ### Parameters tab
 

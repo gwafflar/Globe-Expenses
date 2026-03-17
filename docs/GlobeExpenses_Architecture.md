@@ -44,9 +44,12 @@ The frontend is organized into the following top-level modules:
 
 - **auth/** — Login, registration, profile page, session management
 - **travels/** — Travel list, travel creation, travel detail view
-  - `travels/components/TravelTabs.tsx` — three-tab container with swipe gesture
+  - `travels/components/TravelTabs.tsx` — four-tab container with swipe gesture (Transactions / Balance / Dashboard / Parameters)
   - `travels/components/tabs/TransactionsTab.tsx` — transaction list with pending badges, tap-to-edit
   - `travels/components/tabs/BalanceTab.tsx` — balance/settlement (placeholder)
+  - `travels/components/tabs/DashboardTab.tsx` — read-only analytics: hero totals, spending-over-time, recent days by category, by-category breakdown, per-person stats, currencies summary
+  - `travels/components/tabs/dashboardHelpers.ts` — pure TypeScript helpers (no React): period filtering, member stats, colour palette, formatting, split normalization
+  - `travels/components/CollapsibleCard.tsx` — reusable collapsible card (used by Dashboard; planned for Balance tab)
   - `travels/components/tabs/ParametersTab.tsx` — all per-travel editable lists and settings, members section with invite
 - **transactions/** — Transaction form (create + edit), transaction service
 - **friends/** — Friend search, invite flows, invite acceptance page
@@ -75,6 +78,8 @@ Conflict policy for v1: last-write-wins (Firestore default). Concurrent edit det
 **`hasPendingWrites` metadata**: the `onSnapshot` listener in `useTransactions` is configured with `{ includeMetadataChanges: true }`. This causes the callback to fire when `snapshot.metadata.hasPendingWrites` flips from `true` (locally cached) to `false` (server confirmed). The UI uses this to show and dismiss sync status indicators without polling.
 
 **`TransactionWithStatus`** is a UI-layer TypeScript type (not stored in Firestore) that extends `Transaction` with `isPending: boolean`, derived from `hasPendingWrites`. It is the type returned by the `useTransactions` hook.
+
+**Split normalization at read time**: pre-Session-009 transactions stored splits as `{ uid: string, amount: number }`. Post-refactor splits use `{ travelMemberId: string, amount: number }`. `useTransactions` casts Firestore data as `Split[]` without field transformation, so old splits arrive with `split.travelMemberId === undefined`. `normalizeTransactionSplits()` in `dashboardHelpers.ts` remaps `split.uid` → `split.travelMemberId` using the already-normalised `TravelMember` list as a lookup table. It returns the same array reference when no normalization is needed (avoiding unnecessary `useMemo` invalidation). This normalization is applied once at the top of `DashboardTab` before any downstream computation.
 
 # 4. Data Architecture
 
@@ -351,7 +356,7 @@ All operations require authentication. Rules are deployed via `firestore.rules` 
 
 | **Phase** | **Name** | **Scope** |
 | --- | --- | --- |
-| v1 | Core (current) | PWA, offline sync, single/multi-member travel, transactions with multi-payer splits, transaction editing, travel emoji, per-travel categories/paymentMethods/countries/cities (LabeledItem[] with smart dropdowns), friends system (nametag search, friend requests, shareable invite links), travel member invitations (join via invite link), profile page with nametag claim, three-tab travel detail (Transactions / Balance / Parameters), CSV export/import, hardcoded currency rates |
+| v1 | Core (current) | PWA, offline sync, single/multi-member travel, transactions with multi-payer splits, transaction editing, travel emoji, per-travel categories/paymentMethods/countries/cities (LabeledItem[] with smart dropdowns), friends system (nametag search, friend requests, shareable invite links), travel member invitations (join via invite link), profile page with nametag claim, four-tab travel detail (Transactions / Balance / Dashboard / Parameters), read-only analytics dashboard (period filter, per-member stats, category breakdown, spending-over-time), CSV export/import, hardcoded currency rates |
 | v2 | Collaborative+ | Bank import agent (Revolut webhook, Nordigen aggregator, on-chain via Alchemy/Moralis), draft transaction inbox with soft-delete and raw data audit trail, carousel travel selector, AI-assisted categorization, activity feed (pull model), dynamic membership with join-date visibility cutoff, conflict detection UI, live currency rates, settlement suggestions |
 | v3 | Notifications | Push notifications (FCM) for new/edited transactions involving the user; activity feed upgraded to push model |
 | v4 | Advanced | Bank-rate currency input, cash withdrawal tracking, full conflict resolution UI, recurring/template transactions, manual fetch-new-transactions trigger, potential native app wrappers |
