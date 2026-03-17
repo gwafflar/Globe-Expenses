@@ -1,30 +1,78 @@
 // src/travels/components/tabs/TransactionsTab.tsx
 //
 // Transactions tab for TravelDetailPage.
-// Displays the transaction list extracted from TravelDetailPage,
-// plus placeholder Filter and Display Mode controls, and
-// Export / Import xlsx buttons.
+// Day-grouped accordion list: each row expands in-place to show full detail.
+// Edit opens the existing TransactionForm drawer via onEditTransaction(txId).
 
 import { useRef, useState, useEffect, useMemo } from 'react'
 import type { Travel, LabeledItem } from '@/travels/types'
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
 import { Button } from '@/components/ui/button'
-import { Card, CardTitle, CardDescription } from '@/components/ui/card'
+import { Card } from '@/components/ui/card'
 import { exportTravelToXlsx } from '@/shared/utils/sheetExport'
 import { ImportXlsxDialog } from '@/shared/components/ImportXlsxDialog'
-import { FormulaBadge } from '@/transactions/components/FormulaBadge'
+import { normalizeTransactionSplits } from '@/travels/components/tabs/dashboardHelpers'
 
 // ---------------------------------------------------------------------------
-// Category emoji — resolved from the travel's per-travel category list
+// Currency symbol helpers
 // ---------------------------------------------------------------------------
 
-function getCategoryEmoji(category: string | undefined, categories: LabeledItem[]): string {
-  if (!category) return '💸'
-  // Category may be stored as "🍽️ Food" (emoji + label) when the LabeledItem had an emoji at save time
-  const byFull = categories.find((c) => c.emoji && category === `${c.emoji} ${c.label}`)
-  if (byFull?.emoji) return byFull.emoji
-  // Or stored as plain label "Food" — look up the emoji from the list
-  return categories.find((c) => c.label === category)?.emoji ?? '💸'
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  EUR: '€',
+  USD: '$',
+  GBP: '£',
+  THB: '฿',
+  JPY: '¥',
+  CHF: 'Fr',
+  AUD: 'A$',
+  CAD: 'C$',
+  SGD: 'S$',
+  HKD: 'HK$',
+}
+
+export function currencySymbol(code: string): string {
+  return CURRENCY_SYMBOLS[code] ?? code
+}
+
+/**
+ * Format a number with space as thousands separator and the currency symbol appended.
+ * Integer values show no decimals; fractional values show 2 decimal places.
+ * Example: formatAmount(8900, 'THB') → "8 900 ฿"
+ */
+export function formatAmount(amount: number, currencyCode: string): string {
+  const sym = currencySymbol(currencyCode)
+  const isInteger = amount === Math.floor(amount)
+  const numStr = isInteger
+    ? Math.floor(amount).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ')
+    : amount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ' ')
+  return `${numStr} ${sym}`
+}
+
+// ---------------------------------------------------------------------------
+// Day-grouping logic
+// ---------------------------------------------------------------------------
+
+export interface DayGroup {
+  date: string // DD-MM-YYYY
+  transactions: TransactionWithStatus[]
+}
+
+/**
+ * Group a date-desc sorted transaction list into day buckets.
+ * Preserves the existing sort order within each group.
+ */
+export function groupByDay(transactions: TransactionWithStatus[]): DayGroup[] {
+  const groups: DayGroup[] = []
+  const map = new Map<string, TransactionWithStatus[]>()
+  for (const tx of transactions) {
+    if (!map.has(tx.date)) {
+      const bucket: TransactionWithStatus[] = []
+      map.set(tx.date, bucket)
+      groups.push({ date: tx.date, transactions: bucket })
+    }
+    map.get(tx.date)!.push(tx)
+  }
+  return groups
 }
 
 function formatDateLabel(dateString: string): string {
@@ -36,8 +84,76 @@ function formatDateLabel(dateString: string): string {
   })
 }
 
+/**
+ * Extract the leading flag emoji from a country string like "🇹🇭 Thailand".
+ * Returns '' if the string doesn't start with an emoji (e.g. legacy entries stored as plain "Thailand").
+ */
+function extractCountryEmoji(country: string): string {
+  const cp = country.codePointAt(0) ?? 0
+  // Code points above U+00FF are emoji / non-Latin — safe to treat as emoji prefix
+  if (cp <= 0x00ff) return ''
+  return country.split(' ')[0] ?? ''
+}
+
 // ---------------------------------------------------------------------------
-// Pending badge
+// Category emoji — resolved from the travel's per-travel category list
+// ---------------------------------------------------------------------------
+
+function getCategoryEmoji(category: string | undefined, categories: LabeledItem[]): string {
+  if (!category) return '💸'
+  // Category may be stored as "🍽️ Food" (emoji + label) when the LabeledItem had an emoji
+  const byFull = categories.find((c) => c.emoji && category === `${c.emoji} ${c.label}`)
+  if (byFull?.emoji) return byFull.emoji
+  // Or stored as plain label "Food" — look up the emoji from the list
+  return categories.find((c) => c.label === category)?.emoji ?? '💸'
+}
+
+// ---------------------------------------------------------------------------
+// Member avatar color scheme (deterministic by position in travel.members)
+// ---------------------------------------------------------------------------
+
+const AVATAR_BG_COLORS = ['#CECBF6', '#9FE1CB', '#F5C4B3', '#FAC775', '#B5D4F4', '#F4C0D1']
+const AVATAR_TEXT_COLORS = ['#3C3489', '#085041', '#711713', '#633806', '#0C447C', '#72243E']
+
+function memberColors(memberIndex: number): { bg: string; text: string } {
+  // Cycle through the palette if there are more than 6 members
+  const idx = memberIndex % AVATAR_BG_COLORS.length
+  return { bg: AVATAR_BG_COLORS[idx], text: AVATAR_TEXT_COLORS[idx] }
+}
+
+// ---------------------------------------------------------------------------
+// MemberAvatar — small circle with member initials
+// ---------------------------------------------------------------------------
+
+function MemberAvatar({
+  displayName,
+  memberIndex,
+  size = 18,
+}: {
+  displayName: string
+  memberIndex: number
+  size?: number
+}) {
+  const { bg, text } = memberColors(memberIndex)
+  return (
+    <span
+      className="inline-flex shrink-0 items-center justify-center rounded-full font-medium"
+      style={{
+        width: size,
+        height: size,
+        backgroundColor: bg,
+        color: text,
+        fontSize: Math.floor(size * 0.55),
+        lineHeight: 1,
+      }}
+    >
+      {displayName.charAt(0).toUpperCase()}
+    </span>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// PendingBadge — amber flash while hasPendingWrites is true, green on sync
 // ---------------------------------------------------------------------------
 
 function PendingBadge({ isPending }: { isPending: boolean }) {
@@ -55,8 +171,10 @@ function PendingBadge({ isPending }: { isPending: boolean }) {
 
   if (isPending)
     return (
-      <span className="ml-1 cursor-help rounded-full bg-orange-100 px-1.5 py-0.5 text-[10px] font-medium text-orange-600"
-        title="Saved locally — will sync when back online.">
+      <span
+        className="ml-1 cursor-help rounded-full bg-orange-100 px-1.5 py-0.5 text-[10px] font-medium text-orange-600"
+        title="Saved locally — will sync when back online."
+      >
         ⏳ not synced
       </span>
     )
@@ -70,54 +188,53 @@ function PendingBadge({ isPending }: { isPending: boolean }) {
 }
 
 // ---------------------------------------------------------------------------
-// Payer label — uses travelMemberId for "You" detection
+// DayGroupHeader — thin separator row above each day bucket
 // ---------------------------------------------------------------------------
 
-function buildPayerLabel(
-  paidBy: TransactionWithStatus['paidBy'],
-  members: Travel['members'],
-  currentUserTravelMemberId: string,
-): string {
-  if (paidBy.length === 0) return '?'
-  const includesMe = paidBy.some((s) => s.travelMemberId === currentUserTravelMemberId)
-  if (paidBy.length === 1) {
-    if (includesMe) return 'You'
-    return members.find((m) => m.travelMemberId === paidBy[0].travelMemberId)?.displayName ?? 'Someone'
-  }
-  const othersCount = paidBy.length - (includesMe ? 1 : 0)
-  if (includesMe) return othersCount === 1 ? 'You + 1 other' : `You + ${othersCount} others`
-  return `${paidBy.length} people`
+function DayGroupHeader({
+  date,
+  transactions,
+}: {
+  date: string
+  transactions: TransactionWithStatus[]
+}) {
+  const dateLabel = formatDateLabel(date)
+
+  // Collect up to 3 unique country emojis from this day's transactions
+  const countryEmojis = useMemo(() => {
+    const seen = new Set<string>()
+    for (const tx of transactions) {
+      if (tx.country) seen.add(extractCountryEmoji(tx.country))
+      if (seen.size >= 3) break
+    }
+    return Array.from(seen)
+  }, [transactions])
+
+  // Collect up to 3 unique city names from this day's transactions
+  const cities = useMemo(() => {
+    const seen = new Set<string>()
+    for (const tx of transactions) {
+      if (tx.city) seen.add(tx.city)
+      if (seen.size >= 3) break
+    }
+    return Array.from(seen)
+  }, [transactions])
+
+  return (
+    <div className="flex items-center gap-2 border-b pb-1 pt-3">
+      <span className="text-xs font-semibold text-muted-foreground">{dateLabel}</span>
+      {countryEmojis.length > 0 && (
+        <span className="text-xs text-muted-foreground">{countryEmojis.join('')}</span>
+      )}
+      {cities.length > 0 && (
+        <span className="text-xs text-muted-foreground">{cities.join(' · ')}</span>
+      )}
+    </div>
+  )
 }
 
 // ---------------------------------------------------------------------------
-// Split icon — uses travelMemberId for beneficiary detection
-// ---------------------------------------------------------------------------
-
-function getSplitIcon(
-  tx: TransactionWithStatus,
-  members: Travel['members'],
-  currentUserTravelMemberId: string,
-): string {
-  const myBeneficiary = tx.beneficiaries.find((s) => s.travelMemberId === currentUserTravelMemberId)
-  if (!myBeneficiary) return '🙅'
-  // Check if all members are beneficiaries with equal shares
-  const allMemberIds = members.map((m) => m.travelMemberId).sort()
-  const beneficiaryIds = tx.beneficiaries.map((s) => s.travelMemberId).sort()
-  const allIncluded =
-    allMemberIds.length === beneficiaryIds.length &&
-    allMemberIds.every((id, i) => id === beneficiaryIds[i])
-  if (allIncluded) {
-    const expected = tx.totalAmountMain / members.length
-    const allEqual = tx.beneficiaries.every(
-      (s) => Math.abs(s.amount * tx.exchangeRate - expected) < 0.01,
-    )
-    if (allEqual) return '➗'
-  }
-  return '👥'
-}
-
-// ---------------------------------------------------------------------------
-// Transaction row
+// TransactionRow — collapsed accordion row
 // ---------------------------------------------------------------------------
 
 function TransactionRow({
@@ -126,86 +243,337 @@ function TransactionRow({
   categories,
   currentUserTravelMemberId,
   isSolo,
-  onEdit,
+  mainCurrency,
+  onToggle,
 }: {
   transaction: TransactionWithStatus
   members: Travel['members']
   categories: LabeledItem[]
   currentUserTravelMemberId: string
   isSolo: boolean
-  onEdit: (tx: TransactionWithStatus) => void
+  mainCurrency: string
+  onToggle: () => void
 }) {
-  const dateLabel = formatDateLabel(transaction.date)
   const categoryEmoji = getCategoryEmoji(transaction.category, categories)
-  const payerLabel = buildPayerLabel(transaction.paidBy, members, currentUserTravelMemberId)
-  const myBeneficiary = transaction.beneficiaries.find((s) => s.travelMemberId === currentUserTravelMemberId)
-  const myCostMain = myBeneficiary
-    ? Math.round(myBeneficiary.amount * transaction.exchangeRate * 100) / 100
-    : null
-  const splitIcon = getSplitIcon(transaction, members, currentUserTravelMemberId)
-  const splitTitle =
-    splitIcon === '🙅' ? 'Not your expense'
-    : splitIcon === '➗' ? 'Split equally among all'
-    : 'Custom split'
+
+  // Beneficiary avatars — show up to 3, overlapping
+  const beneficiaryAvatars = useMemo(() => {
+    if (isSolo) return []
+    return transaction.beneficiaries.slice(0, 3).map((b) => ({
+      displayName: members.find((m) => m.travelMemberId === b.travelMemberId)?.displayName ?? '?',
+      memberIndex: members.findIndex((m) => m.travelMemberId === b.travelMemberId),
+    }))
+  }, [transaction.beneficiaries, members, isSolo])
+
+  // Current user's beneficiary share for "your share" line
+  const myBeneficiary = transaction.beneficiaries.find(
+    (b) => b.travelMemberId === currentUserTravelMemberId,
+  )
+  // Only show "your share" when the cost is actually split (share ≠ full amount)
+  const showYourShare =
+    !isSolo && myBeneficiary !== undefined && myBeneficiary.amount !== transaction.totalAmount
 
   return (
-    <Card
-      className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-accent/30 active:bg-accent/50 transition-colors"
-      onClick={() => onEdit(transaction)}
+    <div
+      className="flex cursor-pointer items-center justify-between px-3 py-2.5 transition-colors hover:bg-accent/30 active:bg-accent/50"
+      onClick={onToggle}
     >
-      <div className="flex min-w-0 items-center gap-3">
-        <div className="w-12 shrink-0 text-center">
-          <span className="text-xs font-medium text-muted-foreground">{dateLabel}</span>
-        </div>
-        <div className="min-w-0 space-y-0.5">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-sm">{categoryEmoji}</span>
-            <CardTitle className="text-sm font-medium leading-tight">{transaction.name}</CardTitle>
+      {/* Left: emoji + name + category pill + avatars */}
+      <div className="flex min-w-0 items-start gap-2">
+        <span className="mt-0.5 shrink-0 text-base leading-none">{categoryEmoji}</span>
+        <div className="min-w-0">
+          {/* Transaction name + pending badge */}
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="text-[13px] font-semibold leading-tight">{transaction.name}</span>
             <PendingBadge isPending={transaction.isPending} />
           </div>
-          <CardDescription className="text-xs">
-            Paid by <span className="font-medium text-foreground">{payerLabel}</span>
-            {(transaction.city || transaction.country) && (
-              <span className="ml-1 text-muted-foreground">
-                · {[transaction.city, transaction.country].filter(Boolean).join(', ')}
+          {/* Category pill + beneficiary avatars */}
+          <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+            {transaction.category && (
+              <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                {transaction.category}
               </span>
             )}
-          </CardDescription>
+            {beneficiaryAvatars.length > 0 && (
+              <div className="flex items-center">
+                {beneficiaryAvatars.map((av, i) => (
+                  <span key={i} style={{ marginLeft: i === 0 ? 0 : -4 }}>
+                    <MemberAvatar
+                      displayName={av.displayName}
+                      memberIndex={av.memberIndex >= 0 ? av.memberIndex : 0}
+                      size={18}
+                    />
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
+      {/* Right: primary amount, your share, native/converted */}
       <div className="ml-3 shrink-0 text-right">
         <div className="text-sm font-semibold">
-          <span className="flex items-center gap-1.5">
-            {transaction.totalAmount.toFixed(2)} {transaction.currency}
-            {transaction.amountFormula && (
-              <FormulaBadge formula={transaction.amountFormula} />
-            )}
-          </span>        
+          {formatAmount(transaction.totalAmount, transaction.currency)}
         </div>
-        {isSolo ? (
-          transaction.currency !== 'EUR' && (
-            <div className="text-xs text-muted-foreground">
-              {transaction.totalAmountMain.toFixed(2)} main
-            </div>
-          )
-        ) : (
-          <div className="flex items-center justify-end gap-1 text-xs text-muted-foreground">
-            <span title={splitTitle}>{splitIcon}</span>
-            {myCostMain !== null ? (
-              <span>{myCostMain.toFixed(2)} for you</span>
-            ) : (
-              <span>not yours</span>
-            )}
+        {showYourShare && (
+          <div className="text-[10px] text-muted-foreground">
+            your share: {formatAmount(myBeneficiary!.amount, transaction.currency)}
+          </div>
+        )}
+        {transaction.currency !== mainCurrency && (
+          <div className="text-[10px] text-muted-foreground">
+            {formatAmount(transaction.totalAmountMain, mainCurrency)}
           </div>
         )}
       </div>
-    </Card>
+    </div>
   )
 }
 
 // ---------------------------------------------------------------------------
-// Placeholder toolbar button
+// TransactionDetail — expanded accordion panel
+// ---------------------------------------------------------------------------
+
+function TransactionDetail({
+  transaction,
+  members,
+  currentUserUid,
+  isSolo,
+  mainCurrency,
+  onEdit,
+  onDelete,
+}: {
+  transaction: TransactionWithStatus
+  members: Travel['members']
+  currentUserUid: string
+  isSolo: boolean
+  mainCurrency: string
+  onEdit: () => void
+  onDelete: () => void
+}) {
+  // Toggle between "1 TX = N main" and "1 main = N TX"
+  const [rateDirection, setRateDirection] = useState<'toMain' | 'fromMain'>('toMain')
+
+  const showRate = transaction.currency !== mainCurrency
+
+  const rateLabel = useMemo(() => {
+    if (!showRate) return null
+    const txSym = currencySymbol(transaction.currency)
+    const mainSym = currencySymbol(mainCurrency)
+    if (rateDirection === 'toMain') {
+      return `1 ${txSym} = ${transaction.exchangeRate.toFixed(4)} ${mainSym}`
+    }
+    // fromMain: reciprocal, rounded to 2dp
+    return `1 ${mainSym} = ${(1 / transaction.exchangeRate).toFixed(2)} ${txSym}`
+  }, [showRate, rateDirection, transaction.currency, transaction.exchangeRate, mainCurrency])
+
+  // Defensive read — formula field not yet in Transaction type
+  const formula = (transaction as Record<string, unknown>).formula
+  const formulaStr = typeof formula === 'string' && formula.length > 0 ? formula : null
+
+  return (
+    <div className="space-y-3 border-t bg-muted px-3 py-3 text-sm">
+
+      {/* Amount block */}
+      <div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xl font-bold">
+            {formatAmount(transaction.totalAmount, transaction.currency)}
+          </span>
+          {formulaStr && (
+            <span className="rounded border bg-background px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+              {formulaStr}
+            </span>
+          )}
+        </div>
+        {/* Exchange rate toggle */}
+        {showRate && (
+          <button
+            type="button"
+            className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+            onClick={() => setRateDirection((d) => (d === 'toMain' ? 'fromMain' : 'toMain'))}
+          >
+            <span>{rateLabel}</span>
+            <span className="text-[10px]">⇄</span>
+          </button>
+        )}
+        {/* Arrow to main currency total */}
+        <div className="mt-0.5 text-xs text-muted-foreground">
+          → {formatAmount(transaction.totalAmountMain, mainCurrency)}
+        </div>
+      </div>
+
+      {/* Meta grid — 2 columns */}
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+        <div>
+          <span className="text-muted-foreground">Category </span>
+          <span>{transaction.category ?? '—'}</span>
+        </div>
+        <div>
+          <span className="text-muted-foreground">Payment </span>
+          <span>{transaction.paymentMethod ?? '—'}</span>
+        </div>
+        <div>
+          <span className="text-muted-foreground">Country </span>
+          <span>{transaction.country ?? '—'}</span>
+        </div>
+        <div>
+          <span className="text-muted-foreground">City </span>
+          <span>{transaction.city ?? '—'}</span>
+        </div>
+      </div>
+
+      {/* Notes — only when present */}
+      {transaction.notes && (
+        <div className="text-xs">
+          <span className="font-medium text-foreground">Notes: </span>
+          <span className="text-muted-foreground">{transaction.notes}</span>
+        </div>
+      )}
+
+      {/* Paid by / Split — hidden in solo travel (only one member, no split info needed) */}
+      {!isSolo && (
+        <>
+          <SplitSection
+            label="Paid by"
+            splits={transaction.paidBy}
+            members={members}
+            currentUserUid={currentUserUid}
+            currency={transaction.currency}
+          />
+          <SplitSection
+            label="Split"
+            splits={transaction.beneficiaries}
+            members={members}
+            currentUserUid={currentUserUid}
+            currency={transaction.currency}
+          />
+        </>
+      )}
+
+      {/* Actions */}
+      <div className="flex gap-2 pt-1">
+        <Button type="button" variant="default" size="sm" className="flex-1" onClick={onEdit}>
+          Edit
+        </Button>
+        <Button type="button" variant="destructive" size="sm" className="w-20" onClick={onDelete}>
+          Delete
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// SplitSection — shared row layout for "Paid by" and "Split"
+// ---------------------------------------------------------------------------
+
+function SplitSection({
+  label,
+  splits,
+  members,
+  currentUserUid,
+  currency,
+}: {
+  label: string
+  splits: { travelMemberId: string; amount: number }[]
+  members: Travel['members']
+  currentUserUid: string
+  currency: string
+}) {
+  return (
+    <div>
+      <div className="mb-1 text-xs font-medium text-muted-foreground">{label}</div>
+      <div className="space-y-1">
+        {splits.map((split) => {
+          const member = members.find((m) => m.travelMemberId === split.travelMemberId)
+          const memberIndex = members.findIndex((m) => m.travelMemberId === split.travelMemberId)
+          const isMe = member?.userId === currentUserUid
+          return (
+            <div key={split.travelMemberId} className="flex items-center gap-2 text-xs">
+              <MemberAvatar
+                displayName={member?.displayName ?? '?'}
+                memberIndex={memberIndex >= 0 ? memberIndex : 0}
+                size={24}
+              />
+              <span>
+                {member?.displayName ?? '?'}
+                {isMe && <span className="ml-1 text-muted-foreground">(you)</span>}
+              </span>
+              <span className="ml-auto font-medium">{formatAmount(split.amount, currency)}</span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// DayGroup — header + card list for one day
+// ---------------------------------------------------------------------------
+
+function DayGroupSection({
+  group,
+  members,
+  categories,
+  currentUserTravelMemberId,
+  currentUserUid,
+  isSolo,
+  mainCurrency,
+  expandedTxId,
+  onToggle,
+  onEditTransaction,
+  onDeleteTransaction,
+}: {
+  group: DayGroup
+  members: Travel['members']
+  categories: LabeledItem[]
+  currentUserTravelMemberId: string
+  currentUserUid: string
+  isSolo: boolean
+  mainCurrency: string
+  expandedTxId: string | null
+  onToggle: (txId: string) => void
+  onEditTransaction: (txId: string) => void
+  onDeleteTransaction: (txId: string) => void
+}) {
+  return (
+    <div>
+      <DayGroupHeader date={group.date} transactions={group.transactions} />
+      <div className="mt-1 space-y-1">
+        {group.transactions.map((tx) => (
+          <Card key={tx.txId} className="overflow-hidden p-0">
+            <TransactionRow
+              transaction={tx}
+              members={members}
+              categories={categories}
+              currentUserTravelMemberId={currentUserTravelMemberId}
+              isSolo={isSolo}
+              mainCurrency={mainCurrency}
+              onToggle={() => onToggle(tx.txId)}
+            />
+            {expandedTxId === tx.txId && (
+              <TransactionDetail
+                transaction={tx}
+                members={members}
+                currentUserUid={currentUserUid}
+                isSolo={isSolo}
+                mainCurrency={mainCurrency}
+                onEdit={() => onEditTransaction(tx.txId)}
+                onDelete={() => onDeleteTransaction(tx.txId)}
+              />
+            )}
+          </Card>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Placeholder toolbar button (unchanged)
 // ---------------------------------------------------------------------------
 
 function PlaceholderButton({ label }: { label: string }) {
@@ -218,7 +586,6 @@ function PlaceholderButton({ label }: { label: string }) {
       >
         {label}
       </button>
-      {/* "Coming soon" tooltip */}
       <div className="pointer-events-none absolute bottom-full left-1/2 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded bg-foreground px-2 py-1 text-[10px] text-background opacity-0 transition-opacity group-hover:opacity-100">
         Coming soon
       </div>
@@ -235,10 +602,12 @@ interface TransactionsTabProps {
   transactions: TransactionWithStatus[]
   loading: boolean
   error: string | null
-  currentUserUid: string   // Firebase Auth UID — used to derive travelMemberId and for import
+  currentUserUid: string
   isSolo: boolean
+  mainCurrency: string
   onAddExpense: () => void
-  onEditTransaction: (tx: TransactionWithStatus) => void
+  onEditTransaction: (txId: string) => void
+  onDeleteTransaction: (txId: string) => void
 }
 
 export function TransactionsTab({
@@ -248,19 +617,35 @@ export function TransactionsTab({
   error,
   currentUserUid,
   isSolo,
+  mainCurrency,
   onAddExpense,
   onEditTransaction,
+  onDeleteTransaction,
 }: TransactionsTabProps) {
-  // Derive the current user's travelMemberId from the travel's member list.
-  // This is what Split objects use — NOT the Firebase Auth UID.
+  // Derive the current user's travelMemberId — used for "your share" and "(you)" labels
   const currentUserTravelMemberId = useMemo(
     () => travel.members.find((m) => m.userId === currentUserUid)?.travelMemberId ?? '',
     [travel.members, currentUserUid],
   )
 
-  // Export state — brief spinner while generating the xlsx
+  // Accordion state — only one card open at a time; null = all collapsed
+  const [expandedTxId, setExpandedTxId] = useState<string | null>(null)
+
+  function handleToggle(txId: string) {
+    setExpandedTxId((prev) => (prev === txId ? null : txId))
+  }
+
+  // Normalize legacy splits (pre-Session 009 docs stored split.uid instead of split.travelMemberId).
+  // Same approach as DashboardTab — returns same reference when nothing needs remapping.
+  const normalizedTransactions = useMemo(
+    () => normalizeTransactionSplits(transactions, travel.members),
+    [transactions, travel.members],
+  )
+
+  // Day-grouped transactions (transactions already sorted date desc)
+  const dayGroups = useMemo(() => groupByDay(normalizedTransactions), [normalizedTransactions])
+
   const [isExporting, setIsExporting] = useState(false)
-  // Import dialog visibility
   const [importOpen, setImportOpen] = useState(false)
 
   async function handleExport() {
@@ -292,7 +677,6 @@ export function TransactionsTab({
         </div>
         <div className="flex gap-2">
           {error && <p className="text-xs text-destructive">{error}</p>}
-          {/* Import — always available (user may want to populate an empty travel) */}
           <button
             type="button"
             onClick={() => setImportOpen(true)}
@@ -300,7 +684,6 @@ export function TransactionsTab({
           >
             Import
           </button>
-          {/* Export — only shown once there are transactions to export */}
           {transactions.length > 0 && (
             <button
               type="button"
@@ -322,24 +705,27 @@ export function TransactionsTab({
       ) : transactions.length === 0 ? (
         <div className="flex h-40 flex-col items-center justify-center gap-3 text-center">
           <p className="text-sm font-medium">No expenses recorded yet.</p>
-          <p className="max-w-xs text-xs text-muted-foreground">
-            Tap + to add your first expense.
-          </p>
+          <p className="max-w-xs text-xs text-muted-foreground">Tap + to add your first expense.</p>
           <Button type="button" size="sm" onClick={onAddExpense}>
             Add your first expense
           </Button>
         </div>
       ) : (
         <div className="space-y-2">
-          {transactions.map((tx) => (
-            <TransactionRow
-              key={tx.txId}
-              transaction={tx}
+          {dayGroups.map((group) => (
+            <DayGroupSection
+              key={group.date}
+              group={group}
               members={travel.members}
               categories={travel.categories ?? []}
               currentUserTravelMemberId={currentUserTravelMemberId}
+              currentUserUid={currentUserUid}
               isSolo={isSolo}
-              onEdit={onEditTransaction}
+              mainCurrency={mainCurrency}
+              expandedTxId={expandedTxId}
+              onToggle={handleToggle}
+              onEditTransaction={onEditTransaction}
+              onDeleteTransaction={onDeleteTransaction}
             />
           ))}
         </div>

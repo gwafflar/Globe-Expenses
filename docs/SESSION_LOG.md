@@ -971,3 +971,89 @@ Describe blocks:
 - [ ] PWA icons: `public/icon-192.png`, `public/icon-512.png`, `public/apple-touch-icon.png`
 - [ ] Filter and Display Mode in Transactions tab
 - [ ] Move composite indexes to `firestore.indexes.json`
+
+---
+
+## ✨ Working Session 011 — March 17th 2026
+
+**Type**: UI redesign + bug fixes
+**Tools used**: Claude Web (design) + Claude Code (claude-sonnet-4-6, implementation)
+
+### What was built
+
+**TransactionsTab — full visual redesign** (`src/travels/components/tabs/TransactionsTab.tsx`)
+
+Replaced the flat click-to-edit card list with a day-grouped accordion list. All sub-components live inside the single file (no new files created).
+
+**Day-grouped structure:**
+- `groupByDay()` — pure function, groups the date-desc sorted transaction list into `DayGroup[]` buckets by the `date` field (DD-MM-YYYY)
+- `DayGroupHeader` — thin separator row above each day showing: formatted date (e.g. "Mar 16"), unique country flag emojis (extracted from `"🇹🇭 Thailand"` format, up to 3, deduplicated), unique city names joined with " · " (up to 3). Country display is defensive — strings without an emoji prefix (legacy entries stored as plain "Thailand") are silently skipped via a code-point check (`cp <= 0x00FF → ''`).
+
+**Collapsed row (`TransactionRow`):**
+- Category emoji + bold transaction name + `PendingBadge` (unchanged logic)
+- Category label as a small pill badge
+- Beneficiary avatars (group travel only): up to 3 overlapping 18×18 initials circles, deterministic colour from a 6-slot palette (`AVATAR_BG_COLORS` / `AVATAR_TEXT_COLORS`) keyed by position in `travel.members`
+- Right side: primary amount (`totalAmount` + currency symbol), "your share" line (group only, shown when the user's beneficiary share ≠ full amount), converted amount in main currency (omitted when `currency === mainCurrency`)
+- Clicking the row toggles the accordion. One card open at a time (`useState<string | null>` in `TransactionsTab`).
+
+**Expanded panel (`TransactionDetail`):**
+- Big amount + optional formula pill (defensive `(transaction as any).formula` read)
+- Exchange rate toggle (⇄): local `rateDirection` state per card, cycles between `"1 THB = 0.026 €"` and `"1 € = 38.5 THB"`; hidden when `currency === mainCurrency`
+- Arrow line `→ 11.70 €` (main currency total)
+- 2-column meta grid: Category / Payment method / Country / City
+- Notes section (rendered only when `transaction.notes` is non-empty)
+- Paid by / Split sections (`SplitSection` shared component): avatar + name + "(you)" label + amount per entry; hidden entirely when `isSolo`
+- Actions row: **Edit** button (full-width minus delete) calls `onEditTransaction(txId)`; **Delete** button (destructive, fixed width) calls `onDeleteTransaction(txId)`
+
+**Currency helpers (exported for testing):**
+- `currencySymbol(code)` — symbol map for 10 currencies, fallback to ISO code
+- `formatAmount(amount, code)` — space-separated thousands, no decimals for integers, 2dp otherwise
+
+**Props changes:**
+- `onEditTransaction` signature changed from `(tx: TransactionWithStatus) => void` to `(txId: string) => void`
+- Added `onDeleteTransaction: (txId: string) => void`
+- Added `mainCurrency: string`
+
+**Legacy split normalization:**
+- Pre-Session 009 transactions stored splits as `{ uid: '...', amount }`. `TransactionsTab` now applies `normalizeTransactionSplits` (imported from `dashboardHelpers.ts`) as a `useMemo` before grouping, so old transactions resolve member names and avatars correctly instead of displaying `"?"`. Same approach already used by `DashboardTab`.
+
+**Wiring (`TravelTabs.tsx`, `TravelDetailPage.tsx`):**
+- `TravelTabs`: added `mainCurrency`, `onDeleteTransaction`; `onEditTransaction` type updated; all passed through to `TransactionsTab`
+- `TravelDetailPage`: added `handleEditById(txId)` (looks up full tx, calls existing `handleEditTransaction`); added `handleDeleteTransaction(txId)` stub (`console.warn` — actual deletion in a follow-up); passes `mainCurrency={userProfile?.mainCurrency ?? 'EUR'}`
+
+### Files created
+
+| File | Description |
+|------|-------------|
+| `src/travels/components/tabs/__tests__/transactionsTab.test.ts` | 25 Vitest unit tests for `currencySymbol`, `formatAmount`, `groupByDay` |
+
+### Files modified
+
+| File | Changes |
+|------|---------|
+| `src/travels/components/tabs/TransactionsTab.tsx` | Full redesign — day groups, accordion, TransactionDetail, currency helpers, split normalization |
+| `src/travels/components/TravelTabs.tsx` | Added `mainCurrency`, `onDeleteTransaction`; updated `onEditTransaction` type |
+| `src/travels/pages/TravelDetailPage.tsx` | `handleEditById`, `handleDeleteTransaction` stub, `mainCurrency` prop |
+
+### Small fixes applied during session
+
+- **"native" label removed**: green `"native"` badge on transactions in the travel's main currency was removed — no information value.
+- **Country emoji extraction**: `extractCountryEmoji` now returns `''` for strings that don't start with a Unicode emoji (code point ≤ U+00FF), fixing legacy country entries stored as plain names (e.g. `"Thailand"`) that were rendering as `"ThailandMalaysia"` in the day header.
+- **isSolo — Paid by / Split hidden**: in solo travel, the expanded detail panel no longer renders the Paid by and Split sections (single member, no split info needed).
+
+### Decisions made (binding)
+
+| # | Decision | Notes |
+|---|----------|-------|
+| 57 | Accordion replaces click-to-edit | Clicking a row expands it in-place; Edit button inside the expanded panel opens the form drawer |
+| 58 | Delete button in expanded panel (no confirmation for now) | Calls `onDeleteTransaction(txId)` directly; confirmation dialog deferred to the deletion implementation session |
+| 59 | `onEditTransaction` takes `txId: string` | Tab layer passes only the ID; `TravelDetailPage` does the tx lookup — cleaner interface |
+| 60 | `normalizeTransactionSplits` applied in TransactionsTab | Reuses the same helper as DashboardTab; fixes "?" member display for pre-refactor transactions |
+
+### Carry-forward items (open)
+
+- [ ] Balance tab: settlement computation (greedy debt simplification)
+- [ ] Delete transaction: implement actual Firestore deletion + confirmation dialog (stub in place)
+- [ ] PWA icons: `public/icon-192.png`, `public/icon-512.png`, `public/apple-touch-icon.png`
+- [ ] Filter and Display Mode in Transactions tab
+- [ ] Move composite indexes to `firestore.indexes.json`

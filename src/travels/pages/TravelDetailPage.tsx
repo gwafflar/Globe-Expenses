@@ -161,6 +161,17 @@ export function TravelDetailPage() {
     setIsFormOpen(true)
   }
 
+  // Called by TransactionsTab accordion with a txId — looks up the full tx and opens edit form.
+  function handleEditById(txId: string) {
+    const tx = transactions.find((t) => t.txId === txId)
+    if (tx) handleEditTransaction(tx)
+  }
+
+  // Placeholder — actual deletion implemented in a follow-up.
+  function handleDeleteTransaction(txId: string) {
+    console.warn('[TravelDetailPage] delete not yet implemented for txId:', txId)
+  }
+
   // Called by TransactionForm after a new transaction introduces a country/city
   // not yet in the travel's lists — updates local state immediately so dropdowns
   // and ParametersTab reflect the new value without a page reload.
@@ -312,8 +323,10 @@ export function TravelDetailPage() {
           transactionsError={transactionsError}
           currentUserUid={currentUserUid}
           isSolo={isSolo}
+          mainCurrency={userProfile?.mainCurrency ?? 'EUR'}
           onAddExpense={openForm}
-          onEditTransaction={handleEditTransaction}
+          onEditTransaction={handleEditById}
+          onDeleteTransaction={handleDeleteTransaction}
           onTravelChange={handleTravelChange}
         />
       </main>

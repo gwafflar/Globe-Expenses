@@ -43,8 +43,10 @@ interface TravelTabsProps {
   transactionsError: string | null
   currentUserUid: string
   isSolo: boolean
+  mainCurrency: string
   onAddExpense: () => void
-  onEditTransaction: (tx: TransactionWithStatus) => void
+  onEditTransaction: (txId: string) => void
+  onDeleteTransaction: (txId: string) => void
   onTravelChange: (updated: Partial<Travel>) => void
 }
 
@@ -59,8 +61,10 @@ export function TravelTabs({
   transactionsError,
   currentUserUid,
   isSolo,
+  mainCurrency,
   onAddExpense,
   onEditTransaction,
+  onDeleteTransaction,
   onTravelChange,
 }: TravelTabsProps) {
   const [activeTab, setActiveTab] = useState<TabId>('transactions')
@@ -143,8 +147,10 @@ export function TravelTabs({
                   error={transactionsError}
                   currentUserUid={currentUserUid}
                   isSolo={isSolo}
+                  mainCurrency={mainCurrency}
                   onAddExpense={onAddExpense}
                   onEditTransaction={onEditTransaction}
+                  onDeleteTransaction={onDeleteTransaction}
                 />
               )}
               {tab.id === 'balance' && <BalanceTab />}
