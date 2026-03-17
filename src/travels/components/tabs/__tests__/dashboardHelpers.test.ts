@@ -8,7 +8,7 @@
 // function. The test cases focus on the logic contracts, not implementation
 // details, so they stay valid even if the internal date-math is refactored.
 
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
 import type { Travel } from '@/travels/types'
 import {
@@ -319,7 +319,7 @@ describe('normalizeTransactionSplits', () => {
       displayName: 'Test',
       userId,
       allowRename: true,
-      joinedAt: null as unknown as ReturnType<typeof makeTimestamp>,
+      joinedAt: null as unknown as import('firebase/firestore').Timestamp,
     }
   }
 

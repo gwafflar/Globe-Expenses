@@ -369,7 +369,7 @@ function TransactionDetail({
   }, [showRate, rateDirection, transaction.currency, transaction.exchangeRate, mainCurrency])
 
   // Defensive read — formula field not yet in Transaction type
-  const formula = (transaction as Record<string, unknown>).formula
+  const formula = (transaction as unknown as Record<string, unknown>).formula
   const formulaStr = typeof formula === 'string' && formula.length > 0 ? formula : null
 
   return (
