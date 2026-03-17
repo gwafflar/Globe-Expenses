@@ -138,7 +138,7 @@ TypeScript interface defined in `src/auth/services/userService.ts`. Mirrors the 
 | description | string? | Optional description |
 | startDate | Timestamp? | Optional start date |
 | endDate | Timestamp? | Optional end date |
-| members | MemberRef[] | List of members with display info |
+| members | TravelMember[] | List of members with display info (see TravelMember below) |
 | memberUids | string[] | Flat array of member UIDs — required for Firestore security rules. Security rules cannot inspect fields inside array objects, so this parallel flat array enables `array-contains` queries. |
 | createdBy | string | UID of travel creator |
 | createdAt | Timestamp | Creation timestamp |
@@ -150,7 +150,11 @@ TypeScript interface defined in `src/auth/services/userService.ts`. Mirrors the 
 | settings | object? | Optional travel settings (e.g. `{ trackLocation: boolean }`) |
 | pendingInviteId | string? | Transient field written by a joining non-member solely to pass the invite token to Firestore security rules for authorization via `get()`. Not semantic after the write; ignored by the UI. |
 
-**MemberRef**: `{ uid: string, displayName: string, joinedAt: Timestamp }`
+**TravelMember**: `{ travelMemberId: string, displayName: string, userId: string | null, allowRename: boolean, joinedAt: Timestamp }`
+- `travelMemberId`: client-generated nanoid — stable key used in `Split[]` objects. Never a Firebase Auth UID.
+- `userId`: links the slot to a Firebase Auth account; `null` means the slot is unclaimed (name-only placeholder).
+- `allowRename`: if true, any travel member can rename this person.
+- Legacy documents stored `{ uid, displayName, joinedAt }`. `normaliseMember()` in `travels/types.ts` handles both shapes transparently on read.
 
 **LabeledItem**: `{ id: string, label: string, emoji?: string }`
 - `id`: client-generated stable key (used for Firestore arrayUnion/arrayRemove addressing)
@@ -181,7 +185,7 @@ TypeScript interface defined in `src/auth/services/userService.ts`. Mirrors the 
 | city | string? | City where the expense occurred (optional) |
 | notes | string? | Optional free-text notes |
 
-**Split**: `{ uid: string, amount: number }` — amounts must sum to totalAmount
+**Split**: `{ travelMemberId: string, amount: number }` — amounts must sum to totalAmount. `travelMemberId` is the stable nanoid from `TravelMember`, never a Firebase Auth UID. Legacy documents stored `{ uid, amount }`; `normalizeTransactionSplits()` in `dashboardHelpers.ts` remaps these at read time.
 
 **CreatedByRef**: `{ type: 'user', uid: string } | { type: 'agent', name: string }`
 
@@ -240,9 +244,13 @@ Stored at `users/{userId}/friends/{friendId}`. The friendship is bidirectional: 
 
 From the transaction collection, the net balance of each member is computed as:
 
-`net(user) = sum(paidBy[user].amount) - sum(beneficiaries[user].amount)` [per travel, in main currency]
+`net(member) = sum(paidBy[member].amount * exchangeRate) - sum(beneficiaries[member].amount * exchangeRate)` [per travel, in main currency]
 
-A positive net means the user is owed money. A negative net means the user owes money. Optimal settlement suggestions are derived using a greedy debt-simplification algorithm (minimize number of transfers). This computation runs client-side in v1 and may move to Cloud Functions in v2.
+A positive net means the member is owed money. A negative net means the member owes money. All amounts are converted to the travel's main currency using the `exchangeRate` stored on each transaction. Values are rounded to 2dp; a 0.01 tolerance is used for "effectively zero" checks to avoid floating-point false positives.
+
+Optimal settlement suggestions are derived using a greedy debt-simplification algorithm (minimize number of transfers): sort creditors descending and debtors ascending by magnitude, repeatedly match the largest pair and transfer `min(creditor.net, |debtor.net|)`, stop when all nets are within 0.01 of zero.
+
+Implementation: `computeBalances()` and `computeSettlements()` in `src/travels/utils/balanceUtils.ts` — pure functions, no React or Firebase dependencies. The member identity key is `travelMemberId` (not Firebase Auth UID). This computation runs client-side in v1 and may move to Cloud Functions in v2.
 
 # 5. Key Flows
 

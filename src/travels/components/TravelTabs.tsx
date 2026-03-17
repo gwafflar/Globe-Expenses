@@ -44,6 +44,10 @@ interface TravelTabsProps {
   currentUserUid: string
   isSolo: boolean
   mainCurrency: string
+  settlementCurrency: string
+  settlementRate: number
+  onSettlementCurrencyChange: (currency: string) => void
+  onSettlementRateChange: (rate: number) => void
   onAddExpense: () => void
   onEditTransaction: (txId: string) => void
   onDeleteTransaction: (txId: string) => void
@@ -62,6 +66,10 @@ export function TravelTabs({
   currentUserUid,
   isSolo,
   mainCurrency,
+  settlementCurrency,
+  settlementRate,
+  onSettlementCurrencyChange,
+  onSettlementRateChange,
   onAddExpense,
   onEditTransaction,
   onDeleteTransaction,
@@ -160,6 +168,10 @@ export function TravelTabs({
                   isSolo={isSolo}
                   mainCurrency={mainCurrency}
                   travelName={travel.name}
+                  settlementCurrency={settlementCurrency}
+                  settlementRate={settlementRate}
+                  onSettlementCurrencyChange={onSettlementCurrencyChange}
+                  onSettlementRateChange={onSettlementRateChange}
                 />
               )}
               {tab.id === 'dashboard' && (

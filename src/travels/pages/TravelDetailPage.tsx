@@ -85,8 +85,20 @@ export function TravelDetailPage() {
   const [watchedTxId, setWatchedTxId] = useState<string | null>(null)
   const [bannerState, setBannerState] = useState<BannerState>(null)
 
+  // Settlement currency: allows settlements to be displayed in a different currency
+  // than mainCurrency. Rate means: 1 mainCurrency = settlementRate settlementCurrency.
+  const mainCurrency = userProfile?.mainCurrency ?? 'EUR'
+  const [settlementCurrency, setSettlementCurrency] = useState<string>(mainCurrency)
+  const [settlementRate, setSettlementRate] = useState<number>(1)
+
   const { transactions, loading: loadingTransactions, error: transactionsError } =
     useTransactions(travelId)
+
+  // Reset settlement currency when mainCurrency changes (e.g. userProfile loads after mount)
+  useEffect(() => {
+    setSettlementCurrency(mainCurrency)
+    setSettlementRate(1)
+  }, [mainCurrency])
 
   // Watch newly created transaction for pending→synced transition
   useEffect(() => {
@@ -323,7 +335,11 @@ export function TravelDetailPage() {
           transactionsError={transactionsError}
           currentUserUid={currentUserUid}
           isSolo={isSolo}
-          mainCurrency={userProfile?.mainCurrency ?? 'EUR'}
+          mainCurrency={mainCurrency}
+          settlementCurrency={settlementCurrency}
+          settlementRate={settlementRate}
+          onSettlementCurrencyChange={setSettlementCurrency}
+          onSettlementRateChange={setSettlementRate}
           onAddExpense={openForm}
           onEditTransaction={handleEditById}
           onDeleteTransaction={handleDeleteTransaction}

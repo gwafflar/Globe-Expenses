@@ -974,9 +974,9 @@ Describe blocks:
 
 ---
 
-## ✨ Working Session 011 — March 17th 2026
+## 💄 Working Session 011 — March 17th 2026
 
-**Type**: UI redesign + bug fixes
+**Type**: UI transactions redesign + bug fixes
 **Tools used**: Claude Web (design) + Claude Code (claude-sonnet-4-6, implementation)
 
 ### What was built
@@ -1052,8 +1052,77 @@ Replaced the flat click-to-edit card list with a day-grouped accordion list. All
 
 ### Carry-forward items (open)
 
-- [ ] Balance tab: settlement computation (greedy debt simplification)
 - [ ] Delete transaction: implement actual Firestore deletion + confirmation dialog (stub in place)
-- [ ] PWA icons: `public/icon-192.png`, `public/icon-512.png`, `public/apple-touch-icon.png`
+- [ ] Filter and Display Mode in Transactions tab
+- [ ] Move composite indexes to `firestore.indexes.json`
+
+---
+
+## ✨ Working Session 011.2 — March 17th 2026
+
+**Type**: Feature implementation + hidden joke
+**Tools used**: Claude Code (claude-opus-4-6)
+
+### What was built
+
+**Balance tab — full implementation** (`src/travels/components/tabs/BalanceTab.tsx`)
+
+Replaced the placeholder with a working balance & settlement view:
+
+- **`src/travels/utils/balanceUtils.ts`**: two pure functions (no React, no Firebase):
+  - `computeBalances(transactions, members)` → `MemberBalance[]` (net per member in main currency)
+  - `computeSettlements(balances)` → `Settlement[]` (greedy debt simplification, 0.01 tolerance)
+  - Uses `travelMemberId` as identity key (Session 009 refactor fully landed)
+- **`src/travels/utils/balanceUtils.test.ts`**: 7 Vitest tests (2-member, 3-member restaurant example, balanced, solo, floating-point 100/3, exchange rate, settlement output)
+- **Net balances section**: per-member rows with coloured avatar (deterministic palette), name, "paid X · share Y" subtitle, net amount (green/orange/muted), proportional bar
+- **Settlements section**: one card per settlement with from/to avatars, names, arrow, amount
+- **Copy button**: plain-text settlement summary to clipboard with "Copied!" feedback (1.5s)
+- **Solo view**: upsell card ("Travelling solo?") when `isSolo`
+- **Empty state**: muted message when no transactions
+
+**Settlement currency selector** (`src/travels/components/SettlementCurrencyDrawer.tsx`)
+
+- Dialog (popup) with searchable currency picker, exchange rate input (pre-filled via `getExchangeRate`), Apply/Reset buttons
+- Settlement amounts and copy text use the selected currency and rate; net balances always in mainCurrency
+- State (`settlementCurrency`, `settlementRate`) lives in `TravelDetailPage`, threaded via `TravelTabs` → `BalanceTab`
+- `useEffect` resets to mainCurrency when `userProfile` loads
+- Includes a satirical USD jurisdiction and Strait of Hormuz jokes (though Claude didn't get the second one)
+
+**Static assets reorganised**
+
+- Moved `apple-touch-icon.png`, `icon-192.png`, `icon-512.png` from `public/` to `public/images/`
+- Updated references in `index.html` and `vite.config.ts` (PWA manifest icons)
+- Deleted unused `public/vite.svg` (Vite scaffold leftover, not referenced anywhere)
+
+### Files created
+
+| File | Description |
+|------|-------------|
+| `src/travels/utils/balanceUtils.ts` | Pure balance & settlement computation |
+| `src/travels/utils/balanceUtils.test.ts` | 7 Vitest tests |
+| `src/travels/components/SettlementCurrencyDrawer.tsx` | Settlement currency dialog |
+
+### Files modified
+
+| File | Changes |
+|------|---------|
+| `src/travels/components/tabs/BalanceTab.tsx` | Full rewrite — net balances, settlements, solo view, empty state, copy button, currency selector integration |
+| `src/travels/components/TravelTabs.tsx` | Props for BalanceTab (members, isSolo, mainCurrency, travelName, settlement currency state) |
+| `src/travels/pages/TravelDetailPage.tsx` | `settlementCurrency`/`settlementRate` state, reset effect, threading to TravelTabs |
+| `index.html` | Icon paths updated to `/images/` |
+| `vite.config.ts` | PWA manifest icon paths updated to `/images/` |
+
+### Decisions made (binding)
+
+| # | Decision | Notes |
+|---|----------|-------|
+| 61 | `travelMemberId` as balance identity key | Split refactor fully landed; no uid fallback needed |
+| 62 | Greedy debt simplification algorithm | Sort creditors desc / debtors asc, match largest pairs, 0.01 tolerance |
+| 63 | Settlement currency is UI-only | Conversion applied at display time; core computation always in mainCurrency |
+| 64 | Static assets in `public/images/` | All images consolidated; `vite.svg` deleted |
+
+### Carry-forward items (open)
+
+- [ ] Delete transaction: implement actual Firestore deletion + confirmation dialog (stub in place)
 - [ ] Filter and Display Mode in Transactions tab
 - [ ] Move composite indexes to `firestore.indexes.json`

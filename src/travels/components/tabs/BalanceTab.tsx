@@ -13,10 +13,9 @@ import { Button } from '@/components/ui/button'
 import {
   computeBalances,
   computeSettlements,
-  type MemberBalance,
-  type Settlement,
 } from '@/travels/utils/balanceUtils'
 import { normalizeTransactionSplits } from '@/travels/components/tabs/dashboardHelpers'
+import { SettlementCurrencyDrawer } from '@/travels/components/SettlementCurrencyDrawer'
 
 // ---------------------------------------------------------------------------
 // Avatar colour palette — cycles when members > palette length
@@ -79,6 +78,11 @@ function fmt(n: number, currency: string): string {
   return `${n.toFixed(2)} ${currency}`
 }
 
+/** Convert a mainCurrency amount to settlement currency, rounded to 2dp. */
+function toSettlement(amount: number, rate: number): number {
+  return Math.round(amount * rate * 100) / 100
+}
+
 function netClass(net: number): string {
   if (net > 0.005) return 'text-emerald-600 dark:text-emerald-400'
   if (net < -0.005) return 'text-orange-600 dark:text-orange-400'
@@ -99,6 +103,10 @@ interface BalanceTabProps {
   isSolo: boolean
   mainCurrency: string
   travelName: string
+  settlementCurrency: string
+  settlementRate: number
+  onSettlementCurrencyChange: (currency: string) => void
+  onSettlementRateChange: (rate: number) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -111,8 +119,13 @@ export function BalanceTab({
   isSolo,
   mainCurrency,
   travelName,
+  settlementCurrency,
+  settlementRate,
+  onSettlementCurrencyChange,
+  onSettlementRateChange,
 }: BalanceTabProps) {
   const [copied, setCopied] = useState(false)
+  const [currencyDialogOpen, setCurrencyDrawerOpen] = useState(false)
 
   // Normalise legacy splits (same pattern as DashboardTab)
   const normalizedTx = useMemo(
@@ -173,10 +186,10 @@ export function BalanceTab({
     )
   }
 
-  // ── Copy handler ──
+  // ── Copy handler — uses settlement currency for amounts ──
   function handleCopy() {
     const lines = settlements.map(
-      (s) => `${s.fromName} → ${s.toName}: ${fmt(s.amount, mainCurrency)}`,
+      (s) => `${s.fromName} → ${s.toName}: ${fmt(toSettlement(s.amount, settlementRate), settlementCurrency)}`,
     )
     const text = [
       `${travelName} — settlement summary`,
@@ -191,6 +204,12 @@ export function BalanceTab({
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     })
+  }
+
+  // ── Settlement currency drawer callback ──
+  function handleSettlementApply(currency: string, rate: number) {
+    onSettlementCurrencyChange(currency)
+    onSettlementRateChange(rate)
   }
 
   // ── Avatar helper (shared between balance rows and settlement cards) ──
@@ -208,7 +227,7 @@ export function BalanceTab({
 
   return (
     <div className="flex flex-col gap-0">
-      {/* ── Net balances ── */}
+      {/* ── Net balances (always in mainCurrency) ── */}
       <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
         Net balances
       </h3>
@@ -251,7 +270,7 @@ export function BalanceTab({
         })}
       </div>
 
-      {/* ── Settlements ── */}
+      {/* ── Settlements (amounts in settlementCurrency) ── */}
       {settlements.length > 0 && (
         <>
           {/* Separator */}
@@ -270,22 +289,44 @@ export function BalanceTab({
                   <span className="truncate text-sm">{s.toName}</span>
                   <Avatar memberId={s.toId} />
                   <span className="ml-auto text-sm font-medium tabular-nums">
-                    {fmt(s.amount, mainCurrency)}
+                    {fmt(toSettlement(s.amount, settlementRate), settlementCurrency)}
                   </span>
               </Card>
             ))}
           </div>
 
-          {/* Copy button */}
-          <Button
-            variant="outline"
-            className="mt-3 w-full"
-            onClick={handleCopy}
-          >
-            {copied ? 'Copied!' : 'Copy settlement summary'}
-          </Button>
+          {/* Change currency + copy — separated by a discreet border */}
+          <div className="mt-3 flex flex-col gap-2 border-t pt-3">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="w-full text-xs text-muted-foreground"
+              onClick={() => setCurrencyDrawerOpen(true)}
+            >
+              {settlementCurrency === mainCurrency
+                ? 'Change currency'
+                : `${settlementCurrency} ↗`}
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={handleCopy}
+            >
+              {copied ? 'Copied!' : 'Copy settlement summary'}
+            </Button>
+          </div>
         </>
       )}
+
+      {/* ── Settlement currency drawer ── */}
+      <SettlementCurrencyDrawer
+        open={currencyDialogOpen}
+        onOpenChange={setCurrencyDrawerOpen}
+        mainCurrency={mainCurrency}
+        currentCurrency={settlementCurrency}
+        currentRate={settlementRate}
+        onApply={handleSettlementApply}
+      />
     </div>
   )
 }
