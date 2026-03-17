@@ -46,7 +46,7 @@ export function CollapsibleCard({
   const [isOpen, setIsOpen] = useState(defaultOpen)
 
   return (
-    <div className="mx-4 rounded-xl border bg-card shadow-sm">
+    <div className="rounded-xl border bg-card shadow-sm">
       {/* ── Header row — always visible ── */}
       <button
         type="button"

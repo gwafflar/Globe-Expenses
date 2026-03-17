@@ -1,15 +1,291 @@
 // src/travels/components/tabs/BalanceTab.tsx
-// Placeholder — balance & settlement computation coming in a later session.
+// Balance & settlement tab — shows per-member net balances and optimal settlements.
+//
+// Normalisation: legacy splits (pre-Session-009) must be normalised before reaching
+// this component. TravelTabs passes transactions from useTransactions which are
+// already normalised in the parent (same pattern as DashboardTab).
 
-export function BalanceTab() {
+import { useMemo, useState } from 'react'
+import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
+import type { TravelMember } from '@/travels/types'
+import { Card, CardContent } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import {
+  computeBalances,
+  computeSettlements,
+  type MemberBalance,
+  type Settlement,
+} from '@/travels/utils/balanceUtils'
+import { normalizeTransactionSplits } from '@/travels/components/tabs/dashboardHelpers'
+
+// ---------------------------------------------------------------------------
+// Avatar colour palette — cycles when members > palette length
+// ---------------------------------------------------------------------------
+
+const AVATAR_COLORS = [
+  'bg-blue-500',
+  'bg-amber-500',
+  'bg-emerald-500',
+  'bg-purple-500',
+  'bg-rose-500',
+]
+
+function avatarColor(index: number): string {
+  return AVATAR_COLORS[index % AVATAR_COLORS.length]
+}
+
+/** First letter of displayName, uppercased. */
+function initials(name: string): string {
+  return (name.charAt(0) || '?').toUpperCase()
+}
+
+// ---------------------------------------------------------------------------
+// Per-member paid / share totals (for the subtitle line)
+// ---------------------------------------------------------------------------
+
+interface MemberTotals {
+  paid: number
+  share: number
+}
+
+/** Compute total paid and total share (beneficiary) per member, in main currency. */
+function computeMemberTotals(
+  transactions: TransactionWithStatus[],
+  members: TravelMember[],
+): Map<string, MemberTotals> {
+  const totals = new Map<string, MemberTotals>()
+  for (const m of members) {
+    totals.set(m.travelMemberId, { paid: 0, share: 0 })
+  }
+  for (const tx of transactions) {
+    const rate = tx.exchangeRate
+    for (const s of tx.paidBy) {
+      const t = totals.get(s.travelMemberId)
+      if (t) t.paid += s.amount * rate
+    }
+    for (const s of tx.beneficiaries) {
+      const t = totals.get(s.travelMemberId)
+      if (t) t.share += s.amount * rate
+    }
+  }
+  return totals
+}
+
+// ---------------------------------------------------------------------------
+// Format helpers
+// ---------------------------------------------------------------------------
+
+function fmt(n: number, currency: string): string {
+  return `${n.toFixed(2)} ${currency}`
+}
+
+function netClass(net: number): string {
+  if (net > 0.005) return 'text-emerald-600 dark:text-emerald-400'
+  if (net < -0.005) return 'text-orange-600 dark:text-orange-400'
+  return 'text-muted-foreground'
+}
+
+function netPrefix(net: number): string {
+  return net > 0.005 ? '+' : ''
+}
+
+// ---------------------------------------------------------------------------
+// Props
+// ---------------------------------------------------------------------------
+
+interface BalanceTabProps {
+  transactions: TransactionWithStatus[]
+  members: TravelMember[]
+  isSolo: boolean
+  mainCurrency: string
+  travelName: string
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+export function BalanceTab({
+  transactions,
+  members,
+  isSolo,
+  mainCurrency,
+  travelName,
+}: BalanceTabProps) {
+  const [copied, setCopied] = useState(false)
+
+  // Normalise legacy splits (same pattern as DashboardTab)
+  const normalizedTx = useMemo(
+    () => normalizeTransactionSplits(transactions, members),
+    [transactions, members],
+  )
+
+  // Core computations — memoised so they don't recompute on unrelated re-renders
+  const balances = useMemo(
+    () => computeBalances(normalizedTx, members),
+    [normalizedTx, members],
+  )
+  const settlements = useMemo(
+    () => computeSettlements(balances),
+    [balances],
+  )
+  const memberTotals = useMemo(
+    () => computeMemberTotals(normalizedTx, members),
+    [normalizedTx, members],
+  )
+
+  // Build a travelMemberId → index map for deterministic avatar colours
+  const memberIndexMap = useMemo(() => {
+    const map = new Map<string, number>()
+    members.forEach((m, i) => map.set(m.travelMemberId, i))
+    return map
+  }, [members])
+
+  // Max abs(net) for proportional bar widths
+  const maxAbs = useMemo(
+    () => Math.max(...balances.map((b) => Math.abs(b.net)), 0.01),
+    [balances],
+  )
+
+  // ── Solo upsell ──
+  if (isSolo) {
     return (
-      <div className="flex h-60 flex-col items-center justify-center gap-3 rounded-xl border border-dashed text-center">
-        <span className="text-3xl">⚖️</span>
-        <p className="text-sm font-medium">Balance & settlements</p>
-        <p className="max-w-xs text-xs text-muted-foreground">
-          Who owes whom and optimal settlement suggestions will appear here.
-          Coming in a future update.
-        </p>
+      <Card className="border-primary/30">
+        <CardContent className="px-5 py-4">
+          <p className="text-xs text-muted-foreground">✦ Did you know?</p>
+          <p className="mt-1 text-sm font-semibold">Travelling solo?</p>
+          <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+            Add friends to a travel and GlobeExpenses will automatically track
+            who paid what, split expenses any way you like, and compute the
+            exact settlements so nobody has to do the maths.
+          </p>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  // ── Empty state ──
+  if (transactions.length === 0) {
+    return (
+      <p className="py-12 text-center text-sm text-muted-foreground">
+        No transactions yet. Add your first expense to see balances.
+      </p>
+    )
+  }
+
+  // ── Copy handler ──
+  function handleCopy() {
+    const lines = settlements.map(
+      (s) => `${s.fromName} → ${s.toName}: ${fmt(s.amount, mainCurrency)}`,
+    )
+    const text = [
+      `${travelName} — settlement summary`,
+      '──────────────────────────────────',
+      ...lines,
+      '──────────────────────────────────',
+      'Made with GlobeExpenses 🌏',
+      'Invite link: [placeholder — TODO: real invite link]',
+    ].join('\n')
+
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
+
+  // ── Avatar helper (shared between balance rows and settlement cards) ──
+  function Avatar({ memberId }: { memberId: string }) {
+    const idx = memberIndexMap.get(memberId) ?? 0
+    const name = members.find((m) => m.travelMemberId === memberId)?.displayName ?? ''
+    return (
+      <div
+        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white ${avatarColor(idx)}`}
+      >
+        {initials(name)}
       </div>
     )
   }
+
+  return (
+    <div className="flex flex-col gap-0">
+      {/* ── Net balances ── */}
+      <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        Net balances
+      </h3>
+
+      <div className="flex flex-col gap-3">
+        {balances.map((b) => {
+          const totals = memberTotals.get(b.memberId)
+          const barWidth = maxAbs > 0.01 ? (Math.abs(b.net) / maxAbs) * 100 : 0
+          const barColor = b.net > 0.005 ? 'bg-emerald-500' : b.net < -0.005 ? 'bg-orange-500' : 'bg-muted'
+
+          return (
+            <div key={b.memberId} className="flex items-center gap-3">
+              <Avatar memberId={b.memberId} />
+
+              {/* Name + subtitle */}
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium">{b.displayName}</p>
+                {totals && (
+                  <p className="text-xs text-muted-foreground">
+                    paid {fmt(totals.paid, mainCurrency)} · share {fmt(totals.share, mainCurrency)}
+                  </p>
+                )}
+              </div>
+
+              {/* Net amount + bar */}
+              <div className="flex flex-col items-end gap-0.5">
+                <span className={`text-sm font-semibold tabular-nums ${netClass(b.net)}`}>
+                  {netPrefix(b.net)}{fmt(b.net, mainCurrency)}
+                </span>
+                {/* Proportional bar */}
+                <div className="h-1 w-14 rounded-full bg-muted">
+                  <div
+                    className={`h-1 rounded-full ${barColor}`}
+                    style={{ width: `${barWidth}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* ── Settlements ── */}
+      {settlements.length > 0 && (
+        <>
+          {/* Separator */}
+          <div className="my-4 border-t" />
+
+          <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Suggested settlements
+          </h3>
+
+          <div className="flex flex-col gap-2">
+            {settlements.map((s, i) => (
+              <Card key={i} className="flex items-center gap-2 px-3 py-2.5">
+                  <Avatar memberId={s.fromId} />
+                  <span className="truncate text-sm">{s.fromName}</span>
+                  <span className="text-xs text-muted-foreground">→</span>
+                  <span className="truncate text-sm">{s.toName}</span>
+                  <Avatar memberId={s.toId} />
+                  <span className="ml-auto text-sm font-medium tabular-nums">
+                    {fmt(s.amount, mainCurrency)}
+                  </span>
+              </Card>
+            ))}
+          </div>
+
+          {/* Copy button */}
+          <Button
+            variant="outline"
+            className="mt-3 w-full"
+            onClick={handleCopy}
+          >
+            {copied ? 'Copied!' : 'Copy settlement summary'}
+          </Button>
+        </>
+      )}
+    </div>
+  )
+}

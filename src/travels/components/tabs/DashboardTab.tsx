@@ -443,7 +443,7 @@ export function DashboardTab({
       {/* ================================================================ */}
       {/* Controls bar — period filter + member picker                      */}
       {/* ================================================================ */}
-      <div className="mx-4 rounded-xl border bg-card px-4 py-3 shadow-sm">
+      <div className="rounded-xl border bg-card px-4 py-3 shadow-sm">
 
         {/* Row 1: Period pills + member picker button on the same line */}
         <div className="flex items-center justify-between gap-2">
@@ -545,7 +545,7 @@ export function DashboardTab({
       {/* ================================================================ */}
       {/* Card ① — Hero (not collapsible)                                  */}
       {/* ================================================================ */}
-      <div className="mx-4 rounded-xl border bg-card px-4 py-4 shadow-sm">
+      <div className="rounded-xl border bg-card px-4 py-4 shadow-sm">
 
         {/* Total spend — large centered number */}
         <div className="mb-1 text-center text-xs font-medium uppercase tracking-wide text-muted-foreground">

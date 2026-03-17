@@ -153,7 +153,15 @@ export function TravelTabs({
                   onDeleteTransaction={onDeleteTransaction}
                 />
               )}
-              {tab.id === 'balance' && <BalanceTab />}
+              {tab.id === 'balance' && (
+                <BalanceTab
+                  transactions={transactions}
+                  members={travel.members}
+                  isSolo={isSolo}
+                  mainCurrency={mainCurrency}
+                  travelName={travel.name}
+                />
+              )}
               {tab.id === 'dashboard' && (
                 <DashboardTab
                   travel={travel}
