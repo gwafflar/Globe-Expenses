@@ -4,10 +4,10 @@
 // then renders TravelTabs which owns the three-tab UI.
 // Transaction list is subscribed via useTransactions (onSnapshot).
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 
-import { doc, getDoc, Timestamp } from 'firebase/firestore'
+import { doc, getDoc } from 'firebase/firestore'
 import { db } from '@/services/firebase'
 import type { LabeledItem, Travel } from '@/travels/types'
 import { normaliseMember } from '@/travels/types'
@@ -32,6 +32,7 @@ import { TransactionForm } from '@/transactions/components/TransactionForm'
 import { TravelTabs } from '@/travels/components/TravelTabs'
 import { InstallPromptBanner } from '@/shared/components/InstallPromptBanner'
 import { deleteTransaction } from '@/transactions/services/transactionService'
+import { unarchiveTravel } from '@/travels/services/travelService'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -46,13 +47,6 @@ import {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function formatTravelDate(date?: Timestamp): string {
-  if (!date) return ''
-  return date.toDate().toLocaleDateString(undefined, {
-    day: '2-digit', month: 'short', year: 'numeric',
-  })
-}
 
 type BannerState = 'pending' | 'saved' | null
 
@@ -69,6 +63,68 @@ function SaveBanner({ state, onDismiss }: { state: BannerState; onDismiss: () =>
       state === 'pending' ? 'bg-orange-500' : 'bg-green-600'
     }`}>
       {state === 'pending' ? '⏳ Saved locally — will sync when back online' : '✅ Transaction saved'}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// ArchiveBanner — shown at the top of an archived travel with unarchive action.
+// Shows loading state while unarchiving, then green confirmation for 10 seconds.
+// ---------------------------------------------------------------------------
+
+function ArchiveBanner({
+  travel,
+  currentUserUid,
+  onTravelChange,
+}: {
+  travel: Travel
+  currentUserUid: string
+  onTravelChange: (updated: Partial<Travel>) => void
+}) {
+  const isArchived = (travel.archivedByUids ?? []).includes(currentUserUid)
+  const [unarchiving, setUnarchiving] = useState(false)
+  const [done, setDone] = useState(false)
+
+  // Auto-dismiss the green confirmation after 10 seconds
+  useEffect(() => {
+    if (!done) return
+    const t = setTimeout(() => setDone(false), 10000)
+    return () => clearTimeout(t)
+  }, [done])
+
+  if (!isArchived && !done) return null
+
+  async function handleUnarchive() {
+    setUnarchiving(true)
+    await unarchiveTravel(travel.travelId, currentUserUid)
+    onTravelChange({
+      archivedByUids: (travel.archivedByUids ?? []).filter((u) => u !== currentUserUid),
+    })
+    setUnarchiving(false)
+    setDone(true)
+  }
+
+  // Green confirmation after successful unarchive
+  if (done) {
+    return (
+      <div className="mx-4 mt-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm font-medium text-green-800 dark:border-green-800 dark:bg-green-950 dark:text-green-200">
+        This travel has been unarchived and is back in your active list.
+      </div>
+    )
+  }
+
+  // Amber banner with unarchive action
+  return (
+    <div className="mx-4 mt-2 flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm dark:border-amber-800 dark:bg-amber-950">
+      <span className="text-amber-800 dark:text-amber-200">This travel is archived.</span>
+      <button
+        type="button"
+        onClick={handleUnarchive}
+        disabled={unarchiving}
+        className="text-sm font-medium text-amber-700 underline hover:text-amber-900 disabled:opacity-50 disabled:no-underline dark:text-amber-300 dark:hover:text-amber-100"
+      >
+        {unarchiving ? 'Unarchiving…' : 'Unarchive'}
+      </button>
     </div>
   )
 }
@@ -143,19 +199,18 @@ export function TravelDetailPage() {
             name: d.name as string,
             emoji: d.emoji as string | undefined,
             description: d.description as string | undefined,
-            startDate: d.startDate as Timestamp | undefined,
-            endDate: d.endDate as Timestamp | undefined,
             // Apply normaliseMember to handle legacy MemberRef documents transparently
             members: (d.members ?? []).map((m: Record<string, unknown>) => normaliseMember(m)),
             memberUids: d.memberUids ?? [],
             createdBy: d.createdBy as string,
-            createdAt: d.createdAt as Timestamp,
+            createdAt: d.createdAt,
             currencies: d.currencies ?? [],
             settings: d.settings,
             categories: d.categories ?? [],
             paymentMethods: d.paymentMethods ?? [],
             countries: d.countries ?? [],
             cities: d.cities ?? [],
+            archivedByUids: d.archivedByUids ?? [],
           })
         }
       } catch {
@@ -217,13 +272,6 @@ export function TravelDetailPage() {
       }
     })
   }
-
-  const headerDates = useMemo(() => {
-    if (!travel) return ''
-    const s = formatTravelDate(travel.startDate)
-    const e = formatTravelDate(travel.endDate)
-    return s && e ? `${s} – ${e}` : s
-  }, [travel])
 
   const isSolo = (travel?.members.length ?? 0) === 1
 
@@ -322,7 +370,6 @@ export function TravelDetailPage() {
           </div>
           <div>
             <h1 className="text-base font-semibold leading-tight">{travel.name}</h1>
-            {headerDates && <p className="text-xs text-muted-foreground">{headerDates}</p>}
           </div>
         </div>
 
@@ -345,6 +392,14 @@ export function TravelDetailPage() {
 
       {/* Install PWA banner — shown on mobile browsers only, hidden once installed */}
       <InstallPromptBanner />
+
+      {/* Archived travel banner — shown when the travel is archived for the current user.
+          Three states: idle (amber), unarchiving (amber + spinner text), done (green + confirmation). */}
+      <ArchiveBanner
+        travel={travel}
+        currentUserUid={currentUserUid}
+        onTravelChange={handleTravelChange}
+      />
 
       {/* Tab content */}
       <main className="mx-auto w-full max-w-2xl flex-1 px-4">

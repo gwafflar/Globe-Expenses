@@ -136,8 +136,6 @@ TypeScript interface defined in `src/auth/services/userService.ts`. Mirrors the 
 | name | string | Travel name (e.g. 'Japan 2026') |
 | emoji | string? | Optional emoji for visual identification (e.g. '🇯🇵') |
 | description | string? | Optional description |
-| startDate | Timestamp? | Optional start date |
-| endDate | Timestamp? | Optional end date |
 | members | TravelMember[] | List of members with display info (see TravelMember below) |
 | memberUids | string[] | Flat array of member UIDs — required for Firestore security rules. Security rules cannot inspect fields inside array objects, so this parallel flat array enables `array-contains` queries. |
 | createdBy | string | UID of travel creator |
@@ -148,6 +146,7 @@ TypeScript interface defined in `src/auth/services/userService.ts`. Mirrors the 
 | countries | LabeledItem[] | Countries visited on this travel. Seeded automatically via syncTransactionLocation(); editable in Parameters tab via CountryPicker. |
 | cities | LabeledItem[] | Cities visited. Same seeding and edit behaviour. |
 | settings | object? | Optional travel settings (e.g. `{ trackLocation: boolean }`) |
+| archivedByUids | string[] | UIDs of members who have archived this travel. Per-user archive — each member can archive/unarchive independently. Absent on older documents, read as `[]`. |
 | pendingInviteId | string? | Transient field written by a joining non-member solely to pass the invite token to Firestore security rules for authorization via `get()`. Not semantic after the write; ignored by the UI. |
 
 **TravelMember**: `{ travelMemberId: string, displayName: string, userId: string | null, allowRename: boolean, joinedAt: Timestamp }`
@@ -319,7 +318,30 @@ Firestore FieldValue transforms (arrayUnion, arrayRemove, serverTimestamp) are N
 4. Badge on Activity tab shows count of unseen events
 5. Each item deep-links to the relevant transaction for quick review and editing
 
-## 5.7 CSV Export / Import
+## 5.7 Travel Leave / Delete / Archive
+
+**Leave (multi-user travel):**
+1. User taps "Leave this travel" in Parameters tab → confirmation dialog
+2. `leaveTravel()` writes a single `updateDoc`: `memberUids` updated via `arrayRemove(uid)` (revokes access), user's member slot unclaimed (`userId → null`, slot itself preserved for split integrity)
+3. If the user is `createdBy`, the role is reassigned to a random remaining UID from `memberUids`
+4. User navigated back to `/travels`
+
+**Impact on `memberUids`:** YES — `arrayRemove(uid)` revokes Firestore read/write access.
+**Impact on `members`:** slot is unclaimed (`userId → null`), NOT removed. `travelMemberId` stays intact in transaction splits.
+
+**Delete (solo / last user):**
+1. User taps "Delete this travel" → confirmation dialog
+2. `deleteTravel()`: batch-deletes all transactions in the subcollection (`getDocs` + `writeBatch`), then `deleteDoc` on the travel document
+3. User navigated back to `/travels`
+
+**v1 limitation:** subcollection cleanup is client-side. If the client crashes mid-deletion, orphaned transactions remain (invisible but consuming storage). A Cloud Function `onDelete` trigger is the proper fix (v2).
+
+**Archive / Unarchive (per-user):**
+1. `archivedByUids: string[]` on the travel document — each member archives independently
+2. `useTravels` splits results client-side into `activeTravels` and `archivedTravels` based on whether the user's UID is in `archivedByUids`
+3. No impact on `memberUids` or `members` — purely additive
+
+## 5.8 CSV Export / Import
 
 - Export: fetch all transactions for a travel, map to flat CSV rows, download as .csv
 - Import: parse uploaded CSV, validate rows, batch-write to Firestore
@@ -386,3 +408,4 @@ All operations require authentication. Rules are deployed via `firestore.rules` 
 | Manual fetch trigger | On-demand webhook fallback deferred to v4. | Decided (v4) |
 | updateTravelList conflict | Adding categories/methods from transaction form overwrites the full LabeledItem[] array. Two offline members adding different items simultaneously → last sync wins. Fix in v2: use arrayUnion for individual item additions. | Open (v2) |
 | arrayUnion in security rules | Resolved: FieldValue transforms (arrayUnion) are NOT reflected in request.resource.data during rule evaluation. Rules must use capability tokens (pendingInviteId + get()) instead of checking mutated array fields. | Decided |
+| Travel deletion subcollection cleanup | Client-side batch delete in v1 (getDocs + writeBatch). Cloud Function `onDelete` trigger on `travels/{travelId}` needed for v2: handles crash recovery, >500 transactions, orphan cleanup. | Open (v2) |

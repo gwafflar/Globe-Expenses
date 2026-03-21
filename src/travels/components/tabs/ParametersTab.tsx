@@ -12,6 +12,10 @@ import {
   claimTravelMember,
   unclaimTravelMember,
   setMemberAllowRename,
+  archiveTravel,
+  unarchiveTravel,
+  leaveTravel,
+  deleteTravel,
 } from '@/travels/services/travelService'
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
 import { useAuthStore } from '@/auth/store/useAuthStore'
@@ -21,7 +25,18 @@ import {
   createShareableInvite,
 } from '@/friends/services/friendService'
 import type { Friend } from '@/friends/types'
+import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { ALL_CURRENCIES, ALL_COUNTRIES } from '@/shared/data/pickerData'
 import { Share2, UserPlus, Check } from 'lucide-react'
 
@@ -815,6 +830,8 @@ interface ParametersTabProps {
 }
 
 export function ParametersTab({ travel, transactions, onTravelChange }: ParametersTabProps) {
+  const navigate = useNavigate()
+  const { currentUser } = useAuthStore()
   const [name, setName] = useState(travel.name)
   const [emoji, setEmoji] = useState(travel.emoji ?? '')
 
@@ -857,6 +874,63 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
   async function handleCurrenciesChange(codes: string[]) {
     await updateTravelCurrencies(travel.travelId, codes)
     onTravelChange({ currencies: codes })
+  }
+
+  // ---------------------------------------------------------------------------
+  // Archive / Leave / Delete logic
+  // ---------------------------------------------------------------------------
+
+  const uid = currentUser?.uid ?? ''
+  const isArchived = (travel.archivedByUids ?? []).includes(uid)
+
+  // Solo check based on memberUids (access-control array).
+  // A user in memberUids may not have claimed a slot yet, but they still count
+  // as a real user with access to the travel.
+  const isOnlyUser = travel.memberUids.length <= 1
+
+  // State for the leave/delete confirmation dialog
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [actionInProgress, setActionInProgress] = useState(false)
+
+  // Archive button: loading spinner + brief "Done!" feedback
+  const [archiving, setArchiving] = useState(false)
+  const [archiveDone, setArchiveDone] = useState(false)
+
+  async function handleArchiveToggle() {
+    setArchiving(true)
+    try {
+      if (isArchived) {
+        await unarchiveTravel(travel.travelId, uid)
+        onTravelChange({ archivedByUids: (travel.archivedByUids ?? []).filter((u) => u !== uid) })
+      } else {
+        await archiveTravel(travel.travelId, uid)
+        onTravelChange({ archivedByUids: [...(travel.archivedByUids ?? []), uid] })
+      }
+      // Brief "Done!" feedback before label updates
+      setArchiveDone(true)
+      setTimeout(() => setArchiveDone(false), 10000)
+    } finally {
+      setArchiving(false)
+    }
+  }
+
+  // Executes leave (multi-user) or delete (solo / last user)
+  async function handleLeaveOrDelete() {
+    setActionInProgress(true)
+    try {
+      if (isOnlyUser) {
+        // Solo or last user — hard-delete the entire travel + transactions
+        await deleteTravel(travel.travelId)
+      } else {
+        // Multi-user — leave: remove self from memberUids, unclaim slot
+        await leaveTravel(travel.travelId, uid, travel.members, travel.memberUids, travel.createdBy)
+      }
+      // Navigate back to travels list after leaving/deleting
+      navigate('/travels')
+    } catch (err) {
+      console.error('[ParametersTab] leave/delete failed:', err)
+      setActionInProgress(false)
+    }
   }
 
   return (
@@ -935,6 +1009,86 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
           onItemsChange={handleListChange('cities')}
         />
       </Section>
+
+      {/* ----------------------------------------------------------------- */}
+      {/* Manage travel — archive and leave/delete actions                   */}
+      {/* ----------------------------------------------------------------- */}
+      <Section title="Manage travel">
+        <div className="flex flex-col gap-2">
+          {/* Archive / Unarchive — with loading spinner and "Done!" feedback */}
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full justify-start"
+            onClick={handleArchiveToggle}
+            disabled={archiving}
+          >
+            {archiving
+              ? (isArchived ? 'Unarchiving…' : 'Archiving…')
+              : archiveDone
+                ? (isArchived ? 'Archived!' : 'Unarchived!')
+                : (isArchived ? 'Unarchive this travel' : 'Archive this travel')}
+          </Button>
+
+          {/* Visual confirmation banner after archiving */}
+          {archiveDone && (
+            <div className={`rounded-lg px-3 py-2 text-sm font-medium ${
+              isArchived
+                ? 'bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950 dark:text-amber-200 dark:border-amber-800'
+                : 'bg-green-50 text-green-800 border border-green-200 dark:bg-green-950 dark:text-green-200 dark:border-green-800'
+            }`}>
+              {isArchived
+                ? 'This travel is now archived. It will appear in your "Archived" section.'
+                : 'This travel has been unarchived and is back in your active list.'}
+            </div>
+          )}
+
+          {/* Leave / Delete — opens confirmation dialog */}
+          <Button
+            type="button"
+            variant="destructive"
+            className="w-full justify-start"
+            onClick={() => setConfirmOpen(true)}
+          >
+            {isOnlyUser ? 'Delete this travel' : 'Leave this travel'}
+          </Button>
+        </div>
+
+        {/* Explanation text */}
+        <p className="text-xs text-muted-foreground">
+          {isOnlyUser
+            ? 'You are the only user. Deleting will permanently remove this travel and all its transactions.'
+            : 'Leaving will remove you from the travel. Other members will still have access. Your past transactions will be preserved.'}
+        </p>
+      </Section>
+
+      {/* Confirmation dialog for leave/delete */}
+      <AlertDialog open={confirmOpen} onOpenChange={(open) => { if (!open) setConfirmOpen(false) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {isOnlyUser ? 'Delete this travel?' : 'Leave this travel?'}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {isOnlyUser
+                ? 'This will permanently delete the travel and all its transactions. This action cannot be undone.'
+                : 'You will lose access to this travel. Your expense history will be preserved for other members.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={actionInProgress}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleLeaveOrDelete}
+              disabled={actionInProgress}
+              className="bg-destructive text-white hover:bg-destructive/90"
+            >
+              {actionInProgress
+                ? (isOnlyUser ? 'Deleting…' : 'Leaving…')
+                : (isOnlyUser ? 'Delete' : 'Leave')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
     </div>
   )

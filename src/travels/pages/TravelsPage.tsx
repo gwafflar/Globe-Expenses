@@ -1,8 +1,7 @@
 // TravelsPage.tsx — lists all travels for the current user.
-// This component focuses on layout and rendering and delegates Firestore
-// logic to the `useTravels` hook.
+// Active travels are shown first, followed by a collapsible "Archived" section.
 
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/auth/store/useAuthStore'
 import { usePendingInvites } from '@/friends/hooks/usePendingInvites'
@@ -16,20 +15,61 @@ function avatarHue(uid: string): number {
 }
 import { useTravels } from '@/travels/hooks/useTravels'
 import type { Travel } from '@/travels/types'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Archive } from 'lucide-react'
 import { CreateTravelModal } from '@/travels/components/CreateTravelModal'
 
-// Simple date formatting helper — converts a Firestore Timestamp to a
-// human-readable string like "12 Mar 2026".
-function formatDate(date: Travel['startDate']): string {
-  if (!date) return ''
-  const jsDate = date.toDate()
-  return jsDate.toLocaleDateString(undefined, {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  })
+// Reusable travel card grid — renders a list of travels as clickable cards.
+function TravelCardGrid({
+  travels,
+  onTravelClick,
+  dimmed,
+}: {
+  travels: Travel[]
+  onTravelClick: (travelId: string) => void
+  dimmed?: boolean
+}) {
+  return (
+    <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+      {travels.map((travel) => {
+        const emoji = travel.emoji || '🌍'
+        return (
+          <button
+            key={travel.travelId}
+            type="button"
+            onClick={() => onTravelClick(travel.travelId)}
+            className={`text-left cursor-pointer group ${dimmed ? 'opacity-60' : ''}`}
+            style={{ perspective: '800px' }}
+          >
+            <Card
+              className="h-full transition-all duration-200 ease-out
+                group-hover:shadow-xl
+                group-hover:-translate-y-1
+                group-hover:scale-[1.03]
+                group-hover:[transform:translateY(-4px)_scale(1.03)_rotateX(2deg)]"
+            >
+              <CardHeader className="flex flex-row items-center gap-3 space-y-0">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-secondary text-xl">
+                  <span>{emoji}</span>
+                </div>
+                <div className="space-y-1">
+                  <CardTitle className="text-base">{travel.name}</CardTitle>
+                </div>
+              </CardHeader>
+              {travel.description && (
+                <CardContent>
+                  <p className="text-sm text-muted-foreground line-clamp-2">
+                    {travel.description}
+                  </p>
+                </CardContent>
+              )}
+            </Card>
+          </button>
+        )
+      })}
+    </div>
+  )
 }
 
 export function TravelsPage() {
@@ -43,28 +83,11 @@ export function TravelsPage() {
   // Local UI state controlling whether the "Create travel" modal is open.
   const [isCreateModalOpen, setIsCreateModalOpen] = useState<boolean>(false)
 
+  // Whether the archived section is expanded
+  const [showArchived, setShowArchived] = useState<boolean>(false)
+
   // Subscribe to the current user's travels via the custom hook.
-  const { travels, isLoading, error } = useTravels(userId)
-
-  // Precompute a presentation-friendly version of each travel card.
-  const travelCards = useMemo(
-    () =>
-      travels.map((travel) => {
-        const emoji = travel.emoji || '🌍'
-        const start = formatDate(travel.startDate)
-        const end = formatDate(travel.endDate)
-
-        let dateLabel = ''
-        if (start && end) {
-          dateLabel = `${start} – ${end}`
-        } else if (start) {
-          dateLabel = start
-        }
-
-        return { ...travel, emoji, dateLabel }
-      }),
-    [travels],
-  )
+  const { activeTravels, archivedTravels, isLoading, error } = useTravels(userId)
 
   const handleOpenCreateTravel = () => {
     setIsCreateModalOpen(true)
@@ -80,6 +103,8 @@ export function TravelsPage() {
   const initials = (userProfile?.displayName || currentUser?.email || '?').charAt(0).toUpperCase()
   // Badge count for the avatar button — driven by a real-time snapshot on invites
   const { count: pendingCount } = usePendingInvites(currentUser?.uid)
+
+  const hasNoTravels = activeTravels.length === 0 && archivedTravels.length === 0
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
@@ -119,7 +144,7 @@ export function TravelsPage() {
         {isLoading ? (
           // Loading state while the Firestore subscription is fetching data.
           <div className="flex h-full items-center justify-center">
-            <p className="text-sm text-muted-foreground">Loading your travels…</p>
+            <p className="text-sm text-muted-foreground">Loading your travels...</p>
           </div>
         ) : error ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
@@ -131,7 +156,7 @@ export function TravelsPage() {
               Retry
             </Button>
           </div>
-        ) : travelCards.length === 0 ? (
+        ) : hasNoTravels ? (
           // Empty state when the user has no travels yet.
           <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
             <p className="text-base font-medium">No travels yet.</p>
@@ -143,44 +168,48 @@ export function TravelsPage() {
             </Button>
           </div>
         ) : (
-          // List of travel cards.
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-            {travelCards.map((travel) => (
-              <button
-                key={travel.travelId}
-                type="button"
-                onClick={() => handleTravelClick(travel.travelId)}
-                className="text-left cursor-pointer group"
-                style={{ perspective: '800px' }}
-              >
-              <Card
-                  className="h-full transition-all duration-200 ease-out
-                    group-hover:shadow-xl
-                    group-hover:-translate-y-1
-                    group-hover:scale-[1.03]
-                    group-hover:[transform:translateY(-4px)_scale(1.03)_rotateX(2deg)]"
-              >                  
-                <CardHeader className="flex flex-row items-center gap-3 space-y-0">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-secondary text-xl">
-                      <span>{travel.emoji}</span>
-                    </div>
-                    <div className="space-y-1">
-                      <CardTitle className="text-base">{travel.name}</CardTitle>
-                      {travel.dateLabel && (
-                        <CardDescription>{travel.dateLabel}</CardDescription>
-                      )}
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    {travel.description && (
-                      <p className="text-sm text-muted-foreground line-clamp-2">
-                        {travel.description}
-                      </p>
-                    )}
-                  </CardContent>
-                </Card>
-              </button>
-            ))}
+          <div className="space-y-6">
+            {/* Active travels */}
+            {activeTravels.length > 0 ? (
+              <TravelCardGrid travels={activeTravels} onTravelClick={handleTravelClick} />
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                All your travels are archived.
+              </p>
+            )}
+
+            {/* Archived travels — directory-style card that expands to show archived travels */}
+            {archivedTravels.length > 0 && (
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => setShowArchived(!showArchived)}
+                  className="text-left cursor-pointer group"
+                  style={{ perspective: '800px' }}
+                >
+                  <Card className="h-full opacity-70 transition-all duration-200 ease-out group-hover:opacity-100 group-hover:shadow-lg">
+                    <CardHeader className="flex flex-row items-center gap-3 space-y-0">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                        <Archive className="h-5 w-5" />
+                      </div>
+                      <div className="space-y-1">
+                        <CardTitle className="text-base">Archived ({archivedTravels.length})</CardTitle>
+                      </div>
+                      <span className="ml-auto text-xs text-muted-foreground">
+                        {showArchived ? '▲' : '▼'}
+                      </span>
+                    </CardHeader>
+                  </Card>
+                </button>
+              </div>
+            )}
+            {showArchived && archivedTravels.length > 0 && (
+              <TravelCardGrid
+                travels={archivedTravels}
+                onTravelClick={handleTravelClick}
+                dimmed
+              />
+            )}
           </div>
         )}
       </main>
@@ -193,6 +222,7 @@ export function TravelsPage() {
           isOpen={isCreateModalOpen}
           onClose={() => setIsCreateModalOpen(false)}
           uid={userId}
+          onCreated={(travelId) => navigate(`/travels/${travelId}`)}
           displayName={
             currentUser?.displayName && currentUser.displayName.trim() !== ''
               ? currentUser.displayName
@@ -203,4 +233,3 @@ export function TravelsPage() {
     </div>
   )
 }
-

@@ -1052,7 +1052,7 @@ Replaced the flat click-to-edit card list with a day-grouped accordion list. All
 
 ### Carry-forward items (open)
 
-- [ ] Delete transaction: implement actual Firestore deletion + confirmation dialog (stub in place)
+- [x] ~~Delete transaction~~ (done in commit f14f7f4, between sessions)
 - [ ] Filter and Display Mode in Transactions tab
 - [ ] Move composite indexes to `firestore.indexes.json`
 
@@ -1123,6 +1123,130 @@ Replaced the placeholder with a working balance & settlement view:
 
 ### Carry-forward items (open)
 
-- [ ] Delete transaction: implement actual Firestore deletion + confirmation dialog (stub in place)
+- [ ] Delete transactions
+- [ ] Filter and Display Mode in Transactions tab
+- [ ] Move composite indexes to `firestore.indexes.json`
+
+---
+
+## ✨ Working Session 012.1 — March 21st 2026
+
+### What was built
+**Delete transaction** 
+
+  - `transactionService.ts`: added
+  `deleteTransaction(travelId, txId)` — fire-and-forget
+  `deleteDoc`
+  - `TravelDetailPage.tsx`: replaced `console.warn` stub
+  with `AlertDialog` confirmation + `deleteTransaction()`
+  call
+  - No new Firestore rules needed — existing `allow read,
+  write` on transactions subcollection already covers delete
+
+--- 
+
+## ✨ Working Session 012.2 — March 21st 2026
+
+**Type**: Feature implementation
+**Tools used**: Claude Code (claude-opus-4-6)
+
+### What was built
+
+**Travel management — leave, delete, archive, date removal**
+
+Three new travel lifecycle operations and several UX improvements.
+
+---
+
+#### Leave travel (multi-user)
+
+When a user leaves a multi-user travel:
+- Their UID is removed from `memberUids` via `arrayRemove` — **revokes Firestore read/write access**
+- Their member slot is **unclaimed** (`userId → null`), **NOT removed** — preserves `travelMemberId` references in existing transaction splits
+- If the leaving user is the `createdBy`, the role is reassigned to a random remaining user from `memberUids`
+- User is navigated back to `/travels` after leaving
+
+**Impact on `memberUids`:** YES — `arrayRemove(uid)` revokes access. The user will no longer see the travel in their `useTravels` query.
+**Impact on `members`:** slot is unclaimed (`userId → null`), NOT removed. `travelMemberId` stays intact for split integrity.
+
+#### Delete travel (solo / last user)
+
+When the user is the only person in `memberUids`:
+- All transactions in the subcollection are batch-deleted client-side (`getDocs` + `writeBatch`)
+- The travel document itself is then deleted via `deleteDoc`
+- User is navigated back to `/travels`
+
+**Known limitation (v1):** subcollection cleanup is client-side. If the client crashes mid-deletion, orphaned transaction documents may remain under the deleted travel. These are invisible (security rules check `memberUids` on the parent, which no longer exists) but still consume Firestore storage. See carry-forward items.
+
+**Edge case — batch size:** Firestore batches are limited to 500 operations. Travels with 500+ transactions would fail. Acceptable for v1 (unlikely scenario).
+
+#### Archive / Unarchive (per-user)
+
+- New field `archivedByUids: string[]` on the travel document (absent on older docs, read as `[]`)
+- Each user can independently archive/unarchive a travel without affecting other members
+- **No impact on `memberUids` or `members`** — purely additive field
+
+**UI:**
+- **TravelsPage:** archived travels shown in a collapsible "directory-style" card (Archive icon + "Archived (N)" label). Clicking expands to show dimmed travel cards.
+- **TravelDetailPage:** amber banner at top for archived travels: "This travel is archived." with an "Unarchive" link. Shows "Unarchiving..." during operation, then green confirmation banner (10 seconds).
+- **ParametersTab:** "Manage travel" section at bottom with:
+  - Archive/Unarchive button with loading state ("Archiving..."/"Unarchiving...") and feedback banner (10 seconds)
+  - Leave/Delete button (label depends on `memberUids.length`) with confirmation dialog
+
+#### Removed `startDate` / `endDate`
+
+- Removed from `Travel` interface, `createTravel` service, `CreateTravelModal` form, `useTravels` hook, `TravelDetailPage` header, `TravelsPage` cards
+- `getTripDurationDays()` in `dashboardHelpers.ts` simplified — only uses transaction date span now
+- **Backward compatible:** existing Firestore docs with these fields are unaffected (fields simply ignored on read, no migration needed)
+
+#### Create travel → navigate to new travel
+
+- `createTravel()` now returns the Firestore document ID
+- `CreateTravelModal` accepts `onCreated` callback
+- `TravelsPage` navigates to `/travels/{newId}` after successful creation
+
+#### "Only user" check fix
+
+- Changed from counting `members.filter(m.userId !== null)` to using `memberUids.length`
+- A user in `memberUids` who hasn't claimed a member slot still counts as a real user with access
+- Creator reassignment on leave also picks from `memberUids` (not just claimed member slots)
+
+---
+
+### Files modified
+
+| File | Changes |
+|------|---------|
+| `src/travels/types.ts` | Removed `startDate`, `endDate`. Added `archivedByUids: string[]` |
+| `src/travels/services/travelService.ts` | Removed date fields from `createTravel` (now returns `string`). Added `leaveTravel()`, `deleteTravel()`, `archiveTravel()`, `unarchiveTravel()` |
+| `src/travels/hooks/useTravels.ts` | Returns `{ activeTravels, archivedTravels }` instead of `travels`. Reads `archivedByUids`, removed date fields |
+| `src/travels/pages/TravelsPage.tsx` | Removed date display. Added archived directory card with `Archive` icon. `onCreated` wiring for navigation |
+| `src/travels/pages/TravelDetailPage.tsx` | Removed date references. Added `ArchiveBanner` component (loading + green confirmation). Reads `archivedByUids` |
+| `src/travels/components/CreateTravelModal.tsx` | Removed date fields. Added `onCreated` callback prop |
+| `src/travels/components/tabs/ParametersTab.tsx` | Added "Manage travel" section with archive/leave/delete buttons, confirmation dialogs, loading/feedback states |
+| `src/travels/components/tabs/dashboardHelpers.ts` | Removed `startDate`/`endDate` branch from `getTripDurationDays()` |
+| `src/travels/components/tabs/__tests__/dashboardHelpers.test.ts` | Updated tests: removed date-based test, added `archivedByUids` to fixture |
+
+### Decisions made (binding)
+
+| # | Decision | Notes |
+|---|----------|-------|
+| 65 | Leave = unclaim slot, not remove | Member slot kept with `userId: null` to preserve `travelMemberId` references in transaction splits. `memberUids` is modified (arrayRemove). |
+| 66 | Delete = client-side subcollection cleanup (v1) | `getDocs` + `writeBatch` before `deleteDoc`. Cloud Function cascade deferred to v2. |
+| 67 | Archive is per-user via `archivedByUids` | Each member archives independently. No impact on access or membership. Client-side filtering in `useTravels`. |
+| 68 | "Only user" check uses `memberUids.length` | Not `members.filter(userId !== null).length`. A user in `memberUids` without a claimed slot still has access. |
+| 69 | Creator reassignment on leave | If the leaving user is `createdBy`, reassign to a random remaining UID from `memberUids`. |
+| 70 | Removed `startDate` / `endDate` from Travel | No use case in v1. Existing Firestore docs unaffected (fields ignored on read). |
+
+### Edge cases documented
+
+- **User leaves → re-invited later:** works fine. UID re-added to `memberUids`. Old unclaimed slot still exists; user can claim it or a new one.
+- **Orphaned transactions after failed delete:** if client crashes between transaction batch delete and travel doc delete, orphaned subcollection docs are invisible (parent doc gone, security rules fail) but consume storage. Cloud Function cleanup is the proper fix (v2).
+- **Batch limit:** Firestore batch max is 500 ops. Travels with 500+ transactions would fail the client-side delete. Acceptable for v1.
+
+### Carry-forward items (open)
+
+- [ ] **Cloud Function `onTravelDeleted`**: Firestore `onDelete` trigger on `travels/{travelId}` to cascade-delete the `transactions` subcollection server-side. Replaces the client-side `getDocs` + `writeBatch` approach. Handles crash recovery, >500 transactions, and retroactive cleanup of any orphaned subcollections. (v2)
+- [ ] PWA icons: `public/images/icon-192.png`, `public/images/icon-512.png`, `public/images/apple-touch-icon.png`
 - [ ] Filter and Display Mode in Transactions tab
 - [ ] Move composite indexes to `firestore.indexes.json`

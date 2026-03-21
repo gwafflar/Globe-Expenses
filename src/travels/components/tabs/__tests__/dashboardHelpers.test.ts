@@ -91,16 +91,9 @@ function makeTravel(overrides: Partial<Travel> = {}): Travel {
     paymentMethods: [],
     countries: [],
     cities: [],
+    archivedByUids: [],
     ...overrides,
   }
-}
-
-// ---------------------------------------------------------------------------
-// Mock Firestore Timestamp for travel.startDate / endDate
-// ---------------------------------------------------------------------------
-
-function makeTimestamp(date: Date) {
-  return { toDate: () => date } as unknown as Travel['startDate']
 }
 
 // ---------------------------------------------------------------------------
@@ -169,18 +162,8 @@ describe('filterTransactions', () => {
 // ---------------------------------------------------------------------------
 
 describe('getTripDurationDays', () => {
-  it('returns correct days when both startDate and endDate are set', () => {
-    const start = new Date(2025, 0, 1)   // 2025-01-01
-    const end   = new Date(2025, 0, 14)  // 2025-01-14 → 14 days
-    const travel = makeTravel({
-      startDate: makeTimestamp(start),
-      endDate:   makeTimestamp(end),
-    })
-    expect(getTripDurationDays(travel, [])).toBe(14)
-  })
-
-  it('returns span of transactions when no travel dates are set', () => {
-    const travel = makeTravel() // no startDate / endDate
+  it('returns span of transactions when dates exist', () => {
+    const travel = makeTravel()
     const txs = [
       makeTx('01-03-2025'),  // earliest
       makeTx('10-03-2025'),

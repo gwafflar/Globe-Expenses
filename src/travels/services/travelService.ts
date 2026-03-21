@@ -4,11 +4,15 @@
 import {
   Timestamp,
   addDoc,
+  arrayRemove,
   arrayUnion,
   collection,
+  deleteDoc,
   doc,
+  getDocs,
   serverTimestamp,
   updateDoc,
+  writeBatch,
 } from 'firebase/firestore'
 import { nanoid } from 'nanoid'
 import { db } from '@/services/firebase'
@@ -45,21 +49,10 @@ interface CreateTravelInput {
   name: string
   emoji?: string
   description?: string
-  startDate?: string
-  endDate?: string
 }
 
-export async function createTravel(input: CreateTravelInput): Promise<void> {
-  const { uid, displayName, name, emoji, description, startDate, endDate } = input
-
-  const startTimestamp =
-    startDate && startDate.trim() !== ''
-      ? Timestamp.fromDate(new Date(startDate))
-      : undefined
-  const endTimestamp =
-    endDate && endDate.trim() !== ''
-      ? Timestamp.fromDate(new Date(endDate))
-      : undefined
+export async function createTravel(input: CreateTravelInput): Promise<string> {
+  const { uid, displayName, name, emoji, description } = input
 
   const travelsRef = collection(db, 'travels')
 
@@ -89,10 +82,9 @@ export async function createTravel(input: CreateTravelInput): Promise<void> {
 
   if (emoji?.trim()) docData.emoji = emoji.trim()
   if (description?.trim()) docData.description = description.trim()
-  if (startTimestamp) docData.startDate = startTimestamp
-  if (endTimestamp) docData.endDate = endTimestamp
 
-  await addDoc(travelsRef, docData)
+  const docRef = await addDoc(travelsRef, docData)
+  return docRef.id
 }
 
 // ---------------------------------------------------------------------------
@@ -302,4 +294,101 @@ export async function setMemberAllowRename(
     m.travelMemberId === travelMemberId ? { ...m, allowRename } : m,
   )
   await updateDoc(ref, { members: updated.map(serialiseMember) })
+}
+
+// ---------------------------------------------------------------------------
+// Leave / Delete travel
+//
+// "Leave" removes the current user from memberUids (revokes access) and
+// unclaims their member slot (sets userId to null). The slot itself is kept
+// so that existing transaction splits referencing the travelMemberId stay valid.
+//
+// If the leaving user is the creator and other real users remain, createdBy
+// is reassigned to a random remaining real user.
+//
+// "Delete" hard-deletes the travel doc AND all child transactions. Used when
+// the user is the only real user left (solo travel or last person standing).
+//
+// Impact on memberUids: YES — arrayRemove(uid) revokes Firestore access.
+// Impact on members:    slot is unclaimed (userId → null), NOT removed.
+// ---------------------------------------------------------------------------
+
+/**
+ * Leaves a multi-user travel. The user's UID is removed from memberUids
+ * (revoking access) and their member slot is unclaimed (userId → null).
+ * If the user is the creator, createdBy is reassigned to another real user.
+ */
+export async function leaveTravel(
+  travelId: string,
+  uid: string,
+  currentMembers: TravelMember[],
+  currentMemberUids: string[],
+  currentCreatedBy: string,
+): Promise<void> {
+  const ref = doc(db, 'travels', travelId)
+
+  // Unclaim the leaving user's slot but keep the slot for split integrity
+  const updatedMembers = currentMembers.map((m) =>
+    m.userId === uid ? { ...m, userId: null } : m,
+  )
+
+  const update: Record<string, unknown> = {
+    memberUids: arrayRemove(uid),
+    members: updatedMembers.map(serialiseMember),
+  }
+
+  // Reassign creator if needed — pick a random remaining user from memberUids.
+  // Uses memberUids (not members with non-null userId) because a user in
+  // memberUids who hasn't claimed a slot is still a real user with access.
+  if (currentCreatedBy === uid) {
+    const remaining = currentMemberUids.filter((u) => u !== uid)
+    if (remaining.length > 0) {
+      update.createdBy = remaining[Math.floor(Math.random() * remaining.length)]
+    }
+  }
+
+  await updateDoc(ref, update)
+}
+
+/**
+ * Hard-deletes a travel and all its child transactions.
+ * Used for solo travels or when the user is the last real user.
+ */
+export async function deleteTravel(travelId: string): Promise<void> {
+  // Delete all transactions in the subcollection first
+  // (Firestore does not cascade-delete subcollections)
+  const txRef = collection(db, 'travels', travelId, 'transactions')
+  const txSnapshot = await getDocs(txRef)
+
+  // Batch delete transactions (max 500 per batch — fine for v1)
+  if (!txSnapshot.empty) {
+    const batch = writeBatch(db)
+    txSnapshot.docs.forEach((txDoc) => batch.delete(txDoc.ref))
+    await batch.commit()
+  }
+
+  // Delete the travel document itself
+  const travelRef = doc(db, 'travels', travelId)
+  await deleteDoc(travelRef)
+}
+
+// ---------------------------------------------------------------------------
+// Archive / Unarchive
+//
+// Per-user archive: each user can independently archive/unarchive a travel.
+// The user's UID is added to / removed from archivedByUids[].
+//
+// No impact on memberUids or members — purely additive.
+// ---------------------------------------------------------------------------
+
+/** Archives a travel for the current user. */
+export async function archiveTravel(travelId: string, uid: string): Promise<void> {
+  const ref = doc(db, 'travels', travelId)
+  await updateDoc(ref, { archivedByUids: arrayUnion(uid) })
+}
+
+/** Unarchives a travel for the current user. */
+export async function unarchiveTravel(travelId: string, uid: string): Promise<void> {
+  const ref = doc(db, 'travels', travelId)
+  await updateDoc(ref, { archivedByUids: arrayRemove(uid) })
 }

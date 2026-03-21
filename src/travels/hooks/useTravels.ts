@@ -1,8 +1,9 @@
 // useTravels.ts — custom hook to subscribe to the current user's travels.
+// Returns active and archived travels separately so the UI can render them
+// in distinct sections.
 
 import { useEffect, useState } from 'react'
 import {
-  Timestamp,
   collection,
   onSnapshot,
   orderBy,
@@ -17,19 +18,22 @@ import type { Travel } from '@/travels/types'
 import { normaliseMember } from '@/travels/types'
 
 interface UseTravelsResult {
-  travels: Travel[]
+  activeTravels: Travel[]
+  archivedTravels: Travel[]
   isLoading: boolean
   error: string | null
 }
 
 export function useTravels(userId: string | undefined): UseTravelsResult {
-  const [travels, setTravels] = useState<Travel[]>([])
+  const [activeTravels, setActiveTravels] = useState<Travel[]>([])
+  const [archivedTravels, setArchivedTravels] = useState<Travel[]>([])
   const [isLoading, setIsLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!userId) {
-      setTravels([])
+      setActiveTravels([])
+      setArchivedTravels([])
       setIsLoading(false)
       setError(null)
       return
@@ -46,20 +50,23 @@ export function useTravels(userId: string | undefined): UseTravelsResult {
     const unsubscribe = onSnapshot(
       q,
       (snapshot: QuerySnapshot<DocumentData>) => {
-        const nextTravels: Travel[] = snapshot.docs.map((docSnapshot) => {
+        const active: Travel[] = []
+        const archived: Travel[] = []
+
+        for (const docSnapshot of snapshot.docs) {
           const data = docSnapshot.data()
-          return {
+          const archivedByUids: string[] = data.archivedByUids ?? []
+
+          const travel: Travel = {
             travelId: docSnapshot.id,
             name: data.name as string,
             emoji: data.emoji as string | undefined,
             description: data.description as string | undefined,
-            startDate: data.startDate as Timestamp | undefined,
-            endDate: data.endDate as Timestamp | undefined,
             // Apply normaliseMember to handle legacy MemberRef documents transparently
             members: (data.members ?? []).map((raw: Record<string, unknown>) => normaliseMember(raw)),
             memberUids: data.memberUids ?? [],
             createdBy: data.createdBy as string,
-            createdAt: data.createdAt as Timestamp,
+            createdAt: data.createdAt,
             currencies: data.currencies ?? [],
             settings: data.settings,
             // Per-travel lists — default to [] for older documents that pre-date this field
@@ -67,17 +74,28 @@ export function useTravels(userId: string | undefined): UseTravelsResult {
             paymentMethods: data.paymentMethods ?? [],
             countries: data.countries ?? [],
             cities: data.cities ?? [],
+            archivedByUids,
           }
-        })
 
-        setTravels(nextTravels)
+          // Split into active vs archived based on whether the current user
+          // has archived this travel
+          if (archivedByUids.includes(userId)) {
+            archived.push(travel)
+          } else {
+            active.push(travel)
+          }
+        }
+
+        setActiveTravels(active)
+        setArchivedTravels(archived)
         setIsLoading(false)
         setError(null)
       },
       (err: FirestoreError) => {
         // eslint-disable-next-line no-console
         console.error('useTravels onSnapshot error:', err)
-        setTravels([])
+        setActiveTravels([])
+        setArchivedTravels([])
         setIsLoading(false)
         setError(err.message || 'Unable to load travels.')
       },
@@ -88,5 +106,5 @@ export function useTravels(userId: string | undefined): UseTravelsResult {
     }
   }, [userId])
 
-  return { travels, isLoading, error }
+  return { activeTravels, archivedTravels, isLoading, error }
 }

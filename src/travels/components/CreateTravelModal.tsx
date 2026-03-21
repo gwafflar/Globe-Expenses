@@ -13,6 +13,8 @@ interface CreateTravelModalProps {
   onClose: () => void
   uid: string
   displayName: string
+  // Called with the new travel's Firestore doc ID after successful creation.
+  onCreated?: (travelId: string) => void
 }
 
 export function CreateTravelModal({
@@ -20,12 +22,11 @@ export function CreateTravelModal({
   onClose,
   uid,
   displayName,
+  onCreated,
 }: CreateTravelModalProps) {
   const [name, setName] = useState<string>('')
   const [emoji, setEmoji] = useState<string>('')
   const [description, setDescription] = useState<string>('')
-  const [startDate, setStartDate] = useState<string>('')
-  const [endDate, setEndDate] = useState<string>('')
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
@@ -47,28 +48,23 @@ export function CreateTravelModal({
     setIsSubmitting(true)
 
     try {
-      await createTravel({
+      const newTravelId = await createTravel({
         uid,
         displayName,
         name,
         emoji,
         description,
-        startDate,
-        endDate,
       })
 
-      // We do NOT manually refresh the travels list here.
-      // The `useTravels` hook uses Firestore's onSnapshot listener, which will
-      // automatically emit the new travel once this write succeeds.
-
       onClose()
+
+      // Navigate to the newly created travel page
+      if (onCreated) onCreated(newTravelId)
 
       // Reset fields after closing so the next open starts clean.
       setName('')
       setEmoji('')
       setDescription('')
-      setStartDate('')
-      setEndDate('')
     } catch (error) {
       // Log the raw error to the console so we can see the underlying
       // Firebase / network error details during development.
@@ -126,27 +122,6 @@ export function CreateTravelModal({
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
               />
-            </div>
-
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="travel-start">Start date (optional)</Label>
-                <Input
-                  id="travel-start"
-                  type="date"
-                  value={startDate}
-                  onChange={(event) => setStartDate(event.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="travel-end">End date (optional)</Label>
-                <Input
-                  id="travel-end"
-                  type="date"
-                  value={endDate}
-                  onChange={(event) => setEndDate(event.target.value)}
-                />
-              </div>
             </div>
 
             {errorMessage && (

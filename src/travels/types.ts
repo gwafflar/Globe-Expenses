@@ -57,8 +57,6 @@ export interface Travel {
   name: string
   emoji?: string
   description?: string
-  startDate?: Timestamp
-  endDate?: Timestamp
   // members[] uses the new TravelMember shape. normaliseMember() handles legacy docs on read.
   members: TravelMember[]
   // memberUids is access-control only: the flat array of Firebase Auth UIDs for security rules.
@@ -77,4 +75,8 @@ export interface Travel {
   // Seeded from existing transactions; user can add extras here.
   countries: LabeledItem[]
   cities: LabeledItem[]
+
+  // Per-user archive: UIDs of members who have archived this travel.
+  // Absent on older documents — read as [].
+  archivedByUids: string[]
 }

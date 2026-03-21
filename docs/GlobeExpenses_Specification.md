@@ -46,11 +46,15 @@ The product is distributed as a Progressive Web App (PWA), installable directly 
 ## 3.2 Travel Management
 
 - A user can create multiple travels.
-- A travel has: name (required), emoji (optional, for visual identification), description (optional), start date (optional), end date (optional), and a list of members.
+- A travel has: name (required), emoji (optional, for visual identification), description (optional), and a list of members.
 - Travel members can invite others to join via a shareable invite link (see section 3.5). The invited user joins the travel by accepting the link — all existing transactions are visible to them from the moment of joining (no join-date visibility cutoff in v1).
 - All members have equal access to read and write transactions within a travel.
 - A user can view only travels in which they are a member.
 - Each travel carries per-travel editable lists: categories, paymentMethods, countries, cities (all `LabeledItem[]`). Managed from the Parameters tab of the travel detail view.
+- A member can **leave** a multi-user travel (removed from `memberUids`, slot unclaimed but preserved for split integrity). If the leaving member was the creator, `createdBy` is reassigned to a random remaining member from `memberUids`.
+- A member can **delete** a solo travel (or a travel where they are the last user in `memberUids`). This hard-deletes all transactions and the travel document.
+- A member can **archive** a travel for themselves only (per-user `archivedByUids` array). Archived travels appear in a separate collapsible section on the travels list and show an unarchive banner when opened.
+- After creating a new travel, the user is navigated directly to the travel detail page.
 - [v2] Dynamic member removal and join-date based visibility cutoff for past transactions.
 
 ## 3.3 Transaction Management
@@ -384,3 +388,9 @@ The Activity Feed is a pull-model notification center surfacing collaborative ev
 | 42 | Invite acceptance: core batch + separate friendship writes | Batch = invite update + travel update (atomic, must succeed together). Friendship writes = fire-and-forget outside batch. | A friendship-related failure (e.g. already friends) must not abort the travel join |
 | 43 | arrayUnion not reflected in request.resource.data | Firestore FieldValue transforms are evaluated server-side AFTER rules pass. Rules checking request.resource.data.memberUids during an arrayUnion write will see the pre-write value and always fail. | Travel join rule uses pendingInviteId + get() capability check instead of checking the mutated array |
 | 44 | pendingInviteId: transient authorization carrier | The accepter writes pendingInviteId to the travel document solely for the security rule to read via get(). It has no semantic meaning for the UI and is not displayed or used after the write. | Enables non-member write authorization without a Cloud Function intermediate |
+| 65 | Leave = unclaim slot, not remove | Member slot kept with `userId: null` on leave; `memberUids` updated via `arrayRemove`. | Preserves `travelMemberId` references in transaction splits |
+| 66 | Delete = client-side subcollection cleanup (v1) | `getDocs` + `writeBatch` before `deleteDoc`. Cloud Function cascade deferred to v2. | Acceptable for v1 (low transaction counts); v2 needs `onDelete` trigger for reliability |
+| 67 | Per-user archive via `archivedByUids` | Each member archives independently. No impact on access or membership. Client-side filtering. | Simple, no extra queries; each member manages their own view |
+| 68 | "Only user" check uses `memberUids.length` | Not `members.filter(userId !== null).length`. | A user in `memberUids` who hasn't claimed a slot still has access and counts as a real user |
+| 69 | Creator reassignment on leave | If leaving user is `createdBy`, reassign to random remaining UID from `memberUids`. | Ensures `createdBy` always points to an active member |
+| 70 | Removed `startDate` / `endDate` from Travel | No use case in v1. Existing Firestore docs unaffected. | Fields simply ignored on read; no migration needed |

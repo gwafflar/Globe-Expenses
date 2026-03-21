@@ -176,23 +176,15 @@ export function filterTransactions(
 /**
  * Return the trip length in calendar days.
  *
- * Priority:
- *   1. travel.startDate + travel.endDate (both must be set)
- *   2. Span of transaction dates (min → max)
- *   3. Fallback: 30 days
+ * Uses the span of transaction dates (min → max). Falls back to 30 days
+ * if no transactions exist.
  *
  * Used to cap the "Recent days" slider max value.
  */
 export function getTripDurationDays(
-  travel: Travel,
+  _travel: Travel,
   transactions: TransactionWithStatus[],
 ): number {
-  if (travel.startDate && travel.endDate) {
-    const start = travel.startDate.toDate()
-    const end   = travel.endDate.toDate()
-    return diffDays(start, end) + 1
-  }
-
   if (transactions.length > 0) {
     const dates = transactions.map((tx) => parseTxDate(tx.date).getTime())
     const minDate = new Date(Math.min(...dates))
