@@ -180,6 +180,7 @@ export function TravelTabs({
                   transactions={transactions}
                   currentUserUid={currentUserUid}
                   isSolo={isSolo}
+                  onEditTransaction={onEditTransaction}
                 />
               )}
               {tab.id === 'parameters' && (

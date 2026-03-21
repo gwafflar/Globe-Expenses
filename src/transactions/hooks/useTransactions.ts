@@ -80,6 +80,7 @@ export function useTransactions(travelId: string | undefined): UseTransactionsRe
             lastModifiedBy: data.lastModifiedBy as string,
             draftId: data.draftId as string | undefined,
             notes: data.notes as string | undefined,
+            amountFormula: data.amountFormula as string | undefined,
             // hasPendingWrites is true when the write is queued locally but
             // not yet confirmed by the Firestore server.
             isPending: docSnapshot.metadata.hasPendingWrites,

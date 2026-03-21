@@ -194,9 +194,11 @@ function PendingBadge({ isPending }: { isPending: boolean }) {
 function DayGroupHeader({
   date,
   transactions,
+  mainCurrency,
 }: {
   date: string
   transactions: TransactionWithStatus[]
+  mainCurrency: string
 }) {
   const dateLabel = formatDateLabel(date)
 
@@ -220,6 +222,12 @@ function DayGroupHeader({
     return Array.from(seen)
   }, [transactions])
 
+  // Sum of all transaction amounts converted to main currency for this day
+  const dayTotal = useMemo(
+    () => transactions.reduce((sum, tx) => sum + tx.totalAmountMain, 0),
+    [transactions],
+  )
+
   return (
     <div className="flex items-center gap-2 border-b pb-1 pt-3">
       <span className="text-xs font-semibold text-muted-foreground">{dateLabel}</span>
@@ -229,6 +237,10 @@ function DayGroupHeader({
       {cities.length > 0 && (
         <span className="text-xs text-muted-foreground">{cities.join(' · ')}</span>
       )}
+      {/* Day total pushed to the right */}
+      <span className="ml-auto text-xs font-semibold text-muted-foreground">
+        {formatAmount(dayTotal, mainCurrency)}
+      </span>
     </div>
   )
 }
@@ -368,9 +380,8 @@ function TransactionDetail({
     return `1 ${mainSym} = ${(1 / transaction.exchangeRate).toFixed(2)} ${txSym}`
   }, [showRate, rateDirection, transaction.currency, transaction.exchangeRate, mainCurrency])
 
-  // Defensive read — formula field not yet in Transaction type
-  const formula = (transaction as unknown as Record<string, unknown>).formula
-  const formulaStr = typeof formula === 'string' && formula.length > 0 ? formula : null
+  // amountFormula is an optional display-only field storing the raw formula (e.g. "2*2.5 + 1.5")
+  const formulaStr = transaction.amountFormula ?? null
 
   return (
     <div className="space-y-3 border-t bg-muted px-3 py-3 text-sm">
@@ -383,7 +394,7 @@ function TransactionDetail({
           </span>
           {formulaStr && (
             <span className="rounded border bg-background px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
-              {formulaStr}
+              🧮 {formulaStr} = {transaction.totalAmount}
             </span>
           )}
         </div>
@@ -541,7 +552,7 @@ function DayGroupSection({
 }) {
   return (
     <div>
-      <DayGroupHeader date={group.date} transactions={group.transactions} />
+      <DayGroupHeader date={group.date} transactions={group.transactions} mainCurrency={mainCurrency} />
       <div className="mt-1 space-y-1">
         {group.transactions.map((tx) => (
           <Card key={tx.txId} className="overflow-hidden p-0">

@@ -1250,3 +1250,66 @@ When the user is the only person in `memberUids`:
 - [ ] PWA icons: `public/images/icon-192.png`, `public/images/icon-512.png`, `public/images/apple-touch-icon.png`
 - [ ] Filter and Display Mode in Transactions tab
 - [ ] Move composite indexes to `firestore.indexes.json`
+
+---
+
+## 📝 Working Session 012.3 — March 2026
+
+**Type**: Feature development (UI enhancements)
+**Tools used**: Claude Code (claude-opus-4-6)
+
+### What was done
+
+#### Feature 1 — Day total in Transactions tab header
+
+Added the sum of all transactions for each day (in main currency) to the `DayGroupHeader` component. The total is right-aligned on the same line as the date, country flags, and cities.
+
+**Files changed:** `src/travels/components/tabs/TransactionsTab.tsx`
+
+#### Feature 2 — Stacked horizontal bar chart in Dashboard "Recent days" card
+
+Replaced the per-category vertical bar list with a single stacked horizontal bar per day. Each day is one line with colored segments proportional to category amounts. Overall bar width scales to the maximum day total across the window (not percentage per day). Minimum segment width of 3px ensures tiny categories remain visible.
+
+Added interactive features:
+- **Tap a segment** → info panel shows category name, date, total, and a list of that category's transactions for the clicked day (name, local amount, main currency amount).
+- **Hide category** → "Hide all" button excludes the entire category from the chart; `recentMaxTotal` rescales.
+- **Hide individual transaction** → eye toggle per transaction in the info panel; excluded from data and rescaling.
+- **Edit transaction** → pencil icon per transaction opens the `TransactionForm` drawer (same as Transactions tab). `onEditTransaction` prop threaded from `TravelDetailPage` → `TravelTabs` → `DashboardTab`.
+- **Hidden items pills** → hidden categories (with color dot) and individual transactions shown as re-show pills below the chart.
+
+**Files changed:** `src/travels/components/tabs/DashboardTab.tsx`, `src/travels/components/TravelTabs.tsx`
+
+#### Feature 3 — Formula display in expanded transaction card
+
+The `amountFormula` field (raw formula string like "2*2.5 + 1.5") is now displayed in the expanded transaction detail with a 🧮 emoji prefix.
+
+**Bug fix:** `amountFormula` was never read from Firestore in `useTransactions` — added it to the document mapping.
+
+**Files changed:** `src/travels/components/tabs/TransactionsTab.tsx`, `src/transactions/hooks/useTransactions.ts`
+
+#### Feature 4 — Formula mode persistence on edit
+
+When editing a transaction that has a saved formula:
+- The formula bar opens automatically (`formulaMode` initialized to `true`).
+- The formula string is pre-populated from `initialValues.amountFormula`.
+- Formula is now saved on update (not just create) — added `amountFormula` to `UpdateTransactionData` and the `updateDoc` call with `deleteField()` cleanup when cleared.
+
+**Files changed:** `src/transactions/components/TransactionForm.tsx`, `src/transactions/services/transactionService.ts`
+
+### Files changed (summary)
+
+| File | Description |
+|------|-------------|
+| `src/travels/components/tabs/TransactionsTab.tsx` | `DayGroupHeader`: added `mainCurrency` prop, day total (right-aligned). `TransactionDetail`: reads `amountFormula` directly (removed defensive cast), added 🧮 prefix |
+| `src/travels/components/tabs/DashboardTab.tsx` | Stacked horizontal bar chart, tap-to-inspect info panel, hide category/transaction, edit transaction, hidden items pills |
+| `src/travels/components/TravelTabs.tsx` | Passed `onEditTransaction` prop to `DashboardTab` |
+| `src/transactions/hooks/useTransactions.ts` | Added `amountFormula` to Firestore document mapping |
+| `src/transactions/components/TransactionForm.tsx` | Initialize `formulaMode`/`formulaStr` from `initialValues.amountFormula` on edit. Moved `amountFormula` into `sharedData` (used by both create and update paths) |
+| `src/transactions/services/transactionService.ts` | Added `amountFormula` to `UpdateTransactionData` type and `updateDoc` call |
+
+### Carry-forward items (open)
+
+- [ ] **Cloud Function `onTravelDeleted`**: cascade-delete transactions subcollection (v2)
+- [ ] PWA icons (still scaffold placeholders)
+- [ ] Filter and Display Mode in Transactions tab
+- [ ] Move composite indexes to `firestore.indexes.json`

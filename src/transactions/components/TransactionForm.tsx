@@ -613,10 +613,12 @@ export function TransactionForm({
   const myTravelMemberId = myMember?.travelMemberId ?? ''
 
   // --- Formula mode state ---
-  // `formulaMode` — whether the formula bar is currently shown instead of the plain amount input
-  const [formulaMode, setFormulaMode] = useState(false)
-  // `formulaStr` — the raw formula string as typed by the user (e.g. "2*2.5 + 1.5")
-  const [formulaStr, setFormulaStr] = useState('')
+  // `formulaMode` — whether the formula bar is currently shown instead of the plain amount input.
+  // When editing a transaction that has a saved formula, open in formula mode automatically.
+  const [formulaMode, setFormulaMode] = useState(isEdit && !!initialValues?.amountFormula)
+  // `formulaStr` — the raw formula string as typed by the user (e.g. "2*2.5 + 1.5").
+  // Pre-populated from the saved formula when editing.
+  const [formulaStr, setFormulaStr] = useState(isEdit ? (initialValues?.amountFormula ?? '') : '')
 
   // Effective category and payment method lists:
   // use per-travel lists if available, else fall back to userProfile global lists.
@@ -861,6 +863,7 @@ export function TransactionForm({
       beneficiaries,
       lastModifiedBy: user.uid,
       notes: notes.trim() || undefined,
+      amountFormula: formulaStr.trim() || undefined,
     }
 
     if (isEdit) {
@@ -872,7 +875,6 @@ export function TransactionForm({
       const newTxId = createTransaction(travelId, {
         ...sharedData,
         createdBy: { type: 'user' as const, uid: user.uid },
-        ...(formulaStr.trim() ? { amountFormula: formulaStr.trim() } : {}),
       })
       onSuccess(newTxId)
     }

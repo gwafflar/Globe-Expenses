@@ -71,6 +71,7 @@ export type UpdateTransactionData = {
   beneficiaries: Split[]
   lastModifiedBy: string
   notes?: string
+  amountFormula?: string
 }
 
 /**
@@ -103,6 +104,7 @@ export function updateTransaction(
     beneficiaries: data.beneficiaries,
     lastModifiedBy: data.lastModifiedBy,
     notes: data.notes ?? deleteField(),
+    amountFormula: data.amountFormula ?? deleteField(),
     lastModifiedAt: serverTimestamp(),
   }).catch((err: unknown) => {
     console.error('[transactionService] updateDoc failed:', err)
