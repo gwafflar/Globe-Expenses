@@ -31,6 +31,17 @@ import {
 import { TransactionForm } from '@/transactions/components/TransactionForm'
 import { TravelTabs } from '@/travels/components/TravelTabs'
 import { InstallPromptBanner } from '@/shared/components/InstallPromptBanner'
+import { deleteTransaction } from '@/transactions/services/transactionService'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -84,6 +95,8 @@ export function TravelDetailPage() {
   const [formKey, setFormKey] = useState(0)
   const [watchedTxId, setWatchedTxId] = useState<string | null>(null)
   const [bannerState, setBannerState] = useState<BannerState>(null)
+  // Holds the txId the user wants to delete — non-null opens the confirmation dialog
+  const [deletingTxId, setDeletingTxId] = useState<string | null>(null)
 
   // Settlement currency: allows settlements to be displayed in a different currency
   // than mainCurrency. Rate means: 1 mainCurrency = settlementRate settlementCurrency.
@@ -179,9 +192,16 @@ export function TravelDetailPage() {
     if (tx) handleEditTransaction(tx)
   }
 
-  // Placeholder — actual deletion implemented in a follow-up.
+  // Opens the confirmation dialog before deleting a transaction.
   function handleDeleteTransaction(txId: string) {
-    console.warn('[TravelDetailPage] delete not yet implemented for txId:', txId)
+    setDeletingTxId(txId)
+  }
+
+  // Called when the user confirms deletion in the AlertDialog.
+  function confirmDelete() {
+    if (!travelId || !deletingTxId) return
+    deleteTransaction(travelId, deletingTxId)
+    setDeletingTxId(null)
   }
 
   // Called by TransactionForm after a new transaction introduces a country/city
@@ -355,6 +375,24 @@ export function TravelDetailPage() {
       >
         +
       </button>
+
+      {/* Delete confirmation dialog */}
+      <AlertDialog open={deletingTxId !== null} onOpenChange={(open) => { if (!open) setDeletingTxId(null) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this expense?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. The expense will be permanently removed for all members.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} className="bg-destructive text-white hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* New / Edit expense drawer — shared for both create and edit modes */}
       <Drawer open={isFormOpen} onOpenChange={(open) => { if (!open) { setIsFormOpen(false); setEditingTx(null) } }}>

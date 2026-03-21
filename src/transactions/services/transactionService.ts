@@ -1,6 +1,6 @@
 // transactionService.ts — Firestore write operations for transactions.
 
-import { collection, doc, setDoc, updateDoc, deleteField, serverTimestamp } from 'firebase/firestore'
+import { collection, doc, setDoc, updateDoc, deleteDoc, deleteField, serverTimestamp } from 'firebase/firestore'
 import { db } from '@/services/firebase'
 import type { Transaction, Split } from '@/transactions/types'
 
@@ -106,5 +106,23 @@ export function updateTransaction(
     lastModifiedAt: serverTimestamp(),
   }).catch((err: unknown) => {
     console.error('[transactionService] updateDoc failed:', err)
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Delete an existing transaction
+// ---------------------------------------------------------------------------
+
+/**
+ * Deletes a transaction document from Firestore.
+ * Fire-and-forget: same offline-first pattern as create/update.
+ * The onSnapshot listener will remove the document from the UI immediately
+ * (local cache delete), then sync the deletion when back online.
+ */
+export function deleteTransaction(travelId: string, txId: string): void {
+  const txRef = doc(db, 'travels', travelId, 'transactions', txId)
+
+  deleteDoc(txRef).catch((err: unknown) => {
+    console.error('[transactionService] deleteDoc failed:', err)
   })
 }
