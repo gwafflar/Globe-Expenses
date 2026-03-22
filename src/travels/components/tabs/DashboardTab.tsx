@@ -345,6 +345,33 @@ export function DashboardTab({
     [sortedDays],
   )
 
+  // yAxisTicks — "nice" round values for the horizontal grid lines on Card ②.
+  // Dynamically picks a step size so we get 2–5 lines that are easy to read
+  // (e.g. 50, 100, 200, 500, 1000…).  The algorithm:
+  //   1. Divide maxDayTotal by a target of ~4 ticks to get a raw step.
+  //   2. Round that step up to the nearest "nice" number (1, 2, 5 × 10^n).
+  //   3. Generate ticks from step up to maxDayTotal.
+  const yAxisTicks = useMemo(() => {
+    if (maxDayTotal <= 0) return []
+    const TARGET_TICKS = 4
+    const rawStep = maxDayTotal / TARGET_TICKS
+
+    // Find the order of magnitude, then snap to 1/2/5 within it
+    const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)))
+    const residual = rawStep / magnitude
+    let niceStep: number
+    if (residual <= 1.5) niceStep = 1 * magnitude
+    else if (residual <= 3.5) niceStep = 2 * magnitude
+    else if (residual <= 7.5) niceStep = 5 * magnitude
+    else niceStep = 10 * magnitude
+
+    const ticks: number[] = []
+    for (let v = niceStep; v <= maxDayTotal; v += niceStep) {
+      ticks.push(v)
+    }
+    return ticks
+  }, [maxDayTotal])
+
   // ---------------------------------------------------------------------------
   // Recent days card data
   // ---------------------------------------------------------------------------
@@ -419,6 +446,27 @@ export function DashboardTab({
     () => Math.max(...filteredRecentDaysData.map((d) => d.total), 1),
     [filteredRecentDaysData],
   )
+
+  // recentXTicks — "nice" round values for the vertical grid lines on Card ③.
+  // Same 1/2/5 algorithm as yAxisTicks but applied to horizontal bars.
+  const recentXTicks = useMemo(() => {
+    if (recentMaxTotal <= 0) return []
+    const TARGET_TICKS = 4
+    const rawStep = recentMaxTotal / TARGET_TICKS
+    const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)))
+    const residual = rawStep / magnitude
+    let niceStep: number
+    if (residual <= 1.5) niceStep = 1 * magnitude
+    else if (residual <= 3.5) niceStep = 2 * magnitude
+    else if (residual <= 7.5) niceStep = 5 * magnitude
+    else niceStep = 10 * magnitude
+
+    const ticks: number[] = []
+    for (let v = niceStep; v <= recentMaxTotal; v += niceStep) {
+      ticks.push(v)
+    }
+    return ticks
+  }, [recentMaxTotal])
 
   // Transactions for the tapped segment's category on the tapped day.
   // Used to render the detail list inside the info panel.
@@ -752,43 +800,69 @@ export function DashboardTab({
           </p>
         ) : (
           <>
-            {/* Bar chart container — fixed height, flex row. Each bar is clickable. */}
-            <div className="relative h-20">
-              <div className="flex h-full items-end gap-0.5">
-                {sortedDays.map(([dateStr, total]) => {
-                  const heightPct = (total / maxDayTotal) * 100
-                  const isTapped = tappedDayKey === dateStr
-                  return (
-                    <div
-                      key={dateStr}
-                      className="flex-1 cursor-pointer"
-                      style={{ height: '100%', display: 'flex', alignItems: 'flex-end' }}
-                      // Toggle: tap same bar to dismiss, tap another to switch
-                      onClick={() =>
-                        setTappedDayKey((prev) => (prev === dateStr ? null : dateStr))
-                      }
-                    >
+            {/* Bar chart with Y-axis labels and dashed grid lines */}
+            <div className="flex h-20">
+              {/* Y-axis labels — narrow fixed-width column on the left */}
+              <div className="relative mr-1.5 flex w-7 shrink-0 flex-col justify-between">
+                {yAxisTicks.map((tick) => (
+                  <span
+                    key={tick}
+                    className="absolute right-0 text-[10px] leading-none text-muted-foreground"
+                    // Position from bottom: tick/max * 100%, nudged up by half line-height
+                    style={{ bottom: `calc(${(tick / maxDayTotal) * 100}% - 5px)` }}
+                  >
+                    {tick >= 1000 ? `${Math.round(tick / 1000)}k` : Math.round(tick)}
+                  </span>
+                ))}
+              </div>
+
+              {/* Chart area — bars + horizontal grid lines */}
+              <div className="relative flex-1">
+                {/* Dashed horizontal grid lines (behind the bars via z-0) */}
+                {yAxisTicks.map((tick) => (
+                  <div
+                    key={tick}
+                    className="pointer-events-none absolute left-0 right-0 z-0 border-t border-dashed border-muted-foreground/20"
+                    style={{ bottom: `${(tick / maxDayTotal) * 100}%` }}
+                  />
+                ))}
+
+                {/* Bars — z-10 so they render above the grid lines */}
+                <div className="relative z-10 flex h-full items-end gap-0.5">
+                  {sortedDays.map(([dateStr, total]) => {
+                    const heightPct = (total / maxDayTotal) * 100
+                    const isTapped = tappedDayKey === dateStr
+                    return (
                       <div
-                        title={`${formatDayLabel(dateStr)}: ${formatAmount(total, mainCurrency)}`}
-                        className={`w-full rounded-t transition-opacity ${
-                          isTapped ? 'bg-primary' : 'bg-primary/70'
-                        } ${tappedDayKey && !isTapped ? 'opacity-40' : ''}`}
-                        style={{ height: `${heightPct}%`, minHeight: 2 }}
-                      />
-                    </div>
-                  )
-                })}
+                        key={dateStr}
+                        className="flex-1 cursor-pointer"
+                        style={{ height: '100%', display: 'flex', alignItems: 'flex-end' }}
+                        onClick={() =>
+                          setTappedDayKey((prev) => (prev === dateStr ? null : dateStr))
+                        }
+                      >
+                        <div
+                          title={`${formatDayLabel(dateStr)}: ${formatAmount(total, mainCurrency)}`}
+                          className={`w-full rounded-t transition-opacity ${
+                            isTapped ? 'bg-primary' : 'bg-primary/70'
+                          } ${tappedDayKey && !isTapped ? 'opacity-40' : ''}`}
+                          style={{ height: `${heightPct}%`, minHeight: 2 }}
+                        />
+                      </div>
+                    )
+                  })}
+                </div>
               </div>
             </div>
 
-            {/* X-axis labels: first, middle, last */}
+            {/* X-axis labels: first, middle, last — offset to match chart area */}
             {(() => {
               const first  = sortedDays[0][0]
               const last   = sortedDays[sortedDays.length - 1][0]
               const midIdx = Math.floor(sortedDays.length / 2)
               const mid    = sortedDays[midIdx][0]
               return (
-                <div className="mt-1 flex justify-between text-xs text-muted-foreground">
+                <div className="ml-[1.875rem] mt-1 flex justify-between text-xs text-muted-foreground">
                   <span>{formatDayLabel(first)}</span>
                   <span>{formatDayLabel(mid)}</span>
                   <span>{formatDayLabel(last)}</span>
@@ -1023,7 +1097,7 @@ export function DashboardTab({
           </div>
         )}
 
-        {/* Day rows */}
+        {/* Day rows with vertical grid lines */}
         <div className="flex flex-col gap-2">
           {filteredRecentDaysData.map(({ dateStr, total, categories }) => (
             <div key={dateStr} className="flex items-center gap-2">
@@ -1032,11 +1106,20 @@ export function DashboardTab({
                 {formatDayLabel(dateStr)}
               </span>
 
-              {/* Stacked horizontal bar — one line per day, segments proportional to category amounts */}
-              <div className="flex flex-1 items-center">
+              {/* Bar area — relative container so vertical grid lines can be overlaid */}
+              <div className="relative flex flex-1 items-center" style={{ minHeight: 14 }}>
+                {/* Vertical dashed grid lines (behind bars via z-0) */}
+                {recentXTicks.map((tick) => (
+                  <div
+                    key={tick}
+                    className="pointer-events-none absolute top-0 bottom-0 z-0 border-l border-dashed border-muted-foreground/40"
+                    style={{ left: `${(tick / recentMaxTotal) * 100}%` }}
+                  />
+                ))}
+
                 {categories.length === 0 ? (
                   // No transactions this day — gray placeholder bar
-                  <div className="flex items-center gap-2">
+                  <div className="relative z-10 flex items-center gap-2">
                     <div
                       style={{ width: 20, height: 14, borderRadius: 3, backgroundColor: '#d1d5db' }}
                     />
@@ -1046,7 +1129,7 @@ export function DashboardTab({
                   // Overall bar width scales to recentMaxTotal (days with less spend = shorter bar).
                   // Each segment inside is proportional to its category amount within the day.
                   <div
-                    className="flex overflow-hidden rounded"
+                    className="relative z-10 flex overflow-hidden rounded"
                     style={{ width: `${(total / recentMaxTotal) * 100}%`, minWidth: 4, height: 14 }}
                   >
                     {categories.map((cat, i) => {
@@ -1088,6 +1171,32 @@ export function DashboardTab({
               </span>
             </div>
           ))}
+
+          {/* X-axis tick labels — aligned with the bar area (skip date + total columns) */}
+          {recentXTicks.length > 0 && (
+            <div className="flex items-center gap-2">
+              {/* Spacer matching date label width */}
+              <span className="w-12 shrink-0" />
+              {/* Tick labels positioned relative to bar area */}
+              <div className="relative flex-1" style={{ height: 14 }}>
+                {recentXTicks.map((tick) => (
+                  <span
+                    key={tick}
+                    className="absolute text-[10px] leading-none text-muted-foreground"
+                    // Center the label on the tick line
+                    style={{
+                      left: `${(tick / recentMaxTotal) * 100}%`,
+                      transform: 'translateX(-50%)',
+                    }}
+                  >
+                    {tick >= 1000 ? `${Math.round(tick / 1000)}k` : Math.round(tick)}
+                  </span>
+                ))}
+              </div>
+              {/* Spacer matching total column width */}
+              <span className="w-16 shrink-0" />
+            </div>
+          )}
         </div>
 
         {/* Tapped segment info panel — category header + day's transactions */}

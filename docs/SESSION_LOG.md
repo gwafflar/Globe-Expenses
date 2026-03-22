@@ -1323,11 +1323,73 @@ When editing a transaction that has a saved formula:
 
 ### What was done
 
-Extended the tap-to-inspect pattern (already in "Recent days" card) to two more Dashboard cards:
+Extended the tap-to-inspect pattern (already in "Recent days" card) to two more Dashboard cards + X- and Y-axis grid lines in two cards.
 
 - **Spending over time (Card ②):** Clicking a day bar opens a panel listing that day's transactions grouped by category. Each category group has a "Hide all" toggle; each transaction has edit + hide buttons. Hidden items are excluded from `perDayTotals`, rescaling the bar chart.
 - **By category (Card ④):** Clicking a category row opens a panel listing all transactions for that category in the selected period, with edit + hide per transaction and a "Hide all" button that removes the entire category from the chart. Percentages recalculate.
 
 Each card maintains independent hidden sets (`hiddenSpendingTxIds` / `hiddenSpendingCategories` for Card ②, `hiddenCategoryTxIds` / `hiddenCategoryNames` for Card ④).
 
+- **Axis grid lines:** Added Y-axis labels + horizontal dashed grid lines to Card ② and X-axis labels + vertical dashed grid lines to Card ③. Tick values are auto-computed using a 1/2/5 nice-number algorithm (~4 ticks, values like 50/100/200/500/1k). Values ≥1000 display as `Nk`.
+
 **Files changed:** `src/travels/components/tabs/DashboardTab.tsx`
+
+---
+
+## ✨ Working Session 012.5 — 22 March 2026
+
+**Type**: Feature — Transaction filter & search
+**Tools used**: Claude Code (claude-opus-4-6)
+
+### What was built
+
+**Client-side filter & search for the Transactions tab.** All filtering operates on the in-memory transaction array — zero extra Firestore reads.
+
+#### Filter hook (`src/transactions/hooks/useTransactionFilters.ts`)
+
+Custom hook managing filter state, search query, and filtered output via `useMemo`.
+
+- **7 filter dimensions**: category, currency, country, city, paymentMethod, paidBy, beneficiaries
+- **Search bar**: case-insensitive substring match on transaction name + numeric amount matching (prefix)
+- **Filter logic**: OR within a dimension, AND across dimensions
+- **"Undefined" option**: for optional fields (category, country, city, paymentMethod), an `__undefined__` sentinel is appended when some transactions lack the field — lets users filter for "no value set"
+- **Cross-filtering** (`availableOptions`): for each dimension, applies all *other* active filters, then collects which values still have matching transactions. Unavailable values are greyed out in the UI (line-through + muted). Short-circuits when no filters are active.
+
+Extracted helper functions: `matchesDimension()`, `matchesSearch()`, `extractDimensionValues()` — reused by both the main filter and the cross-filter computation.
+
+#### Filter panel (`src/transactions/components/FilterPanel.tsx`)
+
+- Search bar with 🔍 icon
+- Horizontal scrollable dimension chips (Category, Currency, Country, City, Payment, Paid by, For)
+- Tap a chip → expands multi-select toggle buttons; unavailable values shown with line-through
+- "Undefined" option styled with italic + dashed border
+- Active filter badges (removable); "Undefined" badges prefixed with dimension label ("Category: Undefined")
+- Result count (`12 / 45`) + "Clear all" button
+- `paidBy`/`beneficiaries` hidden in solo travels; dimensions with no options hidden
+
+#### TransactionsTab integration
+
+- Filter toggle button replaces old disabled placeholder; shows active filter count badge
+- Filter panel slides in below the toolbar
+- Day-grouped list renders from the filtered array
+- "No transactions match your filters" empty state with "Clear all filters" button
+
+### Files created
+
+| File | Description |
+|------|-------------|
+| `src/transactions/hooks/useTransactionFilters.ts` | Filter/search hook with cross-filtering |
+| `src/transactions/components/FilterPanel.tsx` | Collapsible filter & search UI |
+
+### Files modified
+
+| File | Changes |
+|------|-------------|
+| `src/travels/components/tabs/TransactionsTab.tsx` | Replaced filter placeholder with `FilterToggleButton`; integrated `useTransactionFilters` hook and `FilterPanel`; added "no results" empty state |
+
+### Carry-forward items (open)
+
+- [ ] **Cloud Function `onTravelDeleted`**: cascade-delete transactions subcollection (v2)
+- [ ] PWA icons (still scaffold placeholders)
+- [ ] Display Mode in Transactions tab
+- [ ] Move composite indexes to `firestore.indexes.json`

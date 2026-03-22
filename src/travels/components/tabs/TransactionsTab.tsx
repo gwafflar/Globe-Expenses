@@ -12,6 +12,8 @@ import { Card } from '@/components/ui/card'
 import { exportTravelToXlsx } from '@/shared/utils/sheetExport'
 import { ImportXlsxDialog } from '@/shared/components/ImportXlsxDialog'
 import { normalizeTransactionSplits } from '@/travels/components/tabs/dashboardHelpers'
+import { useTransactionFilters } from '@/transactions/hooks/useTransactionFilters'
+import { FilterPanel } from '@/transactions/components/FilterPanel'
 
 // ---------------------------------------------------------------------------
 // Currency symbol helpers
@@ -584,7 +586,7 @@ function DayGroupSection({
 }
 
 // ---------------------------------------------------------------------------
-// Placeholder toolbar button (unchanged)
+// Placeholder toolbar button (for features not yet implemented)
 // ---------------------------------------------------------------------------
 
 function PlaceholderButton({ label }: { label: string }) {
@@ -601,6 +603,43 @@ function PlaceholderButton({ label }: { label: string }) {
         Coming soon
       </div>
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// FilterToggleButton — replaces the old placeholder, shows active filter count
+// ---------------------------------------------------------------------------
+
+function FilterToggleButton({
+  isOpen,
+  activeCount,
+  onClick,
+}: {
+  isOpen: boolean
+  activeCount: number
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`
+        flex items-center gap-1 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors
+        ${isOpen
+          ? 'border-primary bg-primary/10 text-primary'
+          : activeCount > 0
+            ? 'border-primary/50 bg-primary/5 text-primary hover:bg-primary/10'
+            : 'border-input bg-background text-foreground hover:bg-accent'
+        }
+      `}
+    >
+      🔍 Filter
+      {activeCount > 0 && (
+        <span className="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground">
+          {activeCount}
+        </span>
+      )}
+    </button>
   )
 }
 
@@ -653,8 +692,29 @@ export function TransactionsTab({
     [transactions, travel.members],
   )
 
-  // Day-grouped transactions (transactions already sorted date desc)
-  const dayGroups = useMemo(() => groupByDay(normalizedTransactions), [normalizedTransactions])
+  // -- Filter & search (all client-side, no extra Firestore reads) --
+  const {
+    filtered: filteredTransactions,
+    searchQuery,
+    setSearchQuery,
+    filters,
+    toggleFilter,
+    clearDimension,
+    clearAll,
+    hasActiveFilters,
+    options,
+    availableOptions,
+    resultCount,
+  } = useTransactionFilters(normalizedTransactions, travel, isSolo)
+
+  // Controls whether the filter panel is visible
+  const [filterOpen, setFilterOpen] = useState(false)
+
+  // Count of active filter dimensions (not counting search) — shown on the toggle button
+  const activeFilterCount = Object.keys(filters).length + (searchQuery.trim() ? 1 : 0)
+
+  // Day-grouped transactions — now uses the FILTERED list
+  const dayGroups = useMemo(() => groupByDay(filteredTransactions), [filteredTransactions])
 
   const [isExporting, setIsExporting] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
@@ -683,7 +743,11 @@ export function TransactionsTab({
       {/* Toolbar */}
       <div className="flex items-center justify-between">
         <div className="flex gap-2">
-          <PlaceholderButton label="🔍 Filter" />
+          <FilterToggleButton
+            isOpen={filterOpen}
+            activeCount={activeFilterCount}
+            onClick={() => setFilterOpen((prev) => !prev)}
+          />
           <PlaceholderButton label="⊞ Display" />
         </div>
         <div className="flex gap-2">
@@ -708,6 +772,25 @@ export function TransactionsTab({
         </div>
       </div>
 
+      {/* Filter panel — slides in below toolbar when open */}
+      {filterOpen && (
+        <FilterPanel
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          filters={filters}
+          options={options}
+          availableOptions={availableOptions}
+          onToggleFilter={toggleFilter}
+          onClearDimension={clearDimension}
+          onClearAll={clearAll}
+          hasActiveFilters={hasActiveFilters}
+          resultCount={resultCount}
+          totalCount={normalizedTransactions.length}
+          travel={travel}
+          isSolo={isSolo}
+        />
+      )}
+
       {/* List */}
       {loading ? (
         <div className="flex h-40 items-center justify-center">
@@ -719,6 +802,14 @@ export function TransactionsTab({
           <p className="max-w-xs text-xs text-muted-foreground">Tap + to add your first expense.</p>
           <Button type="button" size="sm" onClick={onAddExpense}>
             Add your first expense
+          </Button>
+        </div>
+      ) : filteredTransactions.length === 0 && hasActiveFilters ? (
+        /* No results after filtering — show a message instead of empty space */
+        <div className="flex h-40 flex-col items-center justify-center gap-3 text-center">
+          <p className="text-sm font-medium text-muted-foreground">No transactions match your filters.</p>
+          <Button type="button" variant="outline" size="sm" onClick={clearAll}>
+            Clear all filters
           </Button>
         </div>
       ) : (
