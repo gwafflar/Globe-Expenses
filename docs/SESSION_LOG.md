@@ -1313,3 +1313,21 @@ When editing a transaction that has a saved formula:
 - [ ] PWA icons (still scaffold placeholders)
 - [ ] Filter and Display Mode in Transactions tab
 - [ ] Move composite indexes to `firestore.indexes.json`
+
+---
+
+## 📝 Working Session 012.4 — 22 March 2026
+
+**Type**: Feature — Dashboard drill-down
+**Tools used**: Claude Code (claude-opus-4-6)
+
+### What was done
+
+Extended the tap-to-inspect pattern (already in "Recent days" card) to two more Dashboard cards:
+
+- **Spending over time (Card ②):** Clicking a day bar opens a panel listing that day's transactions grouped by category. Each category group has a "Hide all" toggle; each transaction has edit + hide buttons. Hidden items are excluded from `perDayTotals`, rescaling the bar chart.
+- **By category (Card ④):** Clicking a category row opens a panel listing all transactions for that category in the selected period, with edit + hide per transaction and a "Hide all" button that removes the entire category from the chart. Percentages recalculate.
+
+Each card maintains independent hidden sets (`hiddenSpendingTxIds` / `hiddenSpendingCategories` for Card ②, `hiddenCategoryTxIds` / `hiddenCategoryNames` for Card ④).
+
+**Files changed:** `src/travels/components/tabs/DashboardTab.tsx`

@@ -144,6 +144,29 @@ export function DashboardTab({
     dateStr: string
   } | null>(null)
 
+  // tappedDayKey — which day bar was tapped in Card ② (Spending over time).
+  // null = panel closed. Stores the DD-MM-YYYY date string.
+  const [tappedDayKey, setTappedDayKey] = useState<string | null>(null)
+
+  // hiddenSpendingTxIds — transaction IDs hidden from the spending-over-time chart.
+  // Independent from hiddenTxIds (which is for Card ③ Recent days).
+  const [hiddenSpendingTxIds, setHiddenSpendingTxIds] = useState<Set<string>>(new Set())
+
+  // hiddenSpendingCategories — entire category names hidden from the
+  // spending-over-time chart. All transactions of a hidden category are excluded.
+  const [hiddenSpendingCategories, setHiddenSpendingCategories] = useState<Set<string>>(new Set())
+
+  // tappedCategoryKey — which category was tapped in Card ④ (By category).
+  // null = panel closed. Stores the category name (empty string = Uncategorized).
+  const [tappedCategoryKey, setTappedCategoryKey] = useState<string | null>(null)
+
+  // hiddenCategoryTxIds — transaction IDs hidden from the by-category chart.
+  // Independent from the other hidden sets.
+  const [hiddenCategoryTxIds, setHiddenCategoryTxIds] = useState<Set<string>>(new Set())
+
+  // hiddenCategoryNames — entire category names hidden from the by-category chart.
+  const [hiddenCategoryNames, setHiddenCategoryNames] = useState<Set<string>>(new Set())
+
   // ---------------------------------------------------------------------------
   // Resolve current user's travelMemberId (the stable key in Split[])
   // ---------------------------------------------------------------------------
@@ -219,22 +242,29 @@ export function DashboardTab({
   // perDayTotals — Map<DD-MM-YYYY, totalAmountMain> for the spending-over-time
   // bar chart. Always uses group totals (not filtered by member) so the time
   // context stays intact regardless of member selection.
+  // Excludes transactions hidden via the spending-over-time card's hide feature
+  // (both individual txIds and entire categories).
   const perDayTotals = useMemo(() => {
     const map = new Map<string, number>()
     for (const tx of filteredTxs) {
+      if (hiddenSpendingTxIds.has(tx.txId)) continue
+      if (hiddenSpendingCategories.has(tx.category?.trim() || '')) continue
       map.set(tx.date, (map.get(tx.date) ?? 0) + tx.totalAmountMain)
     }
     return map
-  }, [filteredTxs])
+  }, [filteredTxs, hiddenSpendingTxIds, hiddenSpendingCategories])
 
   // perCategoryTotals — sorted array of { name, total, color } for Card ⑤.
   // When selectedTravelMemberId is set, uses that member's consumed share per
   // category; otherwise uses the full tx.totalAmountMain.
+  // Excludes transactions hidden via the by-category card's hide feature.
   const perCategoryTotals = useMemo(() => {
     const map = new Map<string, number>()
 
     for (const tx of filteredTxs) {
+      if (hiddenCategoryTxIds.has(tx.txId)) continue
       const key = tx.category?.trim() || '' // empty string = "Uncategorized"
+      if (hiddenCategoryNames.has(key)) continue
 
       if (selectedTravelMemberId) {
         // Sum only the selected member's beneficiary share for this transaction
@@ -256,7 +286,7 @@ export function DashboardTab({
         if (b.name === '' && a.name !== '') return -1
         return b.total - a.total
       })
-  }, [filteredTxs, selectedTravelMemberId])
+  }, [filteredTxs, selectedTravelMemberId, hiddenCategoryTxIds, hiddenCategoryNames])
 
   // perMemberStats — sorted array of { member, consumed, paid } for Card ⑥.
   // Current user always first, then descending by consumed.
@@ -411,6 +441,68 @@ export function DashboardTab({
   const tappedSegmentColor = tappedSegmentKey
     ? categoryColor(tappedSegmentKey.categoryName || 'Uncategorized')
     : '#999'
+
+  // ---------------------------------------------------------------------------
+  // Tapped day (Card ②) — transactions for the tapped day bar
+  // ---------------------------------------------------------------------------
+
+  // All transactions matching the tapped day (unfiltered — we show hidden ones
+  // with reduced opacity, same pattern as Card ③).
+  const tappedDayTxs = useMemo(() => {
+    if (!tappedDayKey) return []
+    return filteredTxs.filter((tx) => tx.date === tappedDayKey)
+  }, [tappedDayKey, filteredTxs])
+
+  // Total for the tapped day (including hidden txs, for the header display).
+  const tappedDayTotal = useMemo(
+    () => tappedDayTxs.reduce((sum, tx) => sum + tx.totalAmountMain, 0),
+    [tappedDayTxs],
+  )
+
+  // tappedDayByCategory — transactions for the tapped day, grouped by category.
+  // Each group has { categoryName, color, txs, total }. Sorted by total descending.
+  const tappedDayByCategory = useMemo(() => {
+    if (!tappedDayKey) return []
+    const map = new Map<string, typeof tappedDayTxs>()
+    for (const tx of tappedDayTxs) {
+      const key = tx.category?.trim() || ''
+      const arr = map.get(key) ?? []
+      arr.push(tx)
+      map.set(key, arr)
+    }
+    return Array.from(map.entries())
+      .map(([name, txs]) => ({
+        categoryName: name,
+        color: categoryColor(name || 'Uncategorized'),
+        txs,
+        total: txs.reduce((sum, tx) => sum + tx.totalAmountMain, 0),
+      }))
+      .sort((a, b) => b.total - a.total)
+  }, [tappedDayKey, tappedDayTxs])
+
+  // ---------------------------------------------------------------------------
+  // Tapped category (Card ④) — transactions for the tapped category
+  // ---------------------------------------------------------------------------
+
+  // All transactions matching the tapped category in the filtered period.
+  const tappedCategoryTxs = useMemo(() => {
+    if (tappedCategoryKey === null) return []
+    return filteredTxs.filter(
+      (tx) => (tx.category?.trim() || '') === tappedCategoryKey,
+    )
+  }, [tappedCategoryKey, filteredTxs])
+
+  // Total for the tapped category (including hidden txs).
+  const tappedCategoryTotal = useMemo(
+    () => tappedCategoryTxs.reduce((sum, tx) => sum + tx.totalAmountMain, 0),
+    [tappedCategoryTxs],
+  )
+
+  // Color for the tapped category in Card ④
+  const tappedCategoryColor =
+    tappedCategoryKey !== null
+      ? categoryColor(tappedCategoryKey || 'Uncategorized')
+      : '#999'
 
   // Label for the recent-days card summary line
   const recentDaySummary =
@@ -660,21 +752,27 @@ export function DashboardTab({
           </p>
         ) : (
           <>
-            {/* Bar chart container — fixed height, flex row */}
+            {/* Bar chart container — fixed height, flex row. Each bar is clickable. */}
             <div className="relative h-20">
               <div className="flex h-full items-end gap-0.5">
                 {sortedDays.map(([dateStr, total]) => {
                   const heightPct = (total / maxDayTotal) * 100
+                  const isTapped = tappedDayKey === dateStr
                   return (
                     <div
                       key={dateStr}
-                      className="flex-1"
+                      className="flex-1 cursor-pointer"
                       style={{ height: '100%', display: 'flex', alignItems: 'flex-end' }}
+                      // Toggle: tap same bar to dismiss, tap another to switch
+                      onClick={() =>
+                        setTappedDayKey((prev) => (prev === dateStr ? null : dateStr))
+                      }
                     >
                       <div
-                        // title provides a simple hover tooltip (no library needed)
                         title={`${formatDayLabel(dateStr)}: ${formatAmount(total, mainCurrency)}`}
-                        className="w-full rounded-t bg-primary/70"
+                        className={`w-full rounded-t transition-opacity ${
+                          isTapped ? 'bg-primary' : 'bg-primary/70'
+                        } ${tappedDayKey && !isTapped ? 'opacity-40' : ''}`}
                         style={{ height: `${heightPct}%`, minHeight: 2 }}
                       />
                     </div>
@@ -697,6 +795,164 @@ export function DashboardTab({
                 </div>
               )
             })()}
+
+            {/* Tapped day info panel — transactions grouped by category */}
+            {tappedDayKey && (
+              <div className="mt-2 rounded-lg border bg-muted/30 px-3 py-2">
+                {/* Day header row: date label + total */}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-foreground">
+                    {formatDayLabel(tappedDayKey)}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {formatAmount(tappedDayTotal, mainCurrency)}
+                    {' · '}{tappedDayTxs.length} tx{tappedDayTxs.length !== 1 ? 's' : ''}
+                  </span>
+                </div>
+
+                {/* Category groups */}
+                <div className="mt-1.5 flex flex-col gap-2 border-t pt-1.5">
+                  {tappedDayByCategory.map((group) => {
+                    // Check if entire category is hidden
+                    const isCatHidden = hiddenSpendingCategories.has(group.categoryName)
+                    return (
+                      <div key={group.categoryName || '__uncategorized__'}>
+                        {/* Category sub-header: dot, name, total, "Hide all" button */}
+                        <div className={`flex items-center gap-2 ${isCatHidden ? 'opacity-40' : ''}`}>
+                          <span
+                            className="inline-block shrink-0 rounded-full"
+                            style={{ width: 8, height: 8, backgroundColor: group.color }}
+                          />
+                          <span className="flex-1 text-xs font-medium text-foreground">
+                            {group.categoryName || 'Uncategorized'}
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            {formatAmount(group.total, mainCurrency)}
+                          </span>
+                          {/* Hide / show entire category */}
+                          <button
+                            type="button"
+                            className="shrink-0 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                            title={isCatHidden ? 'Show this category' : 'Hide entire category from chart'}
+                            onClick={() => {
+                              setHiddenSpendingCategories((prev) => {
+                                const next = new Set(prev)
+                                if (isCatHidden) next.delete(group.categoryName)
+                                else next.add(group.categoryName)
+                                return next
+                              })
+                            }}
+                          >
+                            {isCatHidden ? '👁️ Show' : '👁️‍🗨️ Hide all'}
+                          </button>
+                        </div>
+
+                        {/* Individual transactions in this category */}
+                        <div className="ml-4 mt-1 flex flex-col gap-1">
+                          {group.txs.map((tx) => {
+                            const isHidden = hiddenSpendingTxIds.has(tx.txId) || isCatHidden
+                            return (
+                              <div
+                                key={tx.txId}
+                                className={`flex items-center gap-2 text-xs ${isHidden ? 'opacity-40' : ''}`}
+                              >
+                                <span className="min-w-0 flex-1 truncate text-foreground">{tx.name}</span>
+                                {tx.currency !== mainCurrency && (
+                                  <span className="shrink-0 text-muted-foreground">
+                                    {formatAmount(tx.totalAmount, tx.currency)}
+                                  </span>
+                                )}
+                                <span className="shrink-0 font-medium text-foreground">
+                                  {formatAmount(tx.totalAmountMain, mainCurrency)}
+                                </span>
+                                {/* Edit button */}
+                                <button
+                                  type="button"
+                                  className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                                  title="Edit this transaction"
+                                  onClick={() => onEditTransaction(tx.txId)}
+                                >
+                                  ✏️
+                                </button>
+                                {/* Hide / show toggle for individual tx (disabled when category is hidden) */}
+                                {!isCatHidden && (
+                                  <button
+                                    type="button"
+                                    className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                                    title={hiddenSpendingTxIds.has(tx.txId) ? 'Show this transaction' : 'Hide this transaction'}
+                                    onClick={() => {
+                                      setHiddenSpendingTxIds((prev) => {
+                                        const next = new Set(prev)
+                                        if (prev.has(tx.txId)) next.delete(tx.txId)
+                                        else next.add(tx.txId)
+                                        return next
+                                      })
+                                    }}
+                                  >
+                                    {hiddenSpendingTxIds.has(tx.txId) ? '👁️' : '👁️‍🗨️'}
+                                  </button>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Hidden items pills — click to re-show (categories + individual txs) */}
+            {(hiddenSpendingCategories.size > 0 || hiddenSpendingTxIds.size > 0) && (
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                <span className="text-xs text-muted-foreground">Hidden:</span>
+                {/* Hidden category pills */}
+                {Array.from(hiddenSpendingCategories).map((name) => (
+                  <button
+                    key={`spending-cat-${name}`}
+                    type="button"
+                    onClick={() => {
+                      setHiddenSpendingCategories((prev) => {
+                        const next = new Set(prev)
+                        next.delete(name)
+                        return next
+                      })
+                    }}
+                    className="flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    <span
+                      className="inline-block rounded-full"
+                      style={{ width: 6, height: 6, backgroundColor: categoryColor(name || 'Uncategorized') }}
+                    />
+                    {name || 'Uncategorized'}
+                    <span className="text-[10px]">👁️</span>
+                  </button>
+                ))}
+                {/* Hidden individual transaction pills */}
+                {Array.from(hiddenSpendingTxIds).map((txId) => {
+                  const tx = filteredTxs.find((t) => t.txId === txId)
+                  if (!tx) return null
+                  return (
+                    <button
+                      key={`spending-tx-${txId}`}
+                      type="button"
+                      onClick={() => {
+                        setHiddenSpendingTxIds((prev) => {
+                          const next = new Set(prev)
+                          next.delete(txId)
+                          return next
+                        })
+                      }}
+                      className="flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      <span className="max-w-[8rem] truncate">{tx.name}</span>
+                      <span className="text-[10px]">👁️</span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
           </>
         )}
       </CollapsibleCard>
@@ -981,32 +1237,184 @@ export function DashboardTab({
             {perCategoryTotals.length === 0 ? (
               <p className="py-4 text-center text-sm text-muted-foreground">No data</p>
             ) : (
-              <div className="flex flex-col gap-2">
-                {perCategoryTotals.map(({ name, total, color }) => {
-                  const pct = grandTotal > 0 ? Math.round(total / grandTotal * 100) : 0
-                  return (
-                    <div key={name || '__uncategorized__'} className="flex items-center gap-2">
-                      {/* Coloured dot */}
+              <>
+                <div className="flex flex-col gap-2">
+                  {perCategoryTotals.map(({ name, total, color }) => {
+                    const pct = grandTotal > 0 ? Math.round(total / grandTotal * 100) : 0
+                    // Highlight the tapped category row
+                    const isTapped = tappedCategoryKey === name
+                    return (
+                      <div
+                        key={name || '__uncategorized__'}
+                        // Clicking a category row toggles the transaction detail panel
+                        className={`flex cursor-pointer items-center gap-2 rounded-md px-1 py-0.5 transition-colors ${
+                          isTapped ? 'bg-muted/60' : 'hover:bg-muted/30'
+                        }`}
+                        onClick={() =>
+                          setTappedCategoryKey((prev) => (prev === name ? null : name))
+                        }
+                      >
+                        {/* Coloured dot */}
+                        <span
+                          className="inline-block shrink-0 rounded-full"
+                          style={{ width: 8, height: 8, backgroundColor: color }}
+                        />
+                        {/* Category name */}
+                        <span className="flex-1 text-sm text-foreground">
+                          {name || 'Uncategorized'}
+                        </span>
+                        {/* Amount */}
+                        <span className="text-sm font-medium text-foreground">
+                          {formatAmount(total, mainCurrency)}
+                        </span>
+                        {/* Percentage */}
+                        <span className="w-10 text-right text-xs text-muted-foreground">
+                          {pct}%
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {/* Tapped category info panel — transaction list for the selected category */}
+                {tappedCategoryKey !== null && (
+                  <div className="mt-2 rounded-lg border bg-muted/30 px-3 py-2">
+                    {/* Category header row: color dot, name, total, "Hide all" button */}
+                    <div className="flex items-center gap-2">
                       <span
                         className="inline-block shrink-0 rounded-full"
-                        style={{ width: 8, height: 8, backgroundColor: color }}
+                        style={{ width: 8, height: 8, backgroundColor: tappedCategoryColor }}
                       />
-                      {/* Category name */}
-                      <span className="flex-1 text-sm text-foreground">
-                        {name || 'Uncategorized'}
+                      <span className="text-xs font-medium text-foreground">
+                        {tappedCategoryKey || 'Uncategorized'}
                       </span>
-                      {/* Amount */}
-                      <span className="text-sm font-medium text-foreground">
-                        {formatAmount(total, mainCurrency)}
+                      <span className="text-xs text-muted-foreground">
+                        {formatAmount(tappedCategoryTotal, mainCurrency)}
+                        {' · '}{tappedCategoryTxs.length} tx{tappedCategoryTxs.length !== 1 ? 's' : ''}
                       </span>
-                      {/* Percentage */}
-                      <span className="w-10 text-right text-xs text-muted-foreground">
-                        {pct}%
-                      </span>
+                      {/* "Hide all" — hides the entire category from the chart */}
+                      <button
+                        type="button"
+                        className="ml-auto shrink-0 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                        title="Hide entire category from the chart"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setHiddenCategoryNames((prev) => new Set(prev).add(tappedCategoryKey))
+                          setTappedCategoryKey(null)
+                        }}
+                      >
+                        👁️‍🗨️ Hide all
+                      </button>
                     </div>
-                  )
-                })}
-              </div>
+
+                    {/* Individual transactions for this category */}
+                    <div className="mt-1.5 flex flex-col gap-1 border-t pt-1.5">
+                      {tappedCategoryTxs.map((tx) => {
+                        const isHidden = hiddenCategoryTxIds.has(tx.txId)
+                        return (
+                          <div
+                            key={tx.txId}
+                            className={`flex items-center gap-2 text-xs ${isHidden ? 'opacity-40' : ''}`}
+                          >
+                            {/* Date label */}
+                            <span className="shrink-0 text-muted-foreground">
+                              {formatDayLabel(tx.date)}
+                            </span>
+                            <span className="min-w-0 flex-1 truncate text-foreground">{tx.name}</span>
+                            {/* Amount in tx currency if different from main */}
+                            {tx.currency !== mainCurrency && (
+                              <span className="shrink-0 text-muted-foreground">
+                                {formatAmount(tx.totalAmount, tx.currency)}
+                              </span>
+                            )}
+                            {/* Amount in main currency */}
+                            <span className="shrink-0 font-medium text-foreground">
+                              {formatAmount(tx.totalAmountMain, mainCurrency)}
+                            </span>
+                            {/* Edit button */}
+                            <button
+                              type="button"
+                              className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                              title="Edit this transaction"
+                              onClick={(e) => { e.stopPropagation(); onEditTransaction(tx.txId) }}
+                            >
+                              ✏️
+                            </button>
+                            {/* Hide / show toggle */}
+                            <button
+                              type="button"
+                              className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                              title={isHidden ? 'Show this transaction' : 'Hide this transaction'}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setHiddenCategoryTxIds((prev) => {
+                                  const next = new Set(prev)
+                                  if (isHidden) next.delete(tx.txId)
+                                  else next.add(tx.txId)
+                                  return next
+                                })
+                              }}
+                            >
+                              {isHidden ? '👁️' : '👁️‍🗨️'}
+                            </button>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Hidden items pills — click to re-show (categories + individual txs) */}
+                {(hiddenCategoryNames.size > 0 || hiddenCategoryTxIds.size > 0) && (
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    <span className="text-xs text-muted-foreground">Hidden:</span>
+                    {/* Hidden category name pills */}
+                    {Array.from(hiddenCategoryNames).map((name) => (
+                      <button
+                        key={`catname-${name}`}
+                        type="button"
+                        onClick={() => {
+                          setHiddenCategoryNames((prev) => {
+                            const next = new Set(prev)
+                            next.delete(name)
+                            return next
+                          })
+                        }}
+                        className="flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                      >
+                        <span
+                          className="inline-block rounded-full"
+                          style={{ width: 6, height: 6, backgroundColor: categoryColor(name || 'Uncategorized') }}
+                        />
+                        {name || 'Uncategorized'}
+                        <span className="text-[10px]">👁️</span>
+                      </button>
+                    ))}
+                    {/* Hidden individual transaction pills */}
+                    {Array.from(hiddenCategoryTxIds).map((txId) => {
+                      const tx = filteredTxs.find((t) => t.txId === txId)
+                      if (!tx) return null
+                      return (
+                        <button
+                          key={`cat-tx-${txId}`}
+                          type="button"
+                          onClick={() => {
+                            setHiddenCategoryTxIds((prev) => {
+                              const next = new Set(prev)
+                              next.delete(txId)
+                              return next
+                            })
+                          }}
+                          className="flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                        >
+                          <span className="max-w-[8rem] truncate">{tx.name}</span>
+                          <span className="text-[10px]">👁️</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </>
             )}
           </CollapsibleCard>
         )
