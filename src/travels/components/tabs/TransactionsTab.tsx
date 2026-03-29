@@ -14,6 +14,7 @@ import { ImportXlsxDialog } from '@/shared/components/ImportXlsxDialog'
 import { normalizeTransactionSplits } from '@/travels/components/tabs/dashboardHelpers'
 import { useTransactionFilters } from '@/transactions/hooks/useTransactionFilters'
 import { FilterPanel } from '@/transactions/components/FilterPanel'
+import { getTransactionType, countsAsSpending } from '@/transactions/utils/walletHelpers'
 
 // ---------------------------------------------------------------------------
 // Currency symbol helpers
@@ -224,9 +225,9 @@ function DayGroupHeader({
     return Array.from(seen)
   }, [transactions])
 
-  // Sum of all transaction amounts converted to main currency for this day
+  // Sum of spending transactions only (excludes withdrawals and balance-only adjustments)
   const dayTotal = useMemo(
-    () => transactions.reduce((sum, tx) => sum + tx.totalAmountMain, 0),
+    () => transactions.filter(countsAsSpending).reduce((sum, tx) => sum + tx.totalAmountMain, 0),
     [transactions],
   )
 
@@ -268,7 +269,14 @@ function TransactionRow({
   mainCurrency: string
   onToggle: () => void
 }) {
-  const categoryEmoji = getCategoryEmoji(transaction.category, categories)
+  // Transaction type determines the leading emoji:
+  // - withdrawal → 🏧 (ATM/top-up)
+  // - adjustment → ⚖️ (reconciliation)
+  // - expense → category emoji (default)
+  const txType = getTransactionType(transaction)
+  const categoryEmoji = txType === 'withdrawal' ? '🏧'
+    : txType === 'adjustment' ? '⚖️'
+    : getCategoryEmoji(transaction.category, categories)
 
   // Beneficiary avatars — show up to 3, overlapping
   const beneficiaryAvatars = useMemo(() => {
@@ -301,8 +309,18 @@ function TransactionRow({
             <span className="text-[13px] font-semibold leading-tight">{transaction.name}</span>
             <PendingBadge isPending={transaction.isPending} />
           </div>
-          {/* Category pill + beneficiary avatars */}
+          {/* Type badge (non-expense only) + category pill + beneficiary avatars */}
           <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+            {txType === 'withdrawal' && (
+              <span className="rounded-full bg-green-100 px-1.5 py-0.5 text-[10px] font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                Withdrawal
+              </span>
+            )}
+            {txType === 'adjustment' && (
+              <span className="rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+                Adjustment
+              </span>
+            )}
             {transaction.category && (
               <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                 {transaction.category}
@@ -427,6 +445,13 @@ function TransactionDetail({
           <span className="text-muted-foreground">Payment </span>
           <span>{transaction.paymentMethod ?? '—'}</span>
         </div>
+        {/* Fees — only shown on withdrawal transactions */}
+        {transaction.fees != null && transaction.fees > 0 && (
+          <div>
+            <span className="text-muted-foreground">Fees </span>
+            <span>{formatAmount(transaction.fees, transaction.currency)}</span>
+          </div>
+        )}
         <div>
           <span className="text-muted-foreground">Country </span>
           <span>{transaction.country ?? '—'}</span>

@@ -2,7 +2,7 @@
 
 import { collection, doc, setDoc, updateDoc, deleteDoc, deleteField, serverTimestamp } from 'firebase/firestore'
 import { db } from '@/services/firebase'
-import type { Transaction, Split } from '@/transactions/types'
+import type { Transaction, Split, TransactionType, AdjustmentMode } from '@/transactions/types'
 
 /**
  * Creates a new transaction document and returns its ID immediately.
@@ -72,6 +72,9 @@ export type UpdateTransactionData = {
   lastModifiedBy: string
   notes?: string
   amountFormula?: string
+  type?: TransactionType          // Transaction purpose (undefined = 'expense')
+  fees?: number                   // Withdrawal fees (same currency)
+  adjustmentMode?: AdjustmentMode // Only meaningful when type === 'adjustment'
 }
 
 /**
@@ -105,6 +108,9 @@ export function updateTransaction(
     lastModifiedBy: data.lastModifiedBy,
     notes: data.notes ?? deleteField(),
     amountFormula: data.amountFormula ?? deleteField(),
+    type: data.type ?? deleteField(),
+    fees: data.fees ?? deleteField(),
+    adjustmentMode: data.adjustmentMode ?? deleteField(),
     lastModifiedAt: serverTimestamp(),
   }).catch((err: unknown) => {
     console.error('[transactionService] updateDoc failed:', err)

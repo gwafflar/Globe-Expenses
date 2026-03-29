@@ -15,6 +15,7 @@ import {
   computeSettlements,
 } from '@/travels/utils/balanceUtils'
 import { normalizeTransactionSplits } from '@/travels/components/tabs/dashboardHelpers'
+import { countsAsSpending } from '@/transactions/utils/walletHelpers'
 import { SettlementCurrencyDrawer } from '@/travels/components/SettlementCurrencyDrawer'
 
 // ---------------------------------------------------------------------------
@@ -133,18 +134,25 @@ export function BalanceTab({
     [transactions, members],
   )
 
+  // Filter to spending-only transactions — withdrawals and balance-only adjustments
+  // don't create inter-member debts and must be excluded from balance/settlement.
+  const spendingTx = useMemo(
+    () => normalizedTx.filter(countsAsSpending),
+    [normalizedTx],
+  )
+
   // Core computations — memoised so they don't recompute on unrelated re-renders
   const balances = useMemo(
-    () => computeBalances(normalizedTx, members),
-    [normalizedTx, members],
+    () => computeBalances(spendingTx, members),
+    [spendingTx, members],
   )
   const settlements = useMemo(
     () => computeSettlements(balances),
     [balances],
   )
   const memberTotals = useMemo(
-    () => computeMemberTotals(normalizedTx, members),
-    [normalizedTx, members],
+    () => computeMemberTotals(spendingTx, members),
+    [spendingTx, members],
   )
 
   // Build a travelMemberId → index map for deterministic avatar colours

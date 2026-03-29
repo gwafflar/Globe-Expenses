@@ -1393,3 +1393,121 @@ Extracted helper functions: `matchesDimension()`, `matchesSearch()`, `extractDim
 - [ ] PWA icons (still scaffold placeholders)
 - [ ] Display Mode in Transactions tab
 - [ ] Move composite indexes to `firestore.indexes.json`
+
+---
+
+## 📝 Working Session 014 — 25 March 2026
+
+**Type**: Design, planning & implementation
+**Tools used**: Claude Code (claude-opus-4-6)
+
+### Wallet Tracker — Privacy Note
+
+Wallet data (withdrawals, adjustments, remaining balances) is stored in the shared `travels/{travelId}/transactions/` subcollection alongside regular expenses. This means all travel members can technically read each other's wallet events via Firestore.
+
+In v1, the UI only displays each user's own wallet balances — other members' wallet data is never rendered. A disclaimer informs users of this.
+
+In a future phase, **per-member transaction visibility** will allow marking transactions as private (`private: true`), with Firestore security rules enforcing read access to the owner only. This is a broader feature that benefits wallet events, personal notes, and any member-specific data. It requires restructuring the transactions subcollection or adding a filtered subcollection — scoped to v2.
+
+### What was done
+
+Implemented a per-travel wallet tracker (cash simulator) that lets users track remaining balances for any payment method. Core mechanism: transactions gain a `type` field (`'expense' | 'withdrawal' | 'adjustment'`); wallet balance is computed client-side from the existing transaction list — no new Firestore collections, rules, or indexes needed.
+
+#### Data model changes
+
+- `Transaction.type?: TransactionType` — optional for backward compat (`undefined` = expense)
+- `Transaction.fees?: number` — withdrawal fees (same currency), deducted from wallet balance
+- `Transaction.adjustmentMode?: AdjustmentMode` — `'expense'` (counts in stats) or `'balance_only'`
+- `getTransactionType(tx)` canonical helper handles the `undefined` → `'expense'` fallback
+- `countsAsSpending(tx)` predicate controls what appears in spending analytics
+
+#### Wallet balance computation (`walletHelpers.ts`)
+
+Pure functions: `computeWalletBalances()` takes full tx list + travelMemberId + pmLabelMap → returns `WalletBalance[]` per (paymentMethod, currency) pair. Only PM/currency pairs with at least one withdrawal become wallets. `computeReconciliationDiff()` computes signed difference for reconciliation.
+
+#### New components
+
+| File | Purpose |
+|------|---------|
+| `WithdrawalForm.tsx` | Simplified form for wallet top-ups (no category, country/city, splits, formula bar). Auto-sets paidBy/beneficiaries to current user. Sets `type: 'withdrawal'`. |
+| `ReconciliationDialog.tsx` | Bottom-sheet for reconciling wallet balance. Shows computed remaining, input for actual, diff display, two action buttons (create expense / adjust balance only). |
+
+#### Integration
+
+- **TransactionsTab**: type emoji (🏧 withdrawal, ⚖️ adjustment), badge pills, fees in detail view, type filter dimension
+- **DashboardTab**: `spendingTxs` memo filters non-spending transactions from all analytics; wallet balances card with per-PM remaining
+- **BalanceTab**: settlement computation uses `countsAsSpending()` filter
+- **TravelDetailPage**: WithdrawalForm drawer, edit routing by type (`handleEditById`)
+- **FilterPanel**: Type dimension chip (📋) with Expense/Withdrawal/Adjustment options
+- **useTransactionFilters**: `'type'` added to `FilterDimension` union
+- **useTransactions**: reads `type`, `fees`, `adjustmentMode` from Firestore snapshot
+- **transactionService**: `type`, `fees`, `adjustmentMode` in `UpdateTransactionData` with `deleteField()` fallback
+
+#### Design decisions
+
+- Per-travel (not cross-travel) — matches per-travel `paymentMethods: LabeledItem[]`
+- Shared subcollection (privacy = UI-only, structural privacy v2)
+- Adjustment sign convention: signed `paidBy.amount` (positive = wallet gains, negative = wallet loses)
+- Withdrawal fees deducted from deposited amount (`totalAmount - fees`)
+- XLSX export unchanged — wallet events export as regular rows; imports always create expenses
+
+### Carry-forward items (open)
+
+- [ ] **Cloud Function `onTravelDeleted`**: cascade-delete transactions subcollection (v2)
+- [ ] PWA icons (still scaffold placeholders)
+- [ ] Display Mode in Transactions tab
+- [ ] Move composite indexes to `firestore.indexes.json`
+- [ ] Unified TransactionForm with type selector (merge WithdrawalForm into TransactionForm) — prompt written, to implement next session
+- [ ] Per-travel field customization (hideable/showable fields + custom data fields) — future session
+
+---
+
+## 📝 Working Session 014.1 — 29 March 2026
+
+**Type**: UI refinement
+**Tools used**: Claude Code (claude-opus-4-6)
+
+### What was done
+
+Redesigned the wallet balances card in DashboardTab and fixed day totals in TransactionsTab.
+
+#### DashboardTab — Wallet card redesign
+
+Replaced the flat wallet balance list with a richer interactive component:
+
+1. **Horizontal carousel** — scrollable row of compact wallet sub-cards. Each shows PM emoji (extracted from stored string), label, remaining balance (color-coded green/red), currency. Tap to select/deselect.
+
+2. **Drill-down detail** — when a wallet card is tapped:
+   - Summary block: total deposited, total spent, adjustments
+   - "Since last top-up" section: date, net amount, balance after top-up, spent since, estimated remaining
+   - "Not the amount you have?" label + "Reconcile with current amount" button
+
+3. **Top-up list** — scrollable list (max 200px) of withdrawal transactions. Default: all wallets. When a card is selected: filtered to that wallet only. Each row shows emoji, date, name, amount (green `+`), fees.
+
+4. Removed summary line from CollapsibleCard header (redundant with carousel).
+
+New data layer: `withdrawalTxs` memo (all user withdrawals sorted desc), `selectedWalletDetail` memo (drill-down stats including "balance after last top-up" approximation via `remaining + spentSinceLastTopup`).
+
+#### TransactionsTab — Day total fix
+
+Day group header totals now use `countsAsSpending()` filter — excludes withdrawals and balance-only adjustments from daily spending sums.
+
+#### Prompt for next session
+
+Wrote a full implementation prompt for **unified TransactionForm with type selector** (merge WithdrawalForm into TransactionForm, type-aware field visibility, designed for future per-travel field customization).
+
+### Files modified
+
+| File | Changes |
+|------|---------|
+| `src/travels/components/tabs/DashboardTab.tsx` | Wallet card: carousel + drill-down + top-up list; added `isWithdrawal` import, `selectedWalletKey` state, `withdrawalTxs` and `selectedWalletDetail` memos; emoji extraction from stored PM string |
+| `src/travels/components/tabs/TransactionsTab.tsx` | Day total uses `countsAsSpending()` filter; added `countsAsSpending` import |
+
+### Carry-forward items (open)
+
+- [ ] **Unified TransactionForm with type selector** — prompt written (see session notes above)
+- [ ] **Per-travel field customization** — hideable/showable fields + user-defined custom data fields (future)
+- [ ] Cloud Function `onTravelDeleted` (v2)
+- [ ] PWA icons
+- [ ] Display Mode in Transactions tab
+- [ ] Move composite indexes to `firestore.indexes.json`

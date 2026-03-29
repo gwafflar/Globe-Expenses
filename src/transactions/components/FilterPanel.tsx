@@ -32,6 +32,7 @@ interface DimensionMeta {
 }
 
 const DIMENSIONS: DimensionMeta[] = [
+  { key: 'type', label: 'Type', emoji: '📋' },
   { key: 'category', label: 'Category', emoji: '🏷️' },
   { key: 'currency', label: 'Currency', emoji: '💱' },
   { key: 'country', label: 'Country', emoji: '🌍' },
@@ -94,8 +95,16 @@ export function FilterPanel({
 
   /** Resolve a value to a display label. For member dimensions, resolve travelMemberId → displayName.
    *  For the UNDEFINED_FILTER sentinel, returns "Undefined". */
+  /** Map for human-readable transaction type labels. */
+  const TYPE_LABELS: Record<string, string> = {
+    expense: 'Expense',
+    withdrawal: 'Withdrawal',
+    adjustment: 'Adjustment',
+  }
+
   function displayLabel(dimension: FilterDimension, value: string): string {
     if (value === UNDEFINED_FILTER) return 'Undefined'
+    if (dimension === 'type') return TYPE_LABELS[value] ?? value
     if (dimension === 'paidBy' || dimension === 'beneficiaries') {
       return travel.members.find((m) => m.travelMemberId === value)?.displayName ?? value
     }

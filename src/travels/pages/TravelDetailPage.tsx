@@ -29,6 +29,8 @@ import {
   DrawerTitle,
 } from '@/components/ui/drawer'
 import { TransactionForm } from '@/transactions/components/TransactionForm'
+import { WithdrawalForm } from '@/transactions/components/WithdrawalForm'
+import { getTransactionType } from '@/transactions/utils/walletHelpers'
 import { TravelTabs } from '@/travels/components/TravelTabs'
 import { InstallPromptBanner } from '@/shared/components/InstallPromptBanner'
 import { deleteTransaction } from '@/transactions/services/transactionService'
@@ -153,6 +155,9 @@ export function TravelDetailPage() {
   const [bannerState, setBannerState] = useState<BannerState>(null)
   // Holds the txId the user wants to delete — non-null opens the confirmation dialog
   const [deletingTxId, setDeletingTxId] = useState<string | null>(null)
+  // Withdrawal form drawer state (separate from the expense form)
+  const [isWithdrawalFormOpen, setIsWithdrawalFormOpen] = useState(false)
+  const [withdrawalFormKey, setWithdrawalFormKey] = useState(0)
 
   // Settlement currency: allows settlements to be displayed in a different currency
   // than mainCurrency. Rate means: 1 mainCurrency = settlementRate settlementCurrency.
@@ -234,6 +239,12 @@ export function TravelDetailPage() {
     setIsFormOpen(true)
   }
 
+  // Opens the withdrawal form (fresh state).
+  function openWithdrawalForm() {
+    setWithdrawalFormKey((k) => k + 1)
+    setIsWithdrawalFormOpen(true)
+  }
+
   // Opens the form in edit mode pre-filled from an existing transaction.
   function handleEditTransaction(tx: TransactionWithStatus) {
     setFormKey((k) => k + 1)
@@ -241,10 +252,18 @@ export function TravelDetailPage() {
     setIsFormOpen(true)
   }
 
-  // Called by TransactionsTab accordion with a txId — looks up the full tx and opens edit form.
+  // Called by TransactionsTab accordion with a txId — looks up the full tx and opens
+  // the appropriate form: WithdrawalForm for withdrawals, TransactionForm for everything else.
   function handleEditById(txId: string) {
     const tx = transactions.find((t) => t.txId === txId)
-    if (tx) handleEditTransaction(tx)
+    if (!tx) return
+    if (getTransactionType(tx) === 'withdrawal') {
+      setWithdrawalFormKey((k) => k + 1)
+      setEditingTx(tx)
+      setIsWithdrawalFormOpen(true)
+    } else {
+      handleEditTransaction(tx)
+    }
   }
 
   // Opens the confirmation dialog before deleting a transaction.
@@ -416,6 +435,7 @@ export function TravelDetailPage() {
           onSettlementCurrencyChange={setSettlementCurrency}
           onSettlementRateChange={setSettlementRate}
           onAddExpense={openForm}
+          onAddWithdrawal={openWithdrawalForm}
           onEditTransaction={handleEditById}
           onDeleteTransaction={handleDeleteTransaction}
           onTravelChange={handleTravelChange}
@@ -472,6 +492,34 @@ export function TravelDetailPage() {
               onCancel={() => { setIsFormOpen(false); setEditingTx(null) }}
               onLocationAdded={handleLocationAdded}
               onCategoryAdded={handleCategoryAdded}
+              onPaymentMethodAdded={handlePaymentMethodAdded}
+            />
+          </div>
+        </DrawerContent>
+      </Drawer>
+
+      {/* Withdrawal form drawer — used for both create and edit mode */}
+      <Drawer open={isWithdrawalFormOpen} onOpenChange={(open) => { if (!open) { setIsWithdrawalFormOpen(false); setEditingTx(null) } }}>
+        <DrawerContent>
+          <DrawerHeader>
+            <DrawerTitle>{editingTx ? 'Edit withdrawal' : 'Record withdrawal'}</DrawerTitle>
+          </DrawerHeader>
+          <div className="overflow-y-auto px-4 pb-6">
+            <WithdrawalForm
+              key={withdrawalFormKey}
+              travelId={travelId!}
+              members={travel.members}
+              travelPaymentMethods={travel.paymentMethods}
+              travelCurrencies={travel.currencies}
+              existingTransactions={transactions}
+              initialValues={editingTx ?? undefined}
+              onSuccess={(txId) => {
+                setIsWithdrawalFormOpen(false)
+                setEditingTx(null)
+                // Reuse the same watched-tx / banner pattern as expense creation
+                setWatchedTxId(txId)
+              }}
+              onCancel={() => { setIsWithdrawalFormOpen(false); setEditingTx(null) }}
               onPaymentMethodAdded={handlePaymentMethodAdded}
             />
           </div>

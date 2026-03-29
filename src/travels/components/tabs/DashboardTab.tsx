@@ -36,6 +36,13 @@ import {
   dateRangeLabel,
   numberOfDaysInRange,
 } from './dashboardHelpers'
+import {
+  countsAsSpending,
+  computeWalletBalances,
+  isWithdrawal,
+  type WalletBalance,
+} from '@/transactions/utils/walletHelpers'
+import { ReconciliationDialog } from '@/transactions/components/ReconciliationDialog'
 
 // ---------------------------------------------------------------------------
 // Props
@@ -47,6 +54,7 @@ interface DashboardTabProps {
   currentUserUid: string
   isSolo: boolean
   onEditTransaction: (txId: string) => void
+  onAddWithdrawal?: () => void
 }
 
 // ---------------------------------------------------------------------------
@@ -91,6 +99,7 @@ export function DashboardTab({
   currentUserUid,
   isSolo,
   onEditTransaction,
+  onAddWithdrawal,
 }: DashboardTabProps) {
   // The main currency for this travel — first in the currencies array.
   const mainCurrency = travel.currencies[0] ?? 'EUR'
@@ -167,6 +176,13 @@ export function DashboardTab({
   // hiddenCategoryNames — entire category names hidden from the by-category chart.
   const [hiddenCategoryNames, setHiddenCategoryNames] = useState<Set<string>>(new Set())
 
+  // reconcileBalance — the wallet balance being reconciled (null = dialog closed).
+  const [reconcileBalance, setReconcileBalance] = useState<WalletBalance | null>(null)
+
+  // selectedWalletKey — which wallet carousel card is tapped for drill-down.
+  // Format: "paymentMethodId|currency" or null (no selection = show all top-ups).
+  const [selectedWalletKey, setSelectedWalletKey] = useState<string | null>(null)
+
   // ---------------------------------------------------------------------------
   // Resolve current user's travelMemberId (the stable key in Split[])
   // ---------------------------------------------------------------------------
@@ -201,12 +217,89 @@ export function DashboardTab({
     [transactions, travel.members],
   )
 
-  // filteredTxs — the normalised transaction list restricted to the active period.
+  // spendingTxs — only transactions that count toward spending analytics.
+  // Excludes withdrawals and balance-only adjustments so they don't inflate
+  // totals, category breakdowns, or per-member stats.
+  const spendingTxs = useMemo(
+    () => normalizedTxs.filter(countsAsSpending),
+    [normalizedTxs],
+  )
+
+  // filteredTxs — the spending-only list restricted to the active period.
   // Recomputed whenever the period selection or the raw transactions change.
   const filteredTxs = useMemo(
-    () => filterTransactions(normalizedTxs, period),
-    [normalizedTxs, period],
+    () => filterTransactions(spendingTxs, period),
+    [spendingTxs, period],
   )
+
+  // walletBalances — per (paymentMethod, currency) remaining balance for the
+  // current user. Computed from ALL normalised transactions (not period-filtered)
+  // because wallet balance is cumulative across the entire travel.
+  const pmLabelMap = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const pm of travel.paymentMethods ?? []) {
+      m.set(pm.id, pm.emoji ? `${pm.emoji} ${pm.label}` : pm.label)
+    }
+    return m
+  }, [travel.paymentMethods])
+
+  const walletBalances = useMemo(
+    () => computeWalletBalances(normalizedTxs, currentTravelMemberId, pmLabelMap),
+    [normalizedTxs, currentTravelMemberId, pmLabelMap],
+  )
+
+  // withdrawalTxs — all withdrawal transactions where the current user paid,
+  // sorted by date descending. Used by the wallet card's top-up list.
+  const withdrawalTxs = useMemo(() => {
+    return normalizedTxs
+      .filter(tx => isWithdrawal(tx) && tx.paidBy.some(s => s.travelMemberId === currentTravelMemberId))
+      .sort((a, b) => parseTxDate(b.date).getTime() - parseTxDate(a.date).getTime())
+  }, [normalizedTxs, currentTravelMemberId])
+
+  // selectedWalletDetail — drill-down data for the tapped wallet card.
+  // Computes filtered withdrawals, summary stats, and "since last top-up" data.
+  const selectedWalletDetail = useMemo(() => {
+    if (!selectedWalletKey) return null
+    const [pm, currency] = selectedWalletKey.split('|')
+    const wb = walletBalances.find(w => w.paymentMethod === pm && w.currency === currency)
+    if (!wb) return null
+
+    // Withdrawals for this specific wallet, already sorted desc
+    const walletWithdrawals = withdrawalTxs.filter(
+      tx => tx.paymentMethod === pm && tx.currency === currency,
+    )
+
+    const lastTopup = walletWithdrawals[0] // most recent (sorted desc)
+    if (!lastTopup) {
+      return { wb, walletWithdrawals, lastTopup: null, lastTopupNetAmount: 0, spentSinceLastTopup: 0, balanceAfterLastTopup: wb.remaining }
+    }
+
+    const lastTopupDate = parseTxDate(lastTopup.date)
+    const lastTopupNetAmount = (lastTopup.paidBy.find(s => s.travelMemberId === currentTravelMemberId)?.amount ?? 0) - (lastTopup.fees ?? 0)
+
+    // Sum expenses paid by this member with this PM+currency on or after last top-up date
+    let spentSinceLastTopup = 0
+    for (const tx of normalizedTxs) {
+      if (tx.paymentMethod !== pm || tx.currency !== currency) continue
+      if (!countsAsSpending(tx)) continue
+      const paid = tx.paidBy.find(s => s.travelMemberId === currentTravelMemberId)?.amount ?? 0
+      if (paid === 0) continue
+      if (parseTxDate(tx.date).getTime() >= lastTopupDate.getTime()) {
+        spentSinceLastTopup += paid
+      }
+    }
+    spentSinceLastTopup = Math.round(spentSinceLastTopup * 100) / 100
+
+    return {
+      wb,
+      walletWithdrawals,
+      lastTopup,
+      lastTopupNetAmount: Math.round(lastTopupNetAmount * 100) / 100,
+      spentSinceLastTopup,
+      // Balance right after the last top-up ≈ current remaining + everything spent since
+      balanceAfterLastTopup: Math.round((wb.remaining + spentSinceLastTopup) * 100) / 100,
+    }
+  }, [selectedWalletKey, walletBalances, withdrawalTxs, normalizedTxs, currentTravelMemberId])
 
   // totalSpent — sum of all filtered transactions in main currency.
   const totalSpent = useMemo(
@@ -395,7 +488,7 @@ export function DashboardTab({
   // member is selected).
   const recentDaysData = useMemo(() => {
     return recentDateStrings.map((dateStr) => {
-      const dayTxs = normalizedTxs.filter((tx) => tx.date === dateStr && !hiddenTxIds.has(tx.txId))
+      const dayTxs = spendingTxs.filter((tx) => tx.date === dateStr && !hiddenTxIds.has(tx.txId))
 
       if (dayTxs.length === 0) {
         return { dateStr, total: 0, categories: [] as { name: string; amount: number; color: string }[] }
@@ -427,7 +520,7 @@ export function DashboardTab({
 
       return { dateStr, total, categories }
     })
-  }, [recentDateStrings, normalizedTxs, selectedTravelMemberId, hiddenTxIds])
+  }, [recentDateStrings, spendingTxs, selectedTravelMemberId, hiddenTxIds])
 
   // Filtered recent days data — excludes hidden categories so the scale adjusts.
   // Each day gets a new total and filtered categories array.
@@ -1596,6 +1689,201 @@ export function DashboardTab({
       })()}
 
       {/* ================================================================ */}
+      {/* Card — Wallet balances (always shown; empty state if no wallets) */}
+      {/* ================================================================ */}
+      <CollapsibleCard
+        title="Wallet balances"
+      >
+        {walletBalances.length > 0 ? (
+          <div className="flex flex-col gap-3">
+
+            {/* (a) Horizontal carousel of wallet sub-cards */}
+            <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1" style={{ scrollbarWidth: 'none' }}>
+              {walletBalances.map((wb) => {
+                const key = `${wb.paymentMethod}|${wb.currency}`
+                const isSelected = selectedWalletKey === key
+                // paymentMethodLabel is the stored string (e.g. "💳 Cash" or "Cash").
+                // Extract leading emoji if present; otherwise fall back to 💸.
+                const labelStr = wb.paymentMethodLabel
+                const firstCp = labelStr.codePointAt(0) ?? 0
+                const hasEmoji = firstCp > 0xff // non-Latin code point = emoji prefix
+                const emoji = hasEmoji ? labelStr.split(' ')[0] : '💸'
+                const label = hasEmoji ? labelStr.slice(labelStr.indexOf(' ') + 1) : labelStr
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setSelectedWalletKey(isSelected ? null : key)}
+                    className={`
+                      flex min-w-[120px] shrink-0 flex-col rounded-xl border px-3 py-2 text-left transition-all
+                      ${isSelected
+                        ? 'border-primary bg-primary/5 ring-1 ring-primary'
+                        : 'border-border bg-muted/30 hover:bg-muted/50'}
+                    `}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-lg leading-none">{emoji}</span>
+                      <span className="truncate text-xs font-medium text-muted-foreground">{label}</span>
+                    </div>
+                    <span className={`mt-1 text-base font-bold ${
+                      wb.remaining > 0 ? 'text-green-600 dark:text-green-400'
+                        : wb.remaining < 0 ? 'text-red-600 dark:text-red-400'
+                        : 'text-foreground'
+                    }`}>
+                      {formatAmount(wb.remaining, wb.currency)}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">{wb.currency} remaining</span>
+                  </button>
+                )
+              })}
+            </div>
+
+            {/* (c) Drill-down detail when a wallet card is selected */}
+            {selectedWalletDetail && (
+              <div className="rounded-lg border bg-muted/20 px-3 py-2.5 space-y-2">
+                {/* Summary stats */}
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                  <div>
+                    <span className="text-muted-foreground">Total deposited: </span>
+                    <span className="font-medium">{formatAmount(selectedWalletDetail.wb.deposited, selectedWalletDetail.wb.currency)}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Total spent: </span>
+                    <span className="font-medium">{formatAmount(selectedWalletDetail.wb.spent, selectedWalletDetail.wb.currency)}</span>
+                  </div>
+                  {selectedWalletDetail.wb.adjustments !== 0 && (
+                    <div>
+                      <span className="text-muted-foreground">Adjustments: </span>
+                      <span className="font-medium">
+                        {selectedWalletDetail.wb.adjustments > 0 ? '+' : ''}{formatAmount(selectedWalletDetail.wb.adjustments, selectedWalletDetail.wb.currency)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Since last top-up section */}
+                {selectedWalletDetail.lastTopup && (
+                  <div className="border-t pt-2 space-y-1">
+                    <div className="text-xs font-medium text-muted-foreground">Since last top-up</div>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                      <div>
+                        <span className="text-muted-foreground">Date: </span>
+                        <span className="font-medium">{formatDayLabel(selectedWalletDetail.lastTopup.date)}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Amount: </span>
+                        <span className="font-medium">{formatAmount(selectedWalletDetail.lastTopupNetAmount, selectedWalletDetail.wb.currency)}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Balance after: </span>
+                        <span className="font-medium">{formatAmount(selectedWalletDetail.balanceAfterLastTopup, selectedWalletDetail.wb.currency)}</span>
+                      </div>
+                      <div>
+                        <span className="text-muted-foreground">Spent since: </span>
+                        <span className="font-medium">{formatAmount(selectedWalletDetail.spentSinceLastTopup, selectedWalletDetail.wb.currency)}</span>
+                      </div>
+                    </div>
+                    <div className="pt-1 text-xs">
+                      <span className="text-muted-foreground">Est. remaining: </span>
+                      <span className={`font-semibold ${
+                        selectedWalletDetail.wb.remaining > 0 ? 'text-green-600 dark:text-green-400'
+                          : selectedWalletDetail.wb.remaining < 0 ? 'text-red-600 dark:text-red-400'
+                          : ''
+                      }`}>
+                        {formatAmount(selectedWalletDetail.wb.remaining, selectedWalletDetail.wb.currency)}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 pt-1.5">
+                      <span className="text-[11px] text-muted-foreground">Not the amount you have?</span>
+                      <button
+                        type="button"
+                        onClick={() => setReconcileBalance(selectedWalletDetail.wb)}
+                        className="rounded-md border border-primary/30 px-2 py-0.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/5"
+                      >
+                        Reconcile with current amount
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* (b)/(d) Top-up list — all withdrawals or filtered by selected wallet */}
+            {(() => {
+              const displayedWithdrawals = selectedWalletDetail
+                ? selectedWalletDetail.walletWithdrawals
+                : withdrawalTxs
+
+              if (displayedWithdrawals.length === 0) {
+                return (
+                  <p className="py-1 text-center text-xs text-muted-foreground">
+                    No top-ups recorded yet.
+                  </p>
+                )
+              }
+
+              return (
+                <div className="space-y-1">
+                  <div className="text-xs font-medium text-muted-foreground">
+                    {selectedWalletDetail ? 'Top-ups' : 'All top-ups'}
+                  </div>
+                  <div className="max-h-[200px] space-y-1 overflow-y-auto">
+                    {displayedWithdrawals.map(tx => {
+                      // tx.paymentMethod is the stored string (e.g. "💳 Cash")
+                      const pmStr = tx.paymentMethod ?? ''
+                      const pmCp = pmStr.codePointAt(0) ?? 0
+                      const emoji = pmCp > 0xff ? pmStr.split(' ')[0] : '🏧'
+                      const paid = tx.paidBy.find(s => s.travelMemberId === currentTravelMemberId)?.amount ?? 0
+                      return (
+                        <div
+                          key={tx.txId}
+                          className="flex items-center justify-between rounded-md bg-muted/30 px-2 py-1.5 text-xs"
+                        >
+                          <div className="flex min-w-0 items-center gap-1.5">
+                            <span>{emoji}</span>
+                            <span className="text-muted-foreground">{formatDayLabel(tx.date)}</span>
+                            <span className="truncate font-medium">{tx.name}</span>
+                          </div>
+                          <div className="ml-2 shrink-0 text-right">
+                            <span className="font-medium text-green-600 dark:text-green-400">
+                              +{formatAmount(paid, tx.currency)}
+                            </span>
+                            {tx.fees != null && tx.fees > 0 && (
+                              <div className="text-[10px] text-muted-foreground">
+                                fees: {formatAmount(tx.fees, tx.currency)}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })()}
+
+          </div>
+        ) : (
+          <p className="py-2 text-center text-sm text-muted-foreground">
+            Record a withdrawal to start tracking a payment method balance.
+          </p>
+        )}
+        {/* (e) Record withdrawal button */}
+        {onAddWithdrawal && (
+          <button
+            type="button"
+            onClick={onAddWithdrawal}
+            className="mt-2 w-full rounded-lg border border-dashed border-primary/30 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/5"
+          >
+            + Record withdrawal
+          </button>
+        )}
+        <p className="mt-2 text-xs text-muted-foreground">
+          Only your wallet balances are shown. Withdrawal data is stored alongside shared transactions.
+        </p>
+      </CollapsibleCard>
+
+      {/* ================================================================ */}
       {/* Card ⑥ — Currencies                                              */}
       {/* ================================================================ */}
       <CollapsibleCard
@@ -1627,6 +1915,20 @@ export function DashboardTab({
           </>
         )}
       </CollapsibleCard>
+
+      {/* ================================================================ */}
+      {/* Reconciliation dialog                                             */}
+      {/* ================================================================ */}
+      {reconcileBalance && (
+        <ReconciliationDialog
+          open={!!reconcileBalance}
+          onOpenChange={(open) => { if (!open) setReconcileBalance(null) }}
+          travelId={travel.travelId}
+          balance={reconcileBalance}
+          currentTravelMemberId={currentTravelMemberId}
+          onSuccess={() => setReconcileBalance(null)}
+        />
+      )}
 
       {/* ================================================================ */}
       {/* Member picker bottom sheet                                        */}

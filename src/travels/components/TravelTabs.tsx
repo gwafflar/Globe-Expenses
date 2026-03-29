@@ -49,6 +49,7 @@ interface TravelTabsProps {
   onSettlementCurrencyChange: (currency: string) => void
   onSettlementRateChange: (rate: number) => void
   onAddExpense: () => void
+  onAddWithdrawal?: () => void
   onEditTransaction: (txId: string) => void
   onDeleteTransaction: (txId: string) => void
   onTravelChange: (updated: Partial<Travel>) => void
@@ -71,6 +72,7 @@ export function TravelTabs({
   onSettlementCurrencyChange,
   onSettlementRateChange,
   onAddExpense,
+  onAddWithdrawal,
   onEditTransaction,
   onDeleteTransaction,
   onTravelChange,
@@ -181,6 +183,7 @@ export function TravelTabs({
                   currentUserUid={currentUserUid}
                   isSolo={isSolo}
                   onEditTransaction={onEditTransaction}
+                  onAddWithdrawal={onAddWithdrawal}
                 />
               )}
               {tab.id === 'parameters' && (

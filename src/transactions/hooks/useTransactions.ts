@@ -16,7 +16,7 @@ import {
   FirestoreError,
 } from 'firebase/firestore'
 import { db } from '@/services/firebase'
-import type { Transaction } from '@/transactions/types'
+import type { Transaction, TransactionType, AdjustmentMode } from '@/transactions/types'
 
 // Extends Transaction with a UI-only flag — not stored in Firestore.
 export interface TransactionWithStatus extends Transaction {
@@ -81,6 +81,9 @@ export function useTransactions(travelId: string | undefined): UseTransactionsRe
             draftId: data.draftId as string | undefined,
             notes: data.notes as string | undefined,
             amountFormula: data.amountFormula as string | undefined,
+            type: data.type as TransactionType | undefined,
+            fees: data.fees as number | undefined,
+            adjustmentMode: data.adjustmentMode as AdjustmentMode | undefined,
             // hasPendingWrites is true when the write is queued locally but
             // not yet confirmed by the Firestore server.
             isPending: docSnapshot.metadata.hasPendingWrites,

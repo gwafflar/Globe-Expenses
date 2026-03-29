@@ -13,6 +13,7 @@
 import { useMemo, useState, useCallback } from 'react'
 import type { TransactionWithStatus } from './useTransactions'
 import type { Travel } from '@/travels/types'
+import { getTransactionType } from '@/transactions/utils/walletHelpers'
 
 // Sentinel value representing transactions where the field is undefined/empty.
 // Stored in the filter Set and options array; the UI renders it as "Undefined".
@@ -24,6 +25,7 @@ export const UNDEFINED_FILTER = '__undefined__'
 
 /** The filter dimensions that can be active. Each maps to a Set of selected values. */
 export type FilterDimension =
+  | 'type'
   | 'category'
   | 'currency'
   | 'country'
@@ -79,6 +81,8 @@ function matchesDimension(
   selected: Set<string>,
 ): boolean {
   switch (dim) {
+    case 'type':
+      return selected.has(getTransactionType(tx))
     case 'category': {
       const val = tx.category
       return val ? selected.has(val) : selected.has(UNDEFINED_FILTER)
@@ -120,6 +124,8 @@ function matchesSearch(tx: TransactionWithStatus, q: string, searchAsNumber: num
 /** Extract the value(s) a transaction contributes to a given dimension. */
 function extractDimensionValues(tx: TransactionWithStatus, dim: FilterDimension): string[] {
   switch (dim) {
+    case 'type':
+      return [getTransactionType(tx)]
     case 'category':
       return [tx.category ?? UNDEFINED_FILTER]
     case 'currency':
@@ -140,7 +146,7 @@ function extractDimensionValues(tx: TransactionWithStatus, dim: FilterDimension)
 export function useTransactionFilters(
   transactions: TransactionWithStatus[],
   travel: Travel,
-  isSolo: boolean,
+  _isSolo: boolean,
 ): UseTransactionFiltersResult {
   // -- State --
   const [filters, setFilters] = useState<FilterState>({})
@@ -149,6 +155,7 @@ export function useTransactionFilters(
   // -- Derive available options from the FULL transaction list (not filtered) --
   // This ensures all options remain visible even when some filters are active.
   const options = useMemo<FilterOptions>(() => {
+    const types = new Set<string>()
     const cats = new Set<string>()
     const currencies = new Set<string>()
     const countries = new Set<string>()
@@ -165,6 +172,7 @@ export function useTransactionFilters(
     let hasUndefinedMethod = false
 
     for (const tx of transactions) {
+      types.add(getTransactionType(tx))
       if (tx.category) cats.add(tx.category); else hasUndefinedCat = true
       if (tx.currency) currencies.add(tx.currency)
       if (tx.country) countries.add(tx.country); else hasUndefinedCountry = true
@@ -192,6 +200,8 @@ export function useTransactionFilters(
     if (hasUndefinedMethod) methodList.push(UNDEFINED_FILTER)
 
     return {
+      // Type is ordered semantically: expense first, then withdrawal, then adjustment
+      type: ['expense', 'withdrawal', 'adjustment'].filter((t) => types.has(t)),
       category: catList,
       currency: Array.from(currencies).sort(),
       country: countryList,
@@ -265,7 +275,7 @@ export function useTransactionFilters(
   // For each dimension, apply all OTHER filters + search, then collect which values
   // still appear. Values not in this set get greyed out in the UI.
   const ALL_DIMS: FilterDimension[] = [
-    'category', 'currency', 'country', 'city', 'paymentMethod', 'paidBy', 'beneficiaries',
+    'type', 'category', 'currency', 'country', 'city', 'paymentMethod', 'paidBy', 'beneficiaries',
   ]
 
   const availableOptions = useMemo<FilterOptions>(() => {
