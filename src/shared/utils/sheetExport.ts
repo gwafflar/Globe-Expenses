@@ -145,7 +145,31 @@ function parseFsDate(d: string): Date {
   const [dd, mm, yyyy] = d.split('-').map(Number)
   return new Date(yyyy, mm - 1, dd)
 }
-function fsDateToSheet(d: string): string { return d.replace(/-/g, '/') }
+
+/**
+ * Convert a JS Date to an Excel date serial number.
+ * Excel epoch is 1899-12-30 (not 1900-01-01) due to the intentional 1900 leap year bug.
+ */
+function dateToSerial(date: Date): number {
+  const excelEpoch = new Date(1899, 11, 30) // 1899-12-30
+  const msPerDay = 24 * 60 * 60 * 1000
+  return Math.round((date.getTime() - excelEpoch.getTime()) / msPerDay)
+}
+
+/**
+ * Write a date cell with proper Excel serial + DD/MM/YYYY numFmt.
+ * SheetJS (with cellDates:true) will re-read this as a JS Date object.
+ */
+function dat(ws: WS, col: number, row: number, dateStr: string, s?: S) {
+  const jsDate = parseFsDate(dateStr)
+  const cell: Record<string, unknown> = {
+    t: 'n',
+    v: dateToSerial(jsDate),
+    z: 'DD/MM/YYYY',
+  }
+  if (s) cell.s = { ...s, numFmt: 'DD/MM/YYYY' }
+  ws[addr(col, row)] = cell
+}
 
 // ---------------------------------------------------------------------------
 // Split / paidBy label derivation
@@ -236,14 +260,10 @@ function buildExpensesSheet(
   travel: Travel,
   transactions: Transaction[],
   N: number,
-  ratesDataStart: number,
-  ratesDataEnd: number,
 ): unknown {
   const cm = buildColumnMap(N)
   const ws: WS = {}
   const members = travel.members
-  const paramsRef = `'${SHEET_PARAMS}'!$A$${ratesDataStart}:$B$${ratesDataEnd}`
-  const currLetter = colLetter(cm.currency)  // col H
   const amtLetter  = colLetter(cm.amountLocal) // col G
 
   // ── Row 1: section group headers ─────────────────────────────────────────
@@ -273,6 +293,7 @@ function buildExpensesSheet(
   str(ws, cm.name,         2, 'Description',          hdrDark(C.NAVY))
   str(ws, cm.amountLocal,  2, 'Amount (local)',        hdrDark(C.NAVY))
   str(ws, cm.currency,     2, 'Currency',             hdrDark(C.NAVY))
+  str(ws, cm.exchangeRate, 2, 'Exch. rate',           hdrDark(C.NAVY))
   str(ws, cm.costMain,     2, `Cost (${travel.currencies[0] ?? 'main'})`, hdrDark(C.NAVY2))
   str(ws, cm.splitLabel,   2, 'Split',                hdrDark(C.NAVY))
   str(ws, cm.paidByLabel,  2, 'Paid by',              hdrDark(C.NAVY))
@@ -311,7 +332,7 @@ function buildExpensesSheet(
 
     // Fixed input columns
     num(ws, cm.rowIndex,    r, rowNum,                 dataCell(C.LABEL_ALT))
-    str(ws, cm.date,        r, fsDateToSheet(tx.date), dataCell())
+    dat(ws, cm.date,        r, tx.date,                dataCell())
     if (tx.country) str(ws, cm.country,  r, tx.country,       dataCell())
     else            sty(ws, cm.country,  r,                   dataCell())
     if (tx.city)    str(ws, cm.city,     r, tx.city,          dataCell())
@@ -322,9 +343,14 @@ function buildExpensesSheet(
     num(ws, cm.amountLocal, r, tx.totalAmount,          dataCell())
     str(ws, cm.currency,    r, tx.currency,             dataCell())
 
-    // Col I: cost main ccy (formula → light blue)
+    // Exchange rate locked at transaction creation time — not recomputed from the table.
+    // This ensures re-import restores the original conversion, not today's rate.
+    num(ws, cm.exchangeRate, r, tx.exchangeRate,        dataCell())
+
+    // Cost main ccy: amount × exchange rate (simpler and more accurate than VLOOKUP)
+    const exchLetter = colLetter(cm.exchangeRate)
     fml(ws, cm.costMain, r,
-      `IFERROR(${amtLetter}${r}/VLOOKUP(${currLetter}${r},${paramsRef},2,FALSE),"")`,
+      `${amtLetter}${r}*${exchLetter}${r}`,
       formulaCell())
 
     // Cols J, K: split and paidBy labels
@@ -352,7 +378,7 @@ function buildExpensesSheet(
       // Use member pastel with blue-ish text to signal "computed"
       const fStyle: S = { font: fontBlue(), fill: fill(memberPastel(i)), border: thinBorder(C.BORDER_LIGHT), alignment: LEFT }
       fml(ws, cm.costMainPerMember[i], r,
-        `IF(${paramCell}="",0,IFERROR(${cLoc}${r}/VLOOKUP(${currLetter}${r},${paramsRef},2,FALSE),0))`,
+        `IF(${paramCell}="",0,IFERROR(${cLoc}${r}*${exchLetter}${r},0))`,
         fStyle)
     })
 
@@ -370,6 +396,9 @@ function buildExpensesSheet(
     fml(ws, cm.allGood, r,
       `IF(${amtLetter}${r}="","",IF(AND(${colLetter(cm.checkCost)}${r}="✔️",${colLetter(cm.checkPaid)}${r}="✔️"),"✅","❌"))`,
       ckStyle)
+
+    // Hidden txId column — Firestore document ID for round-trip re-import
+    str(ws, cm.txId, r, tx.txId, dataCell())
   })
 
   const endRow = Math.max(2, EXPENSES_FIRST_DATA_ROW + sorted.length - 1)
@@ -386,9 +415,10 @@ function buildExpensesSheet(
     30,  // F  Description
     14,  // G  Amount
     10,  // H  Currency
-    14,  // I  Cost main total
-    14,  // J  Split label
-    16,  // K  Paid by label
+    12,  // I  Exch. rate
+    14,  // J  Cost main total
+    14,  // K  Split label
+    16,  // L  Paid by label
   ]
   // N cost-local, N paid-local, paymentMethod, notes, N cost-main, 3 checks
   for (let i = 0; i < N; i++)  colWidths.push(14)
@@ -396,6 +426,7 @@ function buildExpensesSheet(
   colWidths.push(18, 25)       // payment method, notes
   for (let i = 0; i < N; i++)  colWidths.push(14)
   colWidths.push(10, 10, 9)    // checks
+  colWidths.push(0)            // txId — hidden column (width 0)
 
   ;(ws as Record<string, unknown>)['!cols'] = colWidths.map((wch) => ({ wch }))
 
@@ -477,7 +508,7 @@ function buildBalanceSheet(
       fml(ws, cols.costMain, r,
         `IF(${paramCell}="",0,IFERROR(VLOOKUP($A${r},${expRange},${cm.costMainPerMember[i]},FALSE),0))`, fStyle)
       fml(ws, cols.paidMain, r,
-        `IF(${paramCell}="",0,IFERROR(${paidLocLtr}${r}/VLOOKUP(IFERROR(VLOOKUP($A${r},${expRange},${currencyCol},FALSE),""),${paramsRef},2,FALSE),0))`, fStyle)
+        `IF(${paramCell}="",0,IFERROR(${paidLocLtr}${r}*VLOOKUP($A${r},${expRange},${cm.exchangeRate},FALSE),0))`, fStyle)
       fml(ws, cols.balance, r,
         `${paidMainLtr}${r}-${costMainLtr}${r}`,
         { font: fontDark(true), fill: fill(memberPastel(i)), border: thinBorder(C.BORDER_LIGHT), alignment: LEFT })
@@ -602,7 +633,7 @@ export async function exportTravelToXlsx(
 
   type WB_WS = XLSXTypes.WorkSheet
   XLSXStyle.utils.book_append_sheet(wb, buildParamsSheet(travel, mainCurrency, N)                           as WB_WS, SHEET_PARAMS)
-  XLSXStyle.utils.book_append_sheet(wb, buildExpensesSheet(travel, transactions, N, ratesDataStart, ratesDataEnd) as WB_WS, SHEET_EXPENSES)
+  XLSXStyle.utils.book_append_sheet(wb, buildExpensesSheet(travel, transactions, N) as WB_WS, SHEET_EXPENSES)
   XLSXStyle.utils.book_append_sheet(wb, buildBalanceSheet(travel, N, ratesDataStart, ratesDataEnd)          as WB_WS, SHEET_BALANCE)
   XLSXStyle.utils.book_append_sheet(wb, buildBalanceSummarySheet(travel, N)                                 as WB_WS, SHEET_BALANCE_SUMMARY)
   XLSXStyle.utils.book_append_sheet(wb, buildAnalysisSheet(travel, N)                                       as WB_WS, SHEET_ANALYSIS)

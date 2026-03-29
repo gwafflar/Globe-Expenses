@@ -40,6 +40,7 @@ import {
   countsAsSpending,
   computeWalletBalances,
   isWithdrawal,
+  isAdjustment,
   type WalletBalance,
 } from '@/transactions/utils/walletHelpers'
 import { ReconciliationDialog } from '@/transactions/components/ReconciliationDialog'
@@ -248,11 +249,11 @@ export function DashboardTab({
     [normalizedTxs, currentTravelMemberId, pmLabelMap],
   )
 
-  // withdrawalTxs — all withdrawal transactions where the current user paid,
-  // sorted by date descending. Used by the wallet card's top-up list.
-  const withdrawalTxs = useMemo(() => {
+  // walletEventTxs — all withdrawal and adjustment transactions where the current
+  // user paid, sorted by date descending. Used by the wallet card's history list.
+  const walletEventTxs = useMemo(() => {
     return normalizedTxs
-      .filter(tx => isWithdrawal(tx) && tx.paidBy.some(s => s.travelMemberId === currentTravelMemberId))
+      .filter(tx => (isWithdrawal(tx) || isAdjustment(tx)) && tx.paidBy.some(s => s.travelMemberId === currentTravelMemberId))
       .sort((a, b) => parseTxDate(b.date).getTime() - parseTxDate(a.date).getTime())
   }, [normalizedTxs, currentTravelMemberId])
 
@@ -264,14 +265,14 @@ export function DashboardTab({
     const wb = walletBalances.find(w => w.paymentMethod === pm && w.currency === currency)
     if (!wb) return null
 
-    // Withdrawals for this specific wallet, already sorted desc
-    const walletWithdrawals = withdrawalTxs.filter(
+    // Wallet events (withdrawals + adjustments) for this specific wallet, already sorted desc
+    const walletEvents = walletEventTxs.filter(
       tx => tx.paymentMethod === pm && tx.currency === currency,
     )
 
-    const lastTopup = walletWithdrawals[0] // most recent (sorted desc)
+    const lastTopup = walletEvents.find(tx => isWithdrawal(tx)) // most recent withdrawal
     if (!lastTopup) {
-      return { wb, walletWithdrawals, lastTopup: null, lastTopupNetAmount: 0, spentSinceLastTopup: 0, balanceAfterLastTopup: wb.remaining }
+      return { wb, walletEvents, lastTopup: null, lastTopupNetAmount: 0, spentSinceLastTopup: 0, balanceAfterLastTopup: wb.remaining }
     }
 
     const lastTopupDate = parseTxDate(lastTopup.date)
@@ -292,14 +293,56 @@ export function DashboardTab({
 
     return {
       wb,
-      walletWithdrawals,
+      walletEvents,
       lastTopup,
       lastTopupNetAmount: Math.round(lastTopupNetAmount * 100) / 100,
       spentSinceLastTopup,
       // Balance right after the last top-up ≈ current remaining + everything spent since
       balanceAfterLastTopup: Math.round((wb.remaining + spentSinceLastTopup) * 100) / 100,
     }
-  }, [selectedWalletKey, walletBalances, withdrawalTxs, normalizedTxs, currentTravelMemberId])
+  }, [selectedWalletKey, walletBalances, walletEventTxs, normalizedTxs, currentTravelMemberId])
+
+  // walletSpendingGaps — for each gap between consecutive wallet events in the
+  // selected wallet drill-down, compute total spending in that date range.
+  // Keyed by the index of the upper (more recent) event in the list.
+  // Only computed when a wallet is selected (gaps are meaningless across mixed wallets).
+  const walletSpendingGaps = useMemo(() => {
+    const gaps = new Map<number, { fromDate: string; toDate: string; amount: number }>()
+    if (!selectedWalletDetail) return gaps
+
+    const [pm, currency] = selectedWalletKey!.split('|')
+    const events = selectedWalletDetail.walletEvents
+
+    // Collect spending txs for this wallet once (avoid re-scanning per gap)
+    const spendingTxs = normalizedTxs.filter(tx => {
+      if (tx.paymentMethod !== pm || tx.currency !== currency) return false
+      if (!countsAsSpending(tx)) return false
+      return (tx.paidBy.find(s => s.travelMemberId === currentTravelMemberId)?.amount ?? 0) > 0
+    })
+
+    for (let i = 0; i < events.length - 1; i++) {
+      const newerDate = parseTxDate(events[i].date)
+      const olderDate = parseTxDate(events[i + 1].date)
+
+      let total = 0
+      for (const tx of spendingTxs) {
+        const txDate = parseTxDate(tx.date)
+        // Include spending strictly between the two event dates
+        if (txDate.getTime() > olderDate.getTime() && txDate.getTime() < newerDate.getTime()) {
+          total += tx.paidBy.find(s => s.travelMemberId === currentTravelMemberId)?.amount ?? 0
+        }
+      }
+
+      // Always show the gap row (even if 0 — gives context of the time range)
+      gaps.set(i, {
+        fromDate: events[i + 1].date,
+        toDate: events[i].date,
+        amount: Math.round(total * 100) / 100,
+      })
+    }
+
+    return gaps
+  }, [selectedWalletDetail, selectedWalletKey, normalizedTxs, currentTravelMemberId])
 
   // totalSpent — sum of all filtered transactions in main currency.
   const totalSpent = useMemo(
@@ -1765,6 +1808,7 @@ export function DashboardTab({
                 {selectedWalletDetail.lastTopup && (
                   <div className="border-t pt-2 space-y-1">
                     <div className="text-xs font-medium text-muted-foreground">Since last top-up</div>
+                    <div className="text-[10px] text-muted-foreground italic">Includes all transactions from end of day of last top-up</div>
                     <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
                       <div>
                         <span className="text-muted-foreground">Date: </span>
@@ -1808,16 +1852,16 @@ export function DashboardTab({
               </div>
             )}
 
-            {/* (b)/(d) Top-up list — all withdrawals or filtered by selected wallet */}
+            {/* (b)/(d) Wallet event list — withdrawals + adjustments, all or filtered */}
             {(() => {
-              const displayedWithdrawals = selectedWalletDetail
-                ? selectedWalletDetail.walletWithdrawals
-                : withdrawalTxs
+              const displayedEvents = selectedWalletDetail
+                ? selectedWalletDetail.walletEvents
+                : walletEventTxs
 
-              if (displayedWithdrawals.length === 0) {
+              if (displayedEvents.length === 0) {
                 return (
                   <p className="py-1 text-center text-xs text-muted-foreground">
-                    No top-ups recorded yet.
+                    No wallet events recorded yet.
                   </p>
                 )
               }
@@ -1825,35 +1869,65 @@ export function DashboardTab({
               return (
                 <div className="space-y-1">
                   <div className="text-xs font-medium text-muted-foreground">
-                    {selectedWalletDetail ? 'Top-ups' : 'All top-ups'}
+                    {selectedWalletDetail ? 'History' : 'All wallet events'}
                   </div>
                   <div className="max-h-[200px] space-y-1 overflow-y-auto">
-                    {displayedWithdrawals.map(tx => {
-                      // tx.paymentMethod is the stored string (e.g. "💳 Cash")
-                      const pmStr = tx.paymentMethod ?? ''
-                      const pmCp = pmStr.codePointAt(0) ?? 0
-                      const emoji = pmCp > 0xff ? pmStr.split(' ')[0] : '🏧'
+                    {displayedEvents.map((tx, idx) => {
+                      const txIsWithdrawal = isWithdrawal(tx)
+                      const typeEmoji = txIsWithdrawal ? '🏧' : '⚖️'
                       const paid = tx.paidBy.find(s => s.travelMemberId === currentTravelMemberId)?.amount ?? 0
+                      // Spending gap row between this event and the next (older) one
+                      const gap = selectedWalletDetail ? walletSpendingGaps.get(idx) : null
                       return (
-                        <div
-                          key={tx.txId}
-                          className="flex items-center justify-between rounded-md bg-muted/30 px-2 py-1.5 text-xs"
-                        >
-                          <div className="flex min-w-0 items-center gap-1.5">
-                            <span>{emoji}</span>
-                            <span className="text-muted-foreground">{formatDayLabel(tx.date)}</span>
-                            <span className="truncate font-medium">{tx.name}</span>
-                          </div>
-                          <div className="ml-2 shrink-0 text-right">
-                            <span className="font-medium text-green-600 dark:text-green-400">
-                              +{formatAmount(paid, tx.currency)}
-                            </span>
-                            {tx.fees != null && tx.fees > 0 && (
-                              <div className="text-[10px] text-muted-foreground">
-                                fees: {formatAmount(tx.fees, tx.currency)}
+                        <div key={tx.txId}>
+                          <div className="flex items-center justify-between rounded-md bg-muted/30 px-2 py-1.5 text-xs">
+                            <div className="flex min-w-0 items-center gap-1.5">
+                              <span>{typeEmoji}</span>
+                              <span className="text-muted-foreground">{formatDayLabel(tx.date)}</span>
+                              <span className="truncate font-medium">{tx.name}</span>
+                            </div>
+                            <div className="ml-2 flex shrink-0 items-center gap-1.5">
+                              <div className="text-right">
+                                <span className={`font-medium ${
+                                  txIsWithdrawal
+                                    ? 'text-green-600 dark:text-green-400'
+                                    : paid >= 0
+                                      ? 'text-blue-600 dark:text-blue-400'
+                                      : 'text-red-600 dark:text-red-400'
+                                }`}>
+                                  {txIsWithdrawal ? '+' : paid >= 0 ? '+' : ''}{formatAmount(paid, tx.currency)}
+                                </span>
+                                {tx.fees != null && tx.fees > 0 && (
+                                  <div className="text-[10px] text-muted-foreground">
+                                    fees: {formatAmount(tx.fees, tx.currency)}
+                                  </div>
+                                )}
                               </div>
-                            )}
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); onEditTransaction(tx.txId) }}
+                                className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                                title="Edit"
+                              >
+                                ✏️
+                              </button>
+                            </div>
                           </div>
+                          {/* Spending gap between this event and the next (older) one */}
+                          {gap && (
+                            <div className="flex items-center gap-1.5 px-3 py-1 text-[10px] text-muted-foreground">
+                              <span>↕</span>
+                              <span>
+                                Spent between {formatDayLabel(gap.fromDate)} and {formatDayLabel(gap.toDate)}:
+                              </span>
+                              <span className="font-medium">
+                                {gap.amount > 0
+                                  ? formatAmount(gap.amount, selectedWalletDetail!.wb.currency)
+                                  : `0 ${selectedWalletDetail!.wb.currency}`
+                                }
+                              </span>
+                            </div>
+                          )}
                         </div>
                       )
                     })}

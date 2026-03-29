@@ -6,6 +6,7 @@ import {
   groupByDay,
   type DayGroup,
 } from '../TransactionsTab'
+import { parseTxDate } from '../dashboardHelpers'
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
 
 // ---------------------------------------------------------------------------
@@ -110,5 +111,31 @@ describe('groupByDay', () => {
   it('returns correct DayGroup shape', () => {
     const result: DayGroup[] = groupByDay([makeTx('tx1', '01-01-2025')])
     expect(result[0]).toMatchObject({ date: '01-01-2025', transactions: expect.any(Array) })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Date sort order (parseTxDate-based, matching the useMemo in TransactionsTab)
+// ---------------------------------------------------------------------------
+
+/** Sort helper — mirrors the useMemo sort in TransactionsTab. */
+function sortByDateDesc(txs: TransactionWithStatus[]): TransactionWithStatus[] {
+  return [...txs].sort((a, b) => {
+    const dateDiff = parseTxDate(b.date).getTime() - parseTxDate(a.date).getTime()
+    return dateDiff
+  })
+}
+
+describe('date sort order (parseTxDate)', () => {
+  it('sorts cross-month correctly (Feb 01 before Jan 31)', () => {
+    const txs = [makeTx('jan31', '31-01-2025'), makeTx('feb01', '01-02-2025')]
+    const sorted = sortByDateDesc(txs)
+    expect(sorted.map((t) => t.txId)).toEqual(['feb01', 'jan31'])
+  })
+
+  it('sorts cross-year correctly (Jan 2025 before Dec 2024)', () => {
+    const txs = [makeTx('dec24', '31-12-2024'), makeTx('jan25', '01-01-2025')]
+    const sorted = sortByDateDesc(txs)
+    expect(sorted.map((t) => t.txId)).toEqual(['jan25', 'dec24'])
   })
 })

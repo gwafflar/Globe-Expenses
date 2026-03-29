@@ -6,8 +6,13 @@
 //
 // The dialog is controlled (open prop) so the parent can close it cleanly.
 
-import { useCallback, useRef, useState } from 'react'
-import type { Travel } from '@/travels/types'
+import { useCallback, useMemo, useRef, useState } from 'react'
+import { arrayUnion, doc, updateDoc } from 'firebase/firestore'
+import { db } from '@/services/firebase'
+import type { Travel, LabeledItem } from '@/travels/types'
+import type { ParsedSheetRow } from '@/shared/utils/sheetImport'
+import { CollapsibleCard } from '@/travels/components/CollapsibleCard'
+import { getFlagForCountry } from '@/shared/data/pickerData'
 import {
   Dialog,
   DialogContent,
@@ -234,17 +239,32 @@ function MappingStep({
 function ResultStep({
   importResult,
   isImporting,
+  progress,
 }: {
   importResult: ImportResult | null
   isImporting: boolean
+  progress: { committed: number; total: number }
 }) {
   const [errorsExpanded, setErrorsExpanded] = useState(false)
 
   if (isImporting) {
+    // Percentage for the progress bar (0–100). Avoid division by zero.
+    const pct = progress.total > 0 ? Math.round((progress.committed / progress.total) * 100) : 0
+
     return (
-      <div className="flex flex-col items-center gap-3 py-8">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-        <p className="text-sm text-muted-foreground">Importing transactions…</p>
+      <div className="flex flex-col items-center gap-4 py-8">
+        {/* Progress bar */}
+        <div className="w-full max-w-xs">
+          <div className="h-2.5 w-full overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full bg-primary transition-all duration-300"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          {progress.committed} / {progress.total} transactions committed
+        </p>
       </div>
     )
   }
@@ -254,13 +274,19 @@ function ResultStep({
   return (
     <div className="flex flex-col gap-3">
       <p className="text-base font-semibold text-green-600">
-        Imported {importResult.imported} transaction{importResult.imported !== 1 ? 's' : ''}
+        {importResult.imported > 0 && (
+          <>{importResult.imported} new transaction{importResult.imported !== 1 ? 's' : ''} imported</>
+        )}
+        {importResult.imported > 0 && importResult.updated > 0 && ', '}
+        {importResult.updated > 0 && (
+          <>{importResult.updated} transaction{importResult.updated !== 1 ? 's' : ''} updated</>
+        )}
+        {importResult.imported === 0 && importResult.updated === 0 && 'No transactions imported'}
       </p>
 
       {importResult.skipped > 0 && (
         <p className="text-sm text-muted-foreground">
-          {importResult.skipped} row{importResult.skipped !== 1 ? 's' : ''} skipped (empty or
-          zero-amount)
+          {importResult.skipped} row{importResult.skipped !== 1 ? 's' : ''} skipped (empty)
         </p>
       )}
 
@@ -289,6 +315,104 @@ function ResultStep({
       <p className="text-xs text-muted-foreground">
         The transaction list updates automatically.
       </p>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Step 2.5 — Data preview (read-only)
+// ---------------------------------------------------------------------------
+
+/** Check whether a value matches any entry in a LabeledItem list (case-insensitive). */
+function matchesLabeledList(value: string, list: LabeledItem[]): boolean {
+  const lower = value.toLowerCase()
+  return list.some((item) => {
+    if (item.label.toLowerCase() === lower) return true
+    // Also match the "emoji label" concatenation (e.g. "🚆 Transit")
+    if (item.emoji && `${item.emoji} ${item.label}`.toLowerCase() === lower) return true
+    return false
+  })
+}
+
+/** Extract unique non-empty values from a specific field across all rows. */
+function uniqueValues(rows: ParsedSheetRow[], key: 'country' | 'city' | 'category' | 'paymentMethod'): string[] {
+  const set = new Set<string>()
+  for (const row of rows) {
+    const v = row[key]
+    if (v) set.add(v)
+  }
+  return Array.from(set).sort((a, b) => a.localeCompare(b))
+}
+
+interface PreviewSection {
+  label: string
+  values: string[]
+  travelList: LabeledItem[]
+}
+
+function PreviewStep({ rows, travel }: { rows: ParsedSheetRow[]; travel: Travel }) {
+  // Build the four sections with their corresponding travel lists
+  const sections: PreviewSection[] = useMemo(() => [
+    { label: 'Countries',       values: uniqueValues(rows, 'country'),       travelList: travel.countries      ?? [] },
+    { label: 'Cities',          values: uniqueValues(rows, 'city'),          travelList: travel.cities         ?? [] },
+    { label: 'Categories',      values: uniqueValues(rows, 'category'),      travelList: travel.categories     ?? [] },
+    { label: 'Payment methods', values: uniqueValues(rows, 'paymentMethod'), travelList: travel.paymentMethods ?? [] },
+  ], [rows, travel])
+
+  const totalUnmatched = sections.reduce(
+    (sum, s) => sum + s.values.filter((v) => !matchesLabeledList(v, s.travelList)).length,
+    0,
+  )
+
+  return (
+    <div className="flex flex-col gap-3">
+      {/* Summary line */}
+      <p className="text-sm text-muted-foreground">
+        {rows.length} transactions · {sections[0].values.length} countries · {sections[1].values.length} cities · {sections[2].values.length} categories · {sections[3].values.length} payment methods
+      </p>
+
+      {/* Match status banner */}
+      {totalUnmatched === 0 ? (
+        <div className="rounded-md bg-green-50 px-3 py-2 text-sm text-green-800 dark:bg-green-900/30 dark:text-green-300">
+          All values match the travel configuration.
+        </div>
+      ) : (
+        <div className="rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+          Some values don't match the travel configuration. They will be imported as-is.
+        </div>
+      )}
+
+      {/* Collapsible sections — each collapsed by default */}
+      {sections.map((section) => (
+        <CollapsibleCard
+          key={section.label}
+          title={section.label}
+          summary={`${section.values.length}`}
+          defaultOpen={false}
+        >
+          {section.values.length === 0 ? (
+            <p className="text-xs text-muted-foreground">No values found.</p>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {section.values.map((value) => {
+                const matched = matchesLabeledList(value, section.travelList)
+                return (
+                  <span
+                    key={value}
+                    className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                      matched
+                        ? 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300'
+                        : 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300'
+                    }`}
+                  >
+                    {value}
+                  </span>
+                )
+              })}
+            </div>
+          )}
+        </CollapsibleCard>
+      ))}
     </div>
   )
 }
@@ -332,21 +456,25 @@ export function ImportXlsxDialog({
   travel,
   currentUserUid,
 }: ImportXlsxDialogProps) {
-  const [step, setStep]                 = useState<1 | 2 | 3>(1)
+  type Step = 'upload' | 'mapping' | 'preview' | 'result'
+  const [step, setStep]                 = useState<Step>('upload')
   const [parseResult, setParseResult]   = useState<ParseResult | null>(null)
   // Maps sheet slot index → travelMemberId (the stable ID used in Split[])
   const [slotToTravelMemberId, setSlotToTravelMemberId] = useState<Record<number, string | undefined>>({})
   const [importResult, setImportResult] = useState<ImportResult | null>(null)
   const [isImporting, setIsImporting]   = useState(false)
+  // Progress tracking: [committed, total] updated after each batch commit
+  const [importProgress, setImportProgress] = useState<{ committed: number; total: number }>({ committed: 0, total: 0 })
 
   // Reset all state when the dialog closes
   function handleOpenChange(nextOpen: boolean) {
     if (!nextOpen) {
-      setStep(1)
+      setStep('upload')
       setParseResult(null)
       setSlotToTravelMemberId({})
       setImportResult(null)
       setIsImporting(false)
+      setImportProgress({ committed: 0, total: 0 })
     }
     onOpenChange(nextOpen)
   }
@@ -358,17 +486,22 @@ export function ImportXlsxDialog({
       // Auto-match slot names to travel member display names
       const autoMapping = buildInitialMapping(result.slots, travel.members)
       setSlotToTravelMemberId(autoMapping)
-      setStep(2)
+      setStep('mapping')
     },
     [travel.members],
   )
 
-  // Step 2 → 3
+  // Step 2 (mapping) → preview
+  function handlePreview() {
+    setStep('preview')
+  }
+
+  // Step preview → result (runs the actual import + syncs travel lists)
   async function handleImport() {
     if (!parseResult) return
 
     setIsImporting(true)
-    setStep(3)
+    setStep('result')
 
     const mainCurrency = travel.currencies[0] ?? 'EUR'
     const result = await importParsedRows(
@@ -377,7 +510,54 @@ export function ImportXlsxDialog({
       slotToTravelMemberId,
       currentUserUid,
       mainCurrency,
+      (committed, total) => setImportProgress({ committed, total }),
     )
+
+    // ── Sync travel lists ───────────────────────────────────────────────────
+    // Reuse the same uniqueValues / matchesLabeledList helpers from PreviewStep
+    // to find values not already in the travel and write them via arrayUnion.
+    const travelRef = doc(db, 'travels', travel.travelId)
+    const listUpdates: Record<string, unknown> = {}
+
+    const listFields = [
+      { key: 'country'       as const, field: 'countries',      existing: travel.countries      ?? [], prefix: 'country' },
+      { key: 'city'          as const, field: 'cities',         existing: travel.cities         ?? [], prefix: 'city' },
+      { key: 'category'      as const, field: 'categories',     existing: travel.categories     ?? [], prefix: 'cat' },
+      { key: 'paymentMethod' as const, field: 'paymentMethods', existing: travel.paymentMethods ?? [], prefix: 'pm' },
+    ] as const
+
+    for (const { key, field, existing, prefix } of listFields) {
+      // Reuse uniqueValues + matchesLabeledList (same logic as PreviewStep)
+      const newValues = uniqueValues(parseResult.rows, key)
+        .filter((v) => !matchesLabeledList(v, existing))
+
+      if (newValues.length > 0) {
+        const items: LabeledItem[] = newValues.map((label) => {
+          const item: LabeledItem = { id: `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, label }
+          if (key === 'country') item.emoji = getFlagForCountry(label)
+          return item
+        })
+        listUpdates[field] = arrayUnion(...items)
+      }
+    }
+
+    // Currencies are plain string[], not LabeledItem[]
+    const existingCurrencySet = new Set((travel.currencies ?? []).map((c) => c.toUpperCase()))
+    const sheetCurrencies = new Set<string>()
+    for (const row of parseResult.rows) {
+      if (row.currency) sheetCurrencies.add(row.currency)
+    }
+    const newCurrencies = [...sheetCurrencies].filter((c) => !existingCurrencySet.has(c.toUpperCase()))
+    if (newCurrencies.length > 0) listUpdates.currencies = arrayUnion(...newCurrencies)
+
+    if (Object.keys(listUpdates).length > 0) {
+      console.log('[ImportXlsxDialog] syncing travel lists:', Object.keys(listUpdates))
+      try {
+        await updateDoc(travelRef, listUpdates)
+      } catch (err) {
+        console.error('[ImportXlsxDialog] travel list sync failed:', err)
+      }
+    }
 
     setImportResult(result)
     setIsImporting(false)
@@ -387,7 +567,12 @@ export function ImportXlsxDialog({
   const assignedIds = Object.values(slotToTravelMemberId).filter((id): id is string => id !== undefined)
   const hasDuplicates = assignedIds.length !== new Set(assignedIds).size
 
-  const stepLabel = { 1: 'Step 1 of 3 — Upload', 2: 'Step 2 of 3 — Member mapping', 3: 'Step 3 of 3 — Done' }
+  const stepLabel: Record<Step, string> = {
+    upload:  'Step 1 of 4 — Upload',
+    mapping: 'Step 2 of 4 — Member mapping',
+    preview: 'Step 3 of 4 — Data preview',
+    result:  'Step 4 of 4 — Done',
+  }
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -398,9 +583,9 @@ export function ImportXlsxDialog({
         </DialogHeader>
 
         {/* Step content */}
-        {step === 1 && <UploadStep onParsed={handleParsed} />}
+        {step === 'upload' && <UploadStep onParsed={handleParsed} />}
 
-        {step === 2 && parseResult && (
+        {step === 'mapping' && parseResult && (
           <MappingStep
             parseResult={parseResult}
             travel={travel}
@@ -409,29 +594,43 @@ export function ImportXlsxDialog({
           />
         )}
 
-        {step === 3 && (
-          <ResultStep importResult={importResult} isImporting={isImporting} />
+        {step === 'preview' && parseResult && (
+          <PreviewStep rows={parseResult.rows} travel={travel} />
+        )}
+
+        {step === 'result' && (
+          <ResultStep importResult={importResult} isImporting={isImporting} progress={importProgress} />
         )}
 
         {/* Footer buttons */}
         <DialogFooter>
-          {step === 2 && (
+          {step === 'upload' && (
+            <Button variant="outline" onClick={() => handleOpenChange(false)}>
+              Cancel
+            </Button>
+          )}
+          {step === 'mapping' && (
             <>
-              <Button variant="outline" onClick={() => setStep(1)}>
+              <Button variant="outline" onClick={() => setStep('upload')}>
                 Back
               </Button>
-              <Button onClick={handleImport} disabled={hasDuplicates}>
+              <Button onClick={handlePreview} disabled={hasDuplicates}>
+                Next
+              </Button>
+            </>
+          )}
+          {step === 'preview' && (
+            <>
+              <Button variant="outline" onClick={() => setStep('mapping')}>
+                Back
+              </Button>
+              <Button onClick={handleImport}>
                 Import
               </Button>
             </>
           )}
-          {step === 3 && !isImporting && (
+          {step === 'result' && !isImporting && (
             <Button onClick={() => handleOpenChange(false)}>Done</Button>
-          )}
-          {step === 1 && (
-            <Button variant="outline" onClick={() => handleOpenChange(false)}>
-              Cancel
-            </Button>
           )}
         </DialogFooter>
       </DialogContent>

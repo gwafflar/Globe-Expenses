@@ -1462,7 +1462,7 @@ Pure functions: `computeWalletBalances()` takes full tx list + travelMemberId + 
 
 ---
 
-## 📝 Working Session 014.1 — 29 March 2026
+## 📝 Working Session 014.2 — 29 March 2026
 
 **Type**: UI refinement
 **Tools used**: Claude Code (claude-opus-4-6)
@@ -1507,6 +1507,60 @@ Wrote a full implementation prompt for **unified TransactionForm with type selec
 
 - [ ] **Unified TransactionForm with type selector** — prompt written (see session notes above)
 - [ ] **Per-travel field customization** — hideable/showable fields + user-defined custom data fields (future)
+- [ ] Cloud Function `onTravelDeleted` (v2)
+- [ ] PWA icons
+- [ ] Display Mode in Transactions tab
+- [ ] Move composite indexes to `firestore.indexes.json`
+
+---
+
+## 📝 Working Session 015 — March 2026
+
+**Type**: Bug fixes — XLSX import/export pipeline
+**Tools used**: Claude Web, Claude Code (CLI)
+
+### Summary
+
+Fixed 6 bugs in the import/export round-trip pipeline, plus 2 small UI fixes. All discovered during user testing of a 1400-row travel import.
+
+### Fixes applied
+
+1. **Zero-amount skip** (`sheetImport.ts`): Changed row-skip condition from `!row.totalAmount` to `row.totalAmount === null || row.totalAmount === undefined`. Zero-amount rows (cash withdrawals, transfers) are now imported correctly.
+
+2. **Batch writes** (`sheetImport.ts`): Replaced per-row `createTransaction()` with `writeBatch` chunked at 500. 1400 rows → 3 batch commits instead of 1400 individual pending writes. Added `onProgress` callback for UI progress bar.
+
+3. **Data preview step** (`ImportXlsxDialog.tsx`): New Step 3 of 4 between member mapping and import. Shows unique countries/cities/categories/payment methods as green (matched) or amber (new) pills. Uses `CollapsibleCard`, read-only.
+
+4. **Date sort order** (`TransactionsTab.tsx`): Added `parseTxDate`-based sort before `groupByDay()`. Fixes lexicographic `"DD-MM-YYYY"` string sort (e.g. Jan 31 appearing after Feb 01). `createdAt` as tiebreaker within same day.
+
+5. **Date encoding** (`sheetExport.ts`, `sheetImport.ts`): Export now writes dates as Excel serials with `z: 'DD/MM/YYYY'` numFmt (via new `dat()` helper + `dateToSerial()`). Import's `parseDate` rewritten to handle JS Date, Excel serial (epoch 1899-12-30), and DD/MM/YYYY or DD-MM-YYYY strings.
+
+6. **Exchange rate column** (`sheetColumns.ts`, `sheetExport.ts`, `sheetImport.ts`): Added col I `Exch. rate` between Currency and Cost (main). Export writes `tx.exchangeRate` as a number. Import reads it and falls back to `getExchangeRate()` for older files. All formulas changed from `VLOOKUP(currency, rateTable)` to `amount * exchangeRate`. Fixes 100 000 VND → 100 000 EUR bug for unsupported currencies.
+
+7. **Travel list sync on import** (`ImportXlsxDialog.tsx`): After import, new categories/countries/cities/paymentMethods/currencies are synced to the travel via `arrayUnion`. Reuses `uniqueValues()` and `matchesLabeledList()` from the preview step.
+
+8. **Emoji spacing** (`TransactionsTab.tsx`): `DayGroupHeader` country flags joined with `' '` instead of `''`.
+
+9. **Re-import dedup** (`sheetExport.ts`, `sheetImport.ts`, `sheetColumns.ts`): Export writes `tx.txId` in a hidden column. Import reads it and uses `doc(collection, txId)` + `batch.set(merge: true)` to update in-place instead of creating duplicates. `ImportResult` now reports `imported` (new) and `updated` (existing) separately.
+
+### Files modified
+
+| File | Changes |
+|------|---------|
+| `src/shared/utils/sheetColumns.ts` | Added `exchangeRate` (col I) and `txId` (hidden) to `ColumnMap`; shifted all downstream columns +1 |
+| `src/shared/utils/sheetExport.ts` | Date cells as Excel serials with numFmt; exchange rate column; txId hidden column; formulas use `amount*rate` instead of VLOOKUP |
+| `src/shared/utils/sheetImport.ts` | Zero-amount fix; batch writes with progress; `parseDate` rewrite; reads `exchangeRate` and `txId` columns; `ImportResult.updated` field |
+| `src/shared/components/ImportXlsxDialog.tsx` | 4-step wizard (upload→mapping→preview→result); `PreviewStep` component; progress bar; travel list sync via `arrayUnion`; updated/imported counts |
+| `src/travels/components/tabs/TransactionsTab.tsx` | `parseTxDate`-based sort before `groupByDay()`; emoji spacing fix |
+| `src/shared/utils/__tests__/sheetColumns.test.ts` | New: `buildColumnMap` tests for column positions |
+| `src/shared/utils/__tests__/sheetImport.test.ts` | New: `parseDate` tests (JS Date, serial, strings, edge cases) |
+| `src/travels/components/tabs/__tests__/transactionsTab.test.ts` | Added cross-month and cross-year sort order tests |
+
+### Carry-forward items (open)
+
+- [ ] **Unified TransactionForm with type selector** — prompt written (Session 014)
+- [ ] **Per-travel field customization** — hideable/showable fields + user-defined custom data fields (future)
+- [ ] **Travel list sync verification** — console log added to confirm `updateDoc` runs; remove after confirmed working
 - [ ] Cloud Function `onTravelDeleted` (v2)
 - [ ] PWA icons
 - [ ] Display Mode in Transactions tab

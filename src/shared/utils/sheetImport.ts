@@ -8,9 +8,10 @@
 // between the two steps.  See ImportXlsxDialog.tsx.
 
 import * as XLSX from 'xlsx'
+import { collection, doc, writeBatch, serverTimestamp } from 'firebase/firestore'
+import { db } from '@/services/firebase'
 import { buildColumnMap, colLetter } from '@/shared/utils/sheetColumns'
 import { getExchangeRate } from '@/shared/utils/exchangeRates'
-import { createTransaction } from '@/transactions/services/transactionService'
 import { SHEET_PARAMS, SHEET_EXPENSES } from '@/shared/utils/sheetExport'
 
 // ---------------------------------------------------------------------------
@@ -37,6 +38,8 @@ export interface ParsedSheetRow {
   paidByLabel?: string    // raw value from col K
   costPerSlot: (number | undefined)[]   // length = nMembersInSheet
   paidPerSlot: (number | undefined)[]   // length = nMembersInSheet
+  exchangeRate?: number   // present when col I contains a numeric rate; undefined for older files
+  txId?: string           // Firestore doc ID from a previous export (for re-import dedup)
 }
 
 export interface ParseResult {
@@ -69,42 +72,50 @@ function asNumber(v: unknown): number {
 }
 
 /**
- * Parse a date cell value (JS Date, Excel serial number, or "DD/MM/YYYY" string)
- * into the Firestore format "DD-MM-YYYY".
+ * Parse a date cell value into "DD-MM-YYYY" (Firestore format).
+ *
+ * SheetJS with cellDates:true returns:
+ *   - JS Date  → when the cell's numFmt is recognised as a date format
+ *   - number   → raw Excel serial when numFmt is "General" or unrecognised (our old export bug)
+ *   - string   → when the cell was stored as text (e.g. "23/07/2025")
+ *
+ * Exported for unit testing.
  */
-function parseDate(v: unknown): string {
-  if (v instanceof Date) {
-    const d = v
-    return [
-      String(d.getDate()).padStart(2, '0'),
-      String(d.getMonth() + 1).padStart(2, '0'),
-      d.getFullYear(),
-    ].join('-')
-  }
-  if (typeof v === 'string') {
-    const trimmed = v.trim()
-    // Handles "DD/MM/YYYY" (sheet format)
-    const slashParts = trimmed.split('/')
-    if (slashParts.length === 3) {
-      const [dd, mm, yyyy] = slashParts.map((s) => s.trim())
-      return `${dd.padStart(2, '0')}-${mm.padStart(2, '0')}-${yyyy}`
+export function parseDate(raw: unknown): string | undefined {
+  let date: Date | undefined
+
+  if (raw instanceof Date) {
+    // SheetJS correctly identified a date cell — use directly
+    date = raw
+  } else if (typeof raw === 'number' && raw > 0) {
+    // Raw Excel serial — convert using the Excel epoch (1899-12-30).
+    // This handles files exported before the date format fix was applied.
+    const excelEpoch = new Date(1899, 11, 30)
+    date = new Date(excelEpoch.getTime() + raw * 24 * 60 * 60 * 1000)
+  } else if (typeof raw === 'string') {
+    const trimmed = raw.trim()
+    // Try DD/MM/YYYY (our sheet display format)
+    const slashMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+    if (slashMatch) {
+      const [, d, m, y] = slashMatch.map(Number)
+      date = new Date(y, m - 1, d)
     }
-    // Handles "DD-MM-YYYY" (already correct)
-    const dashParts = trimmed.split('-')
-    if (dashParts.length === 3) {
-      return `${dashParts[0].padStart(2, '0')}-${dashParts[1].padStart(2, '0')}-${dashParts[2]}`
-    }
-  }
-  if (typeof v === 'number') {
-    // Excel serial date: SheetJS exposes XLSX.SSF for date parsing
-    try {
-      const d = (XLSX.SSF as unknown as { parse_date_code: (n: number) => { d: number; m: number; y: number } | null }).parse_date_code(v)
-      if (d) return `${String(d.d).padStart(2, '0')}-${String(d.m).padStart(2, '0')}-${d.y}`
-    } catch {
-      // fall through
+    // Try DD-MM-YYYY (Firestore format — e.g. if someone hand-edited the sheet)
+    if (!date) {
+      const dashMatch = trimmed.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/)
+      if (dashMatch) {
+        const [, d, m, y] = dashMatch.map(Number)
+        date = new Date(y, m - 1, d)
+      }
     }
   }
-  return ''
+
+  if (!date || isNaN(date.getTime())) return undefined
+
+  const dd   = String(date.getDate()).padStart(2, '0')
+  const mm   = String(date.getMonth() + 1).padStart(2, '0')
+  const yyyy = date.getFullYear()
+  return `${dd}-${mm}-${yyyy}`
 }
 
 // ---------------------------------------------------------------------------
@@ -188,6 +199,13 @@ export async function parseSheetFile(file: File): Promise<ParseResult> {
       },
     )
 
+    // Read the exchange rate column (present in exports with the rate column)
+    const rawRate = getCellValue(wsExpenses, cm.exchangeRate, r)
+    const exchangeRate = typeof rawRate === 'number' && rawRate > 0 ? rawRate : undefined
+
+    // Read the hidden txId column (present in GlobeExpenses exports for re-import dedup)
+    const txId = asString(getCellValue(wsExpenses, cm.txId, r))
+
     rows.push({
       date:          parseDate(rawDate) || new Date().toLocaleDateString('fr-FR').replace(/\//g, '-'),
       country:       asString(getCellValue(wsExpenses, cm.country,       r)),
@@ -202,6 +220,8 @@ export async function parseSheetFile(file: File): Promise<ParseResult> {
       paidByLabel:   asString(getCellValue(wsExpenses, cm.paidByLabel,   r)),
       costPerSlot,
       paidPerSlot,
+      ...(exchangeRate !== undefined && { exchangeRate }),
+      ...(txId && { txId }),
     })
   }
 
@@ -225,13 +245,20 @@ export async function parseSheetFile(file: File): Promise<ParseResult> {
 // ---------------------------------------------------------------------------
 
 export interface ImportResult {
-  imported: number
+  imported: number    // new transactions created
+  updated: number     // existing transactions updated (re-import with txId)
   skipped: number
   errors: string[]
 }
 
 /**
- * Writes parsed rows to Firestore as new Transaction documents.
+ * Writes parsed rows to Firestore as Transaction documents and syncs
+ * any new list values (categories, countries, cities, paymentMethods,
+ * currencies) to the travel document.
+ *
+ * If a row carries a txId (from a previous GlobeExpenses export), the
+ * existing document is updated in-place (merge: true) instead of creating
+ * a duplicate.
  *
  * @param slotToTravelMemberId  Maps slotIndex → travel member's travelMemberId.
  *                              undefined value = skip that slot's transactions.
@@ -242,19 +269,30 @@ export async function importParsedRows(
   slotToTravelMemberId: Record<number, string | undefined>,
   currentUserUid: string,
   mainCurrency: string,
+  /** Called after each batch commit with (committedSoFar, totalToCommit). */
+  onProgress?: (committed: number, total: number) => void,
 ): Promise<ImportResult> {
   let imported = 0
+  let updated = 0
   let skipped = 0
   const errors: string[] = []
 
-  rows.forEach((row, rowIndex) => {
+  // Collect all valid transaction payloads first, then batch-write in chunks of 500.
+  // This avoids 1400+ individual pending writes which flood the onSnapshot listener.
+  const BATCH_SIZE = 500
+  const payloads: Array<{ ref: ReturnType<typeof doc>; data: Record<string, unknown> }> = []
+  const txCollection = collection(db, 'travels', travelId, 'transactions')
+
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+    const row = rows[rowIndex]
     const rowLabel = `Row ${rowIndex + 1}`
 
-    // Skip rows that have no name and no amount (truly empty)
+    // Only skip rows that have neither a description nor an amount.
+    // Zero-amount rows (transfers, withdrawals) are valid and must be imported.
     if (!row.name || row.name === '(unnamed)') {
-      if (!row.totalAmount) {
+      if (row.totalAmount === null || row.totalAmount === undefined) {
         skipped++
-        return
+        continue
       }
     }
 
@@ -295,18 +333,19 @@ export async function importParsedRows(
         skipped++
       }
       // else: already reported as errors above
-      return
+      continue
     }
 
-    // Compute exchange rate and main-currency amount
-    const exchangeRate     = getExchangeRate(row.currency, mainCurrency)
+    // Prefer the rate stored in the sheet (locked at original transaction time).
+    // Fall back to getExchangeRate() only for files exported before the rate column was added.
+    const exchangeRate     = row.exchangeRate ?? getExchangeRate(row.currency, mainCurrency)
     const totalAmountMain  = row.totalAmount * exchangeRate
 
-    // Fire-and-forget create — returns txId synchronously.
+    // Build the transaction document data.
     // Optional fields are spread conditionally: passing `key: undefined` to
-    // setDoc() throws a Firestore error, so we only include the key when the
-    // value is actually present.
-    createTransaction(travelId, {
+    // Firestore throws an error, so we only include the key when the value
+    // is actually present.
+    const data: Record<string, unknown> = {
       date:           row.date,
       name:           row.name,
       totalAmount:    row.totalAmount,
@@ -317,15 +356,38 @@ export async function importParsedRows(
       beneficiaries,
       createdBy:      { type: 'user', uid: currentUserUid },
       lastModifiedBy: currentUserUid,
+      lastModifiedAt: serverTimestamp(),
       ...(row.category      !== undefined && { category:      row.category }),
       ...(row.paymentMethod !== undefined && { paymentMethod: row.paymentMethod }),
       ...(row.country       !== undefined && { country:       row.country }),
       ...(row.city          !== undefined && { city:          row.city }),
       ...(row.notes         !== undefined && { notes:         row.notes }),
-    })
+    }
 
-    imported++
-  })
+    // Use existing doc ref if txId is present (re-import dedup), otherwise generate a new ID.
+    // For new documents, also set createdAt.
+    if (row.txId) {
+      payloads.push({ ref: doc(txCollection, row.txId), data })
+      updated++
+    } else {
+      data.createdAt = serverTimestamp()
+      payloads.push({ ref: doc(txCollection), data })
+      imported++
+    }
+  }
 
-  return { imported, skipped, errors }
+  // Commit in chunks of 500 (Firestore hard limit per batch)
+  onProgress?.(0, payloads.length)
+  for (let i = 0; i < payloads.length; i += BATCH_SIZE) {
+    const batch = writeBatch(db)
+    const chunk = payloads.slice(i, i + BATCH_SIZE)
+    for (const { ref, data } of chunk) {
+      // merge: true preserves createdAt / createdBy on re-import of existing rows
+      batch.set(ref, data, { merge: true })
+    }
+    await batch.commit()
+    onProgress?.(Math.min(i + BATCH_SIZE, payloads.length), payloads.length)
+  }
+
+  return { imported, updated, skipped, errors }
 }

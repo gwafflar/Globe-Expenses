@@ -1,7 +1,7 @@
 // sheetColumns.ts — shared column layout for GlobeExpenses Standard Sheet.
 //
 // The Expenses tab has a DYNAMIC column layout that scales with the number of
-// travel members (N). Fixed cols A–K are always present; then N cost-local cols,
+// travel members (N). Fixed cols A–L are always present; then N cost-local cols,
 // N paid-local cols, 2 detail cols, N cost-main cols, and 3 check cols.
 //
 // This module is imported by BOTH sheetExport.ts and sheetImport.ts so the
@@ -17,27 +17,31 @@ export interface ColumnMap {
   name: number          // col F  — Transaction.name (description)
   amountLocal: number   // col G  — totalAmount
   currency: number      // col H  — ISO 4217 code
-  costMain: number      // col I  — totalAmountMain (VLOOKUP formula on export)
-  splitLabel: number    // col J  — derived split label
-  paidByLabel: number   // col K  — derived paid-by label
+  exchangeRate: number  // col I  — exchange rate locked at transaction creation time
+  costMain: number      // col J  — totalAmountMain (=G*I formula on export)
+  splitLabel: number    // col K  — derived split label
+  paidByLabel: number   // col L  — derived paid-by label
 
   // Dynamic columns — arrays of length N (one entry per travel member)
-  costLocal: number[]           // cols 12…11+N   — beneficiaries[i].amount
-  paidLocal: number[]           // cols 12+N…11+2N — paidBy[i].amount
+  costLocal: number[]           // cols 13…12+N   — beneficiaries[i].amount
+  paidLocal: number[]           // cols 13+N…12+2N — paidBy[i].amount
 
   // More fixed cols (position depends on N)
-  paymentMethod: number         // col 12+2N
-  notes: number                 // col 13+2N
+  paymentMethod: number         // col 13+2N
+  notes: number                 // col 14+2N
 
-  // Dynamic — cost in main ccy per member (VLOOKUP formula on export)
-  costMainPerMember: number[]   // cols 14+2N…13+3N
+  // Dynamic — cost in main ccy per member (formula on export)
+  costMainPerMember: number[]   // cols 15+2N…14+3N
 
   // Check columns (formulas on export, ignored on import)
-  checkCost: number             // col 14+3N
-  checkPaid: number             // col 15+3N
-  allGood: number               // col 16+3N
+  checkCost: number             // col 15+3N
+  checkPaid: number             // col 16+3N
+  allGood: number               // col 17+3N
 
-  totalCols: number             // = allGood (total width of the sheet)
+  // Hidden column: Firestore transaction ID (for round-trip re-import dedup)
+  txId: number                  // col 18+3N — hidden on export, read on import
+
+  totalCols: number             // = txId (total width of the sheet)
 }
 
 /**
@@ -45,12 +49,13 @@ export interface ColumnMap {
  * All column numbers are 1-based (col A = 1, col B = 2, …).
  *
  * Example with N=2:
- *   costLocal  = [12, 13]   → cols L, M
- *   paidLocal  = [14, 15]   → cols N, O
- *   paymentMethod = 16      → col P
- *   notes         = 17      → col Q
- *   costMainPerMember = [18, 19] → cols R, S
- *   checkCost = 20, checkPaid = 21, allGood = 22 → cols T, U, V
+ *   costLocal  = [13, 14]   → cols M, N
+ *   paidLocal  = [15, 16]   → cols O, P
+ *   paymentMethod = 17      → col Q
+ *   notes         = 18      → col R
+ *   costMainPerMember = [19, 20] → cols S, T
+ *   checkCost = 21, checkPaid = 22, allGood = 23 → cols U, V, W
+ *   txId = 24               → col X (hidden)
  */
 /**
  * Convert a 1-based column number to an Excel column letter (A, B, …, Z, AA, …).
@@ -70,14 +75,15 @@ export function buildColumnMap(nMembers: number): ColumnMap {
   // Guard: minimum 1 member so arrays are never empty
   const n = Math.max(1, nMembers)
 
-  const costLocal         = Array.from({ length: n }, (_, i) => 12 + i)
-  const paidLocal         = Array.from({ length: n }, (_, i) => 12 + n + i)
-  const paymentMethod     = 12 + 2 * n
-  const notes             = 13 + 2 * n
-  const costMainPerMember = Array.from({ length: n }, (_, i) => 14 + 2 * n + i)
-  const checkCost         = 14 + 3 * n
-  const checkPaid         = 15 + 3 * n
-  const allGood           = 16 + 3 * n
+  const costLocal         = Array.from({ length: n }, (_, i) => 13 + i)
+  const paidLocal         = Array.from({ length: n }, (_, i) => 13 + n + i)
+  const paymentMethod     = 13 + 2 * n
+  const notes             = 14 + 2 * n
+  const costMainPerMember = Array.from({ length: n }, (_, i) => 15 + 2 * n + i)
+  const checkCost         = 15 + 3 * n
+  const checkPaid         = 16 + 3 * n
+  const allGood           = 17 + 3 * n
+  const txId              = 18 + 3 * n
 
   return {
     rowIndex: 1,
@@ -88,9 +94,10 @@ export function buildColumnMap(nMembers: number): ColumnMap {
     name: 6,
     amountLocal: 7,
     currency: 8,
-    costMain: 9,
-    splitLabel: 10,
-    paidByLabel: 11,
+    exchangeRate: 9,
+    costMain: 10,
+    splitLabel: 11,
+    paidByLabel: 12,
     costLocal,
     paidLocal,
     paymentMethod,
@@ -99,6 +106,7 @@ export function buildColumnMap(nMembers: number): ColumnMap {
     checkCost,
     checkPaid,
     allGood,
-    totalCols: allGood,
+    txId,
+    totalCols: txId,
   }
 }

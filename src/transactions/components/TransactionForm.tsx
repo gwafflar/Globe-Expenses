@@ -864,6 +864,12 @@ export function TransactionForm({
       lastModifiedBy: user.uid,
       notes: notes.trim() || undefined,
       amountFormula: formulaStr.trim() || undefined,
+      // Preserve wallet-tracker fields when editing (type, fees, adjustmentMode).
+      // Without this, updateTransaction would deleteField() them, silently
+      // converting a withdrawal/adjustment back to a plain expense.
+      type: isEdit ? initialValues!.type : undefined,
+      fees: isEdit ? initialValues!.fees : undefined,
+      adjustmentMode: isEdit ? initialValues!.adjustmentMode : undefined,
     }
 
     if (isEdit) {

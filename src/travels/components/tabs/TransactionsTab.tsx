@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { exportTravelToXlsx } from '@/shared/utils/sheetExport'
 import { ImportXlsxDialog } from '@/shared/components/ImportXlsxDialog'
-import { normalizeTransactionSplits } from '@/travels/components/tabs/dashboardHelpers'
+import { normalizeTransactionSplits, parseTxDate } from '@/travels/components/tabs/dashboardHelpers'
 import { useTransactionFilters } from '@/transactions/hooks/useTransactionFilters'
 import { FilterPanel } from '@/transactions/components/FilterPanel'
 import { getTransactionType, countsAsSpending } from '@/transactions/utils/walletHelpers'
@@ -235,7 +235,7 @@ function DayGroupHeader({
     <div className="flex items-center gap-2 border-b pb-1 pt-3">
       <span className="text-xs font-semibold text-muted-foreground">{dateLabel}</span>
       {countryEmojis.length > 0 && (
-        <span className="text-xs text-muted-foreground">{countryEmojis.join('')}</span>
+        <span className="text-xs text-muted-foreground">{countryEmojis.join(' ')}</span>
       )}
       {cities.length > 0 && (
         <span className="text-xs text-muted-foreground">{cities.join(' · ')}</span>
@@ -738,8 +738,19 @@ export function TransactionsTab({
   // Count of active filter dimensions (not counting search) — shown on the toggle button
   const activeFilterCount = Object.keys(filters).length + (searchQuery.trim() ? 1 : 0)
 
-  // Day-grouped transactions — now uses the FILTERED list
-  const dayGroups = useMemo(() => groupByDay(filteredTransactions), [filteredTransactions])
+  // Sort by spending date descending (most recent first), with createdAt as tiebreaker.
+  // parseTxDate converts "DD-MM-YYYY" → JS Date so we don't sort lexicographically.
+  const sortedTransactions = useMemo(
+    () => [...filteredTransactions].sort((a, b) => {
+      const dateDiff = parseTxDate(b.date).getTime() - parseTxDate(a.date).getTime()
+      if (dateDiff !== 0) return dateDiff
+      return b.createdAt.toMillis() - a.createdAt.toMillis()
+    }),
+    [filteredTransactions],
+  )
+
+  // Day-grouped transactions — now uses the sorted FILTERED list
+  const dayGroups = useMemo(() => groupByDay(sortedTransactions), [sortedTransactions])
 
   const [isExporting, setIsExporting] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
