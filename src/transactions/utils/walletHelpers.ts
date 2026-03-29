@@ -31,16 +31,38 @@ export function isAdjustment(tx: { type?: TransactionType }): boolean {
   return getTransactionType(tx) === 'adjustment'
 }
 
+export function isTransfer(tx: { type?: TransactionType }): boolean {
+  return getTransactionType(tx) === 'transfer'
+}
+
 /**
  * Returns true if the transaction should count toward spending analytics
  * (category breakdown, per-member totals, spending-over-time, etc.).
  *
  * Includes: regular expenses + adjustments with adjustmentMode === 'expense'.
- * Excludes: withdrawals + balance-only adjustments.
+ * Excludes: withdrawals, balance-only adjustments, transfers.
  */
 export function countsAsSpending(tx: { type?: TransactionType; adjustmentMode?: AdjustmentMode }): boolean {
   const t = getTransactionType(tx)
   if (t === 'expense') return true
+  if (t === 'adjustment' && tx.adjustmentMode === 'expense') return true
+  return false
+}
+
+/**
+ * Returns true if the transaction should affect inter-member balance
+ * (who owes whom). Used by BalanceTab for settlement computation.
+ *
+ * Includes: expenses, expense-mode adjustments, AND transfers.
+ * Excludes: withdrawals, balance-only adjustments.
+ *
+ * Key distinction from countsAsSpending: transfers affect balance
+ * (Alice gives Bob 100 → shifts debt) but do NOT count as spending.
+ */
+export function affectsBalance(tx: { type?: TransactionType; adjustmentMode?: AdjustmentMode }): boolean {
+  const t = getTransactionType(tx)
+  if (t === 'expense') return true
+  if (t === 'transfer') return true
   if (t === 'adjustment' && tx.adjustmentMode === 'expense') return true
   return false
 }
@@ -119,6 +141,11 @@ export function computeWalletBalances(
     if (paidAmount === 0) continue
 
     const t = getTransactionType(tx)
+
+    // Transfers are person-to-person and don't flow through a payment method wallet.
+    // They affect inter-member balance (computed in balanceUtils) but not wallet tracking.
+    if (t === 'transfer') continue
+
     const key = `${tx.paymentMethod}|${tx.currency}`
 
     if (t === 'withdrawal') {

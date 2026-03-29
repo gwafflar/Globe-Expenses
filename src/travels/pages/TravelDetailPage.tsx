@@ -22,15 +22,8 @@ function avatarHue(uid: string): number {
 }
 import { useTransactions, type TransactionWithStatus } from '@/transactions/hooks/useTransactions'
 import { Button } from '@/components/ui/button'
-import {
-  Drawer,
-  DrawerContent,
-  DrawerHeader,
-  DrawerTitle,
-} from '@/components/ui/drawer'
 import { TransactionForm } from '@/transactions/components/TransactionForm'
-import { WithdrawalForm } from '@/transactions/components/WithdrawalForm'
-import { getTransactionType } from '@/transactions/utils/walletHelpers'
+import type { TransactionType } from '@/transactions/types'
 import { TravelTabs } from '@/travels/components/TravelTabs'
 import { InstallPromptBanner } from '@/shared/components/InstallPromptBanner'
 import { deleteTransaction } from '@/transactions/services/transactionService'
@@ -147,6 +140,8 @@ export function TravelDetailPage() {
   const [isFormOpen, setIsFormOpen] = useState(false)
   // When non-null, the form opens in edit mode pre-filled from this transaction.
   const [editingTx, setEditingTx] = useState<TransactionWithStatus | null>(null)
+  // Pre-set type for new transactions (e.g. 'withdrawal' from DashboardTab)
+  const [formInitialType, setFormInitialType] = useState<TransactionType | undefined>(undefined)
   // Incremented each time the form is opened — passed as `key` to TransactionForm
   // so React unmounts and remounts it fresh, ensuring useState pre-fills (country,
   // city, currency) pick up the latest values from existingTransactions.
@@ -155,9 +150,6 @@ export function TravelDetailPage() {
   const [bannerState, setBannerState] = useState<BannerState>(null)
   // Holds the txId the user wants to delete — non-null opens the confirmation dialog
   const [deletingTxId, setDeletingTxId] = useState<string | null>(null)
-  // Withdrawal form drawer state (separate from the expense form)
-  const [isWithdrawalFormOpen, setIsWithdrawalFormOpen] = useState(false)
-  const [withdrawalFormKey, setWithdrawalFormKey] = useState(0)
 
   // Settlement currency: allows settlements to be displayed in a different currency
   // than mainCurrency. Rate means: 1 mainCurrency = settlementRate settlementCurrency.
@@ -233,37 +225,27 @@ export function TravelDetailPage() {
   }
 
   // Opens the new-expense form and forces TransactionForm to remount (fresh state).
-  function openForm() {
+  function openForm(initialType?: TransactionType) {
     setFormKey((k) => k + 1)
     setEditingTx(null)
+    setFormInitialType(initialType)
     setIsFormOpen(true)
   }
 
-  // Opens the withdrawal form (fresh state).
+  // Opens the withdrawal form — now just opens the unified form with initialType.
   function openWithdrawalForm() {
-    setWithdrawalFormKey((k) => k + 1)
-    setIsWithdrawalFormOpen(true)
+    openForm('withdrawal')
   }
 
-  // Opens the form in edit mode pre-filled from an existing transaction.
-  function handleEditTransaction(tx: TransactionWithStatus) {
-    setFormKey((k) => k + 1)
-    setEditingTx(tx)
-    setIsFormOpen(true)
-  }
-
-  // Called by TransactionsTab accordion with a txId — looks up the full tx and opens
-  // the appropriate form: WithdrawalForm for withdrawals, TransactionForm for everything else.
+  // Called by TransactionsTab accordion with a txId — all types now open the same form.
+  // TransactionForm reads getTransactionType(initialValues) internally to pre-set the type.
   function handleEditById(txId: string) {
     const tx = transactions.find((t) => t.txId === txId)
     if (!tx) return
-    if (getTransactionType(tx) === 'withdrawal') {
-      setWithdrawalFormKey((k) => k + 1)
-      setEditingTx(tx)
-      setIsWithdrawalFormOpen(true)
-    } else {
-      handleEditTransaction(tx)
-    }
+    setFormKey((k) => k + 1)
+    setEditingTx(tx)
+    setFormInitialType(undefined) // not needed in edit mode — form reads from initialValues
+    setIsFormOpen(true)
   }
 
   // Opens the confirmation dialog before deleting a transaction.
@@ -293,6 +275,9 @@ export function TravelDetailPage() {
   }
 
   const isSolo = (travel?.members.length ?? 0) === 1
+
+  // Tab navigation request — used by the solo-travel CTA to switch to Parameters
+  const [requestTab, setRequestTab] = useState<string | undefined>(undefined)
 
   const handleBack = () => navigate('/travels')
 
@@ -439,17 +424,38 @@ export function TravelDetailPage() {
           onEditTransaction={handleEditById}
           onDeleteTransaction={handleDeleteTransaction}
           onTravelChange={handleTravelChange}
+          requestTab={requestTab}
+          onRequestTabHandled={() => setRequestTab(undefined)}
         />
       </main>
 
-      {/* FAB */}
-      <button
-        type="button"
-        onClick={openForm}
-        className="fixed bottom-6 right-6 flex h-12 w-12 items-center justify-center rounded-full bg-primary text-2xl font-bold text-primary-foreground shadow-lg shadow-primary/40 transition hover:bg-primary/90"
-      >
-        +
-      </button>
+      {/* FAB area: camera placeholder + add button */}
+      <div className="fixed bottom-6 right-6 flex items-center gap-2">
+        {/* Camera button — v2 placeholder for "encode from ticket" */}
+        <div className="group relative">
+          <button
+            type="button"
+            disabled
+            className="flex h-10 w-10 items-center justify-center rounded-full border border-border bg-muted text-lg text-muted-foreground opacity-60 cursor-not-allowed"
+          >
+            📷
+          </button>
+          <div
+            role="tooltip"
+            className="pointer-events-none absolute bottom-full right-0 mb-1.5 w-44 rounded-md bg-popover px-3 py-2 text-xs text-popover-foreground shadow-md border border-border opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-10"
+          >
+            Coming in v2 — snap a receipt and let AI fill in the transaction.
+          </div>
+        </div>
+        {/* Add transaction FAB */}
+        <button
+          type="button"
+          onClick={() => openForm()}
+          className="flex h-12 w-12 items-center justify-center rounded-full bg-primary text-2xl font-bold text-primary-foreground shadow-lg shadow-primary/40 transition hover:bg-primary/90"
+        >
+          +
+        </button>
+      </div>
 
       {/* Delete confirmation dialog */}
       <AlertDialog open={deletingTxId !== null} onOpenChange={(open) => { if (!open) setDeletingTxId(null) }}>
@@ -469,62 +475,35 @@ export function TravelDetailPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* New / Edit expense drawer — shared for both create and edit modes */}
-      <Drawer open={isFormOpen} onOpenChange={(open) => { if (!open) { setIsFormOpen(false); setEditingTx(null) } }}>
-        <DrawerContent>
-          <DrawerHeader>
-            <DrawerTitle>{editingTx ? 'Edit expense' : 'New expense'}</DrawerTitle>
-          </DrawerHeader>
-          <div className="overflow-y-auto px-4 pb-6">
-            <TransactionForm
-              key={formKey}
-              travelId={travelId!}
-              members={travel.members}
-              travelSettings={travel.settings}
-              travelCategories={travel.categories}
-              travelPaymentMethods={travel.paymentMethods}
-              travelCurrencies={travel.currencies}
-              travelCountries={travel.countries}
-              travelCities={travel.cities}
-              existingTransactions={transactions}
-              initialValues={editingTx ?? undefined}
-              onSuccess={handleTransactionSaved}
-              onCancel={() => { setIsFormOpen(false); setEditingTx(null) }}
-              onLocationAdded={handleLocationAdded}
-              onCategoryAdded={handleCategoryAdded}
-              onPaymentMethodAdded={handlePaymentMethodAdded}
-            />
-          </div>
-        </DrawerContent>
-      </Drawer>
-
-      {/* Withdrawal form drawer — used for both create and edit mode */}
-      <Drawer open={isWithdrawalFormOpen} onOpenChange={(open) => { if (!open) { setIsWithdrawalFormOpen(false); setEditingTx(null) } }}>
-        <DrawerContent>
-          <DrawerHeader>
-            <DrawerTitle>{editingTx ? 'Edit withdrawal' : 'Record withdrawal'}</DrawerTitle>
-          </DrawerHeader>
-          <div className="overflow-y-auto px-4 pb-6">
-            <WithdrawalForm
-              key={withdrawalFormKey}
-              travelId={travelId!}
-              members={travel.members}
-              travelPaymentMethods={travel.paymentMethods}
-              travelCurrencies={travel.currencies}
-              existingTransactions={transactions}
-              initialValues={editingTx ?? undefined}
-              onSuccess={(txId) => {
-                setIsWithdrawalFormOpen(false)
-                setEditingTx(null)
-                // Reuse the same watched-tx / banner pattern as expense creation
-                setWatchedTxId(txId)
-              }}
-              onCancel={() => { setIsWithdrawalFormOpen(false); setEditingTx(null) }}
-              onPaymentMethodAdded={handlePaymentMethodAdded}
-            />
-          </div>
-        </DrawerContent>
-      </Drawer>
+      {/* Unified transaction form — full-screen overlay (renders its own fixed container) */}
+      {isFormOpen && (
+        <TransactionForm
+          key={formKey}
+          travelId={travelId!}
+          members={travel.members}
+          travelSettings={travel.settings}
+          travelCategories={travel.categories}
+          travelPaymentMethods={travel.paymentMethods}
+          travelCurrencies={travel.currencies}
+          travelCountries={travel.countries}
+          travelCities={travel.cities}
+          existingTransactions={transactions}
+          initialValues={editingTx ?? undefined}
+          initialType={formInitialType}
+          onSuccess={handleTransactionSaved}
+          onCancel={() => { setIsFormOpen(false); setEditingTx(null) }}
+          onDelete={(txId) => {
+            // Close the form first, then open the delete confirmation dialog
+            setIsFormOpen(false)
+            setEditingTx(null)
+            handleDeleteTransaction(txId)
+          }}
+          onLocationAdded={handleLocationAdded}
+          onCategoryAdded={handleCategoryAdded}
+          onPaymentMethodAdded={handlePaymentMethodAdded}
+          onNavigateToParameters={() => setRequestTab('parameters')}
+        />
+      )}
     </div>
   )
 }

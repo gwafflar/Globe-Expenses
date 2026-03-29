@@ -15,7 +15,9 @@ export type CreatedByRef =
 // - 'expense': regular spending (default)
 // - 'withdrawal': money deposited into a payment method (ATM withdrawal, top-up, etc.)
 // - 'adjustment': reconciliation entry to correct a wallet balance
-export type TransactionType = 'expense' | 'withdrawal' | 'adjustment'
+// - 'transfer': money transfer between participants (settlement, loan, reimbursement)
+//               Affects inter-member balance but NOT spending analytics or wallet balances.
+export type TransactionType = 'expense' | 'withdrawal' | 'adjustment' | 'transfer'
 
 // For adjustments: determines whether the amount affects spending analytics.
 // - 'expense': counted in spending stats (category breakdown, per-member totals, etc.)

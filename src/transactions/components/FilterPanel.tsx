@@ -98,6 +98,7 @@ export function FilterPanel({
   /** Map for human-readable transaction type labels. */
   const TYPE_LABELS: Record<string, string> = {
     expense: 'Expense',
+    transfer: 'Transfer',
     withdrawal: 'Withdrawal',
     adjustment: 'Adjustment',
   }

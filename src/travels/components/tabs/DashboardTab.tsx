@@ -1736,6 +1736,7 @@ export function DashboardTab({
       {/* ================================================================ */}
       <CollapsibleCard
         title="Wallet balances"
+        summary={walletBalances.length > 0 ? `${walletBalances.length} wallet(s)` : 'No wallets yet'}
       >
         {walletBalances.length > 0 ? (
           <div className="flex flex-col gap-3">
@@ -1954,6 +1955,7 @@ export function DashboardTab({
         )}
         <p className="mt-2 text-xs text-muted-foreground">
           Only your wallet balances are shown. Withdrawal data is stored alongside shared transactions.
+          Transfers between participants are not included in wallet computation.
         </p>
       </CollapsibleCard>
 

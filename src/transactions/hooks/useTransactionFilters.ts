@@ -200,8 +200,8 @@ export function useTransactionFilters(
     if (hasUndefinedMethod) methodList.push(UNDEFINED_FILTER)
 
     return {
-      // Type is ordered semantically: expense first, then withdrawal, then adjustment
-      type: ['expense', 'withdrawal', 'adjustment'].filter((t) => types.has(t)),
+      // Type is ordered semantically: expense first, then transfer, withdrawal, adjustment
+      type: ['expense', 'transfer', 'withdrawal', 'adjustment'].filter((t) => types.has(t)),
       category: catList,
       currency: Array.from(currencies).sort(),
       country: countryList,

@@ -15,7 +15,7 @@ import {
   computeSettlements,
 } from '@/travels/utils/balanceUtils'
 import { normalizeTransactionSplits } from '@/travels/components/tabs/dashboardHelpers'
-import { countsAsSpending } from '@/transactions/utils/walletHelpers'
+import { affectsBalance } from '@/transactions/utils/walletHelpers'
 import { SettlementCurrencyDrawer } from '@/travels/components/SettlementCurrencyDrawer'
 
 // ---------------------------------------------------------------------------
@@ -134,10 +134,11 @@ export function BalanceTab({
     [transactions, members],
   )
 
-  // Filter to spending-only transactions — withdrawals and balance-only adjustments
-  // don't create inter-member debts and must be excluded from balance/settlement.
+  // Filter to balance-affecting transactions — expenses, transfers, and expense-mode
+  // adjustments create inter-member debts. Withdrawals and balance-only adjustments don't.
+  // Note: transfers affect balance (shift who owes whom) but don't count as spending.
   const spendingTx = useMemo(
-    () => normalizedTx.filter(countsAsSpending),
+    () => normalizedTx.filter(affectsBalance),
     [normalizedTx],
   )
 

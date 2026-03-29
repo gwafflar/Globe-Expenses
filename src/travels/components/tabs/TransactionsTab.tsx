@@ -14,7 +14,7 @@ import { ImportXlsxDialog } from '@/shared/components/ImportXlsxDialog'
 import { normalizeTransactionSplits, parseTxDate } from '@/travels/components/tabs/dashboardHelpers'
 import { useTransactionFilters } from '@/transactions/hooks/useTransactionFilters'
 import { FilterPanel } from '@/transactions/components/FilterPanel'
-import { getTransactionType, countsAsSpending } from '@/transactions/utils/walletHelpers'
+import { getTransactionType, countsAsSpending, isTransfer } from '@/transactions/utils/walletHelpers'
 
 // ---------------------------------------------------------------------------
 // Currency symbol helpers
@@ -270,11 +270,13 @@ function TransactionRow({
   onToggle: () => void
 }) {
   // Transaction type determines the leading emoji:
+  // - transfer  → 🤝 (person-to-person)
   // - withdrawal → 🏧 (ATM/top-up)
   // - adjustment → ⚖️ (reconciliation)
   // - expense → category emoji (default)
   const txType = getTransactionType(transaction)
-  const categoryEmoji = txType === 'withdrawal' ? '🏧'
+  const categoryEmoji = txType === 'transfer' ? '🤝'
+    : txType === 'withdrawal' ? '🏧'
     : txType === 'adjustment' ? '⚖️'
     : getCategoryEmoji(transaction.category, categories)
 
@@ -291,9 +293,10 @@ function TransactionRow({
   const myBeneficiary = transaction.beneficiaries.find(
     (b) => b.travelMemberId === currentUserTravelMemberId,
   )
-  // Only show "your share" when the cost is actually split (share ≠ full amount)
+  // Only show "your share" when the cost is actually split (share ≠ full amount).
+  // Transfers don't have a "your share" concept — they're person-to-person movements.
   const showYourShare =
-    !isSolo && myBeneficiary !== undefined && myBeneficiary.amount !== transaction.totalAmount
+    !isSolo && !isTransfer(transaction) && myBeneficiary !== undefined && myBeneficiary.amount !== transaction.totalAmount
 
   return (
     <div
@@ -311,6 +314,11 @@ function TransactionRow({
           </div>
           {/* Type badge (non-expense only) + category pill + beneficiary avatars */}
           <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+            {txType === 'transfer' && (
+              <span className="rounded-full bg-purple-100 px-1.5 py-0.5 text-[10px] font-medium text-purple-700 dark:bg-purple-900/30 dark:text-purple-400">
+                Transfer
+              </span>
+            )}
             {txType === 'withdrawal' && (
               <span className="rounded-full bg-green-100 px-1.5 py-0.5 text-[10px] font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">
                 Withdrawal
@@ -470,18 +478,19 @@ function TransactionDetail({
         </div>
       )}
 
-      {/* Paid by / Split — hidden in solo travel (only one member, no split info needed) */}
+      {/* Paid by / Split — hidden in solo travel (only one member, no split info needed).
+          Transfers use "From" / "To" labels instead of "Paid by" / "Split". */}
       {!isSolo && (
         <>
           <SplitSection
-            label="Paid by"
+            label={isTransfer(transaction) ? 'From' : 'Paid by'}
             splits={transaction.paidBy}
             members={members}
             currentUserUid={currentUserUid}
             currency={transaction.currency}
           />
           <SplitSection
-            label="Split"
+            label={isTransfer(transaction) ? 'To' : 'Split'}
             splits={transaction.beneficiaries}
             members={members}
             currentUserUid={currentUserUid}
@@ -744,7 +753,11 @@ export function TransactionsTab({
     () => [...filteredTransactions].sort((a, b) => {
       const dateDiff = parseTxDate(b.date).getTime() - parseTxDate(a.date).getTime()
       if (dateDiff !== 0) return dateDiff
-      return b.createdAt.toMillis() - a.createdAt.toMillis()
+      // createdAt can be null for pending fire-and-forget writes (serverTimestamp()
+      // is null locally until the server confirms). Treat null as "most recent".
+      const aMs = a.createdAt?.toMillis?.() ?? Number.MAX_SAFE_INTEGER
+      const bMs = b.createdAt?.toMillis?.() ?? Number.MAX_SAFE_INTEGER
+      return bMs - aMs
     }),
     [filteredTransactions],
   )

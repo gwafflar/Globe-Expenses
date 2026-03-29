@@ -9,7 +9,7 @@
 //     switches tab in the swipe direction.
 //   - No animation library needed — CSS transform + transition handles the slide.
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Travel } from '@/travels/types'
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
 import { TransactionsTab } from '@/travels/components/tabs/TransactionsTab'
@@ -53,6 +53,9 @@ interface TravelTabsProps {
   onEditTransaction: (txId: string) => void
   onDeleteTransaction: (txId: string) => void
   onTravelChange: (updated: Partial<Travel>) => void
+  /** When set, TravelTabs switches to this tab. Caller should reset to undefined after. */
+  requestTab?: typeof TABS[number]['id']
+  onRequestTabHandled?: () => void
 }
 
 // ---------------------------------------------------------------------------
@@ -76,8 +79,20 @@ export function TravelTabs({
   onEditTransaction,
   onDeleteTransaction,
   onTravelChange,
+  requestTab,
+  onRequestTabHandled,
 }: TravelTabsProps) {
   const [activeTab, setActiveTab] = useState<TabId>('transactions')
+
+  // External tab navigation request — switch to the requested tab and notify caller
+  useEffect(() => {
+    if (requestTab && requestTab !== activeTab) {
+      setActiveTab(requestTab)
+      onRequestTabHandled?.()
+    } else if (requestTab) {
+      onRequestTabHandled?.()
+    }
+  }, [requestTab]) // eslint-disable-line react-hooks/exhaustive-deps
   const activeIndex = TABS.findIndex((t) => t.id === activeTab)
 
   // Touch tracking refs — no state needed, avoids re-renders

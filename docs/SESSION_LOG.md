@@ -1558,9 +1558,79 @@ Fixed 6 bugs in the import/export round-trip pipeline, plus 2 small UI fixes. Al
 
 ### Carry-forward items (open)
 
-- [ ] **Unified TransactionForm with type selector** — prompt written (Session 014)
+- [x] **Unified TransactionForm with type selector** — implemented in Session 016
 - [ ] **Per-travel field customization** — hideable/showable fields + user-defined custom data fields (future)
 - [ ] **Travel list sync verification** — console log added to confirm `updateDoc` runs; remove after confirmed working
+- [ ] Cloud Function `onTravelDeleted` (v2)
+- [ ] PWA icons
+- [ ] Display Mode in Transactions tab
+- [ ] Move composite indexes to `firestore.indexes.json`
+
+---
+
+## 📝 Working Session 016 — 29–30 March 2026
+
+**Type**: Feature + UI redesign
+**Tools used**: Claude Code (CLI)
+
+### Summary
+
+Unified TransactionForm with 4-type selector (expense / transfer / withdrawal / adjustment), full UI redesign from Drawer to full-screen overlay, and new "transfer between participants" transaction type.
+
+### New: Transfer type
+
+Added `'transfer'` to `TransactionType`. Transfers represent person-to-person money movements (settlements, loans, reimbursements). Key characteristics:
+
+- **`countsAsSpending: false`** — not included in spending analytics (totals, category breakdown, charts)
+- **`affectsBalance: true`** — shifts inter-member balance (who owes whom)
+- **No wallet impact** — transfers are interpersonal, not payment-method-based
+- **Encoding**: `paidBy = [sender]`, `beneficiaries = [receiver(s)]`, `totalAmount = transfer amount`
+- **1→many supported**: single sender, multiple receivers via standard SplitEditor
+
+New predicate `affectsBalance()` introduced in `walletHelpers.ts`. BalanceTab now uses `affectsBalance()` instead of `countsAsSpending()` to correctly include transfers in settlement computation without counting them as spending.
+
+### TransactionForm redesign
+
+1. **Full-screen overlay** — replaced Drawer (bottom sheet) with `position: fixed, inset: 0` overlay. Sticky top bar (✕ / title / Save). Own scroll area.
+2. **4-pill type selector** — Expense 💸 | Transfer 🤝 | Withdrawal 🏧 | Adjustment ⚖️. Switching type preserves shared field values.
+3. **Declarative field visibility** — `FIELD_TYPES` config maps each field to which types show it. Single `fieldVisible(fieldName)` helper checks type + travelSettings. Future per-travel overrides layer on easily.
+4. **Amount row reorder** — `[🧮 formula] [amount input] [EUR € pill]`. Formula button moved left. Currency is a prominent pill/chip (visually distinct, users can't miss it).
+5. **Split section moved up** — Paid by / Split appear before optional fields (core data).
+6. **Transfer split UI** — "From" single-person dropdown + "To" standard SplitEditor (reused as-is).
+7. **Solo travel + transfer** — only type selector + CTA shown. All other fields and Save buttons hidden/greyed. CTA: "Save & add friends →" (saves tx, navigates to Parameters).
+8. **2-column grid** for optional fields — Country+City row, Category+PaymentMethod row. Missing fields cause partner to expand full width.
+9. **Close confirmation** — AlertDialog on dirty close. Edit mode: "Discard changes?" vs create: "Discard transaction?"
+10. **Bottom action bar** — Save + Close buttons at bottom for thumb reach. Delete button in edit mode.
+11. **Adjustment mode labels** — contextual explanation below pills ("Only corrects wallet balance…" / "Counts toward spending analytics…").
+12. **Camera icon** placeholder moved from form to FAB area (greyed, v2 tooltip).
+
+### Merged WithdrawalForm
+
+WithdrawalForm.tsx deleted. All withdrawal behavior (fees field, auto-name, required PM, self-directed splits) handled by type-conditional logic in the unified form. TravelDetailPage routing simplified — no more `getTransactionType` dispatch to choose which form to open. `initialType` prop lets DashboardTab open the form pre-set to 'withdrawal'.
+
+### Bug fix: createdAt null crash
+
+`serverTimestamp()` is `null` locally for pending fire-and-forget writes. The sort in TransactionsTab crashed on `.toMillis()`. Fixed with null-safe access — pending transactions treated as "most recent".
+
+### Files modified
+
+| File | Changes |
+|------|---------|
+| `src/transactions/types.ts` | Added `'transfer'` to `TransactionType` union |
+| `src/transactions/utils/walletHelpers.ts` | Added `isTransfer()`, `affectsBalance()`; updated `countsAsSpending()`; skip transfers in `computeWalletBalances()` |
+| `src/transactions/components/TransactionForm.tsx` | Full rewrite: full-screen overlay, 4-type selector, declarative field visibility, transfer UI, solo CTA, close confirmation, bottom action bar, adjustment mode labels |
+| `src/transactions/components/WithdrawalForm.tsx` | **Deleted** (merged into TransactionForm) |
+| `src/transactions/components/FilterPanel.tsx` | Added 'Transfer' to type label map |
+| `src/transactions/hooks/useTransactionFilters.ts` | Added `'transfer'` to type ordering |
+| `src/travels/pages/TravelDetailPage.tsx` | Removed WithdrawalForm/Drawer; simplified edit routing; added `initialType` + `onDelete` props; camera icon on FAB |
+| `src/travels/components/tabs/TransactionsTab.tsx` | Transfer emoji 🤝, purple badge, "From"/"To" labels, suppressed "your share"; null-safe `createdAt` sort |
+| `src/travels/components/tabs/BalanceTab.tsx` | Switched from `countsAsSpending` to `affectsBalance` |
+| `src/travels/components/tabs/DashboardTab.tsx` | Wallet card info note about transfers |
+
+### Carry-forward items (open)
+
+- [ ] **Per-travel field customization** — hideable/showable fields via Parameters; `FIELD_TYPES` config ready for extension
+- [ ] **`onNavigateToParameters` prop** — not yet wired in TravelDetailPage (solo CTA saves but doesn't redirect)
 - [ ] Cloud Function `onTravelDeleted` (v2)
 - [ ] PWA icons
 - [ ] Display Mode in Transactions tab

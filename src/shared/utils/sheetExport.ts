@@ -113,7 +113,7 @@ function labelCell(): S {
 // ---------------------------------------------------------------------------
 // Worksheet cell writers
 // ---------------------------------------------------------------------------
-type WS = Record<string, { t: string; v?: unknown; f?: string; s?: S }>
+type WS = Record<string, { t: string; v?: unknown; f?: string; s?: S; z?: string }>
 
 function addr(col: number, row: number): string { return `${colLetter(col)}${row}` }
 
@@ -162,7 +162,7 @@ function dateToSerial(date: Date): number {
  */
 function dat(ws: WS, col: number, row: number, dateStr: string, s?: S) {
   const jsDate = parseFsDate(dateStr)
-  const cell: Record<string, unknown> = {
+  const cell: WS[string] = {
     t: 'n',
     v: dateToSerial(jsDate),
     z: 'DD/MM/YYYY',
@@ -449,15 +449,13 @@ function balanceMemberCols(i: number) {
 function buildBalanceSheet(
   travel: Travel,
   N: number,
-  ratesDataStart: number,
-  ratesDataEnd: number,
+  _ratesDataStart: number,
+  _ratesDataEnd: number,
 ): unknown {
   const cm = buildColumnMap(N)
   const ws: WS = {}
   const members = travel.members
   const lastExpCol    = colLetter(cm.totalCols)
-  const currencyCol   = cm.currency
-  const paramsRef     = `'${SHEET_PARAMS}'!$A$${ratesDataStart}:$B$${ratesDataEnd}`
   const expRange      = `'${SHEET_EXPENSES}'!$A:$${lastExpCol}`
 
   // Row 1: member section headers (merged per member)

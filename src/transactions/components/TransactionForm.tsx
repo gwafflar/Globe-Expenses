@@ -1,14 +1,16 @@
-// TransactionForm.tsx — form for creating a new transaction.
+// TransactionForm.tsx — unified form for all transaction types.
 //
-// Data flow:
-// - User profile (mainCurrency, categories, paymentMethods) from Zustand auth store.
-// - Travel members and settings from props (fetched by TravelDetailPage).
-// - Existing transactions from props — used to derive previously used
-//   country/city values for the dropdown, and to pre-fill the last used value.
-// - On submit, calls createTransaction() (fire-and-forget): form closes immediately,
-//   transaction appears in list with isPending=true until server confirms.
+// Handles: expense, transfer, withdrawal, adjustment.
+// Replaces the old TransactionForm (expense-only) + WithdrawalForm.
+//
+// UI: full-screen overlay (not a Drawer). Sticky top bar with ✕ / title / Save.
+// Close triggers unsaved-changes confirmation dialog.
+//
+// Field visibility is declarative: each field declares which types it appears for,
+// plus optional travelSettings gates. This makes future per-travel field
+// customisation (Parameters tab) easy to layer on without restructuring.
 
-import { useState, useMemo, useEffect, useRef } from 'react'
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { useAuthStore } from '@/auth/store/useAuthStore'
 import { createTransaction, updateTransaction } from '@/transactions/services/transactionService'
 import { getExchangeRate } from '@/shared/utils/exchangeRates'
@@ -18,24 +20,32 @@ import { Textarea } from '@/components/ui/textarea'
 import type { LabeledItem, TravelMember, TravelSettings } from '@/travels/types'
 import { updateTravelCurrencies, updateTravelList, syncTransactionLocation } from '@/travels/services/travelService'
 import { ALL_CURRENCIES, ALL_COUNTRIES } from '@/shared/data/pickerData'
-import type { Split } from '@/transactions/types'
+import type { Split, TransactionType } from '@/transactions/types'
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
+import { getTransactionType } from '@/transactions/utils/walletHelpers'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { FormulaBar } from './FormulaBar'
+import { SplitEditor } from '@/transactions/components/SplitEditor'
+import { SplitSummaryRow } from '@/transactions/components/SplitSummaryRow'
 import {
   Drawer,
   DrawerContent,
   DrawerHeader,
   DrawerTitle,
 } from '@/components/ui/drawer'
-import { FormulaBar } from './FormulaBar'
-import { SplitEditor } from '@/transactions/components/SplitEditor'
-import { SplitSummaryRow } from '@/transactions/components/SplitSummaryRow'
 
 // ---------------------------------------------------------------------------
 // Date conversion helpers
 // ---------------------------------------------------------------------------
-
-// HTML <input type="date"> always uses YYYY-MM-DD internally.
-// Firestore storage format is DD-MM-YYYY.
 
 function toInputFormat(ddmmyyyy: string): string {
   const [dd, mm, yyyy] = ddmmyyyy.split('-')
@@ -58,31 +68,49 @@ function getTodayDDMMYYYY(): string {
 }
 
 // ---------------------------------------------------------------------------
+// Field visibility — declarative config
+// ---------------------------------------------------------------------------
+// Each form field declares which transaction types show it.
+// travelSettings gates are layered on top (e.g. trackLocation for country/city).
+// Future: per-travel user overrides can be added to this structure.
+
+type FieldName =
+  | 'date' | 'name' | 'amount' | 'formula' | 'fees'
+  | 'category' | 'paymentMethod' | 'country' | 'city'
+  | 'notes' | 'split' | 'adjustmentMode'
+
+const FIELD_TYPES: Record<FieldName, TransactionType[]> = {
+  date:           ['expense', 'transfer', 'withdrawal', 'adjustment'],
+  name:           ['expense', 'transfer', 'withdrawal', 'adjustment'],
+  amount:         ['expense', 'transfer', 'withdrawal', 'adjustment'],
+  formula:        ['expense', 'transfer', 'withdrawal', 'adjustment'],
+  fees:           ['withdrawal'],
+  category:       ['expense'],
+  paymentMethod:  ['expense', 'withdrawal', 'adjustment'],
+  country:        ['expense'],
+  city:           ['expense'],
+  notes:          ['expense', 'transfer', 'withdrawal', 'adjustment'],
+  split:          ['expense', 'transfer'],
+  adjustmentMode: ['adjustment'],
+}
+
+// ---------------------------------------------------------------------------
 // Location dropdown helpers
 // ---------------------------------------------------------------------------
 
-// Special sentinel value shown in the dropdown when a user previously chose
-// "Other" without entering a named country/city. Stored as-is in Firestore.
 const OTHER_VALUE = 'Other'
 
-// Scans existing transactions and returns unique non-empty values for a given
-// field, ordered by most recently used (based on transaction date, then createdAt).
-// "Other" is excluded from this list — it's always appended as a fixed option.
 function getPreviousValues(
   transactions: TransactionWithStatus[],
   field: 'country' | 'city',
 ): string[] {
-  // Build a map of value → most recent date string seen (DD-MM-YYYY sorts lexically
-  // when reversed to YYYY-MM-DD, but we use index order as a proxy here — Firestore
-  // returns transactions ordered by date desc, so first occurrence = most recent).
-  const seen = new Map<string, number>() // value → first index seen (lower = more recent)
+  const seen = new Map<string, number>()
   transactions.forEach((tx, index) => {
     const val = tx[field]
     if (val && val !== OTHER_VALUE && !seen.has(val)) {
       seen.set(val, index)
     }
   })
-  // Sort by index ascending = most recently used first
   return [...seen.entries()]
     .sort((a, b) => a[1] - b[1])
     .map(([val]) => val)
@@ -91,65 +119,47 @@ function getPreviousValues(
 // ---------------------------------------------------------------------------
 // LocationSelect — dropdown for country or city
 // ---------------------------------------------------------------------------
-// Three states:
-//   1. Selecting from list (default)
-//   2. "Other" selected — shows plain text, no input
-//   3. "Add new" — shows a text input for a brand new value
 
 interface LocationSelectProps {
   label: string
-  value: string        // current field value (stored string, or '' if unset)
+  value: string
   onChange: (val: string) => void
-  previousValues: string[]  // ordered list of previously used values
-  placeholder: string  // shown as the "unset" option in the dropdown
+  previousValues: string[]
+  placeholder: string
 }
 
 function LocationSelect({ label, value, onChange, previousValues, placeholder }: LocationSelectProps) {
-  // Track whether the user is currently typing a new value
   const [addingNew, setAddingNew] = useState(false)
   const [newInput, setNewInput] = useState('')
 
-  // Determine what the <select> should show.
-  // If value is something not in previousValues and not OTHER_VALUE and not '',
-  // it's a custom value the user typed — treat it as selected in the dropdown
-  // by adding it temporarily to the list.
   const isCustomValue = value !== '' && value !== OTHER_VALUE && !previousValues.includes(value)
 
   function handleSelectChange(e: React.ChangeEvent<HTMLSelectElement>) {
     const selected = e.target.value
     if (selected === '__add_new__') {
-      // User wants to type a new value
       setAddingNew(true)
       setNewInput('')
-      // Don't call onChange yet — wait until they confirm
     } else {
       setAddingNew(false)
-      onChange(selected) // '' = unset, OTHER_VALUE = "Other", or a named value
+      onChange(selected)
     }
   }
 
   function handleNewInputConfirm() {
     const trimmed = newInput.trim()
-    if (trimmed) {
-      onChange(trimmed)
-    }
+    if (trimmed) onChange(trimmed)
     setAddingNew(false)
   }
 
   function handleNewInputKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Enter') handleNewInputConfirm()
-    if (e.key === 'Escape') {
-      setAddingNew(false)
-      // Revert to previous value (don't change onChange)
-    }
+    if (e.key === 'Escape') setAddingNew(false)
   }
 
   return (
     <div className="flex flex-col gap-1">
-      <label className="text-sm font-medium">{label}</label>
-
+      <label className="text-xs font-medium text-muted-foreground">{label}</label>
       {addingNew ? (
-        // Inline text input to type the new value
         <div className="flex gap-2">
           <Input
             autoFocus
@@ -159,46 +169,24 @@ function LocationSelect({ label, value, onChange, previousValues, placeholder }:
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewInput(e.target.value)}
             onKeyDown={handleNewInputKeyDown}
           />
-          <Button type="button" size="sm" onClick={handleNewInputConfirm}>
-            OK
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => setAddingNew(false)}
-          >
-            ✕
-          </Button>
+          <Button type="button" size="sm" onClick={handleNewInputConfirm}>OK</Button>
+          <Button type="button" size="sm" variant="outline" onClick={() => setAddingNew(false)}>✕</Button>
         </div>
       ) : (
         <select
           className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-          // The select value must be one of the <option> values.
-          // If isCustomValue, we display it as a temporary selected option below.
           value={isCustomValue ? value : value}
           onChange={handleSelectChange}
         >
-          {/* Unset / empty option */}
           <option value="">{placeholder}</option>
-
-          {/* Custom value typed in a previous session — show it at the top */}
-          {isCustomValue && (
-            <option value={value}>{value}</option>
-          )}
-
-          {/* Previously used values, ordered by most recent */}
+          {isCustomValue && <option value={value}>{value}</option>}
           {previousValues.map((v) => (
             <option key={v} value={v}>{v}</option>
           ))}
-
-          {/* Fixed options at the bottom */}
           <option value={OTHER_VALUE}>Other</option>
           <option value="__add_new__">+ Add new…</option>
         </select>
       )}
-
-      {/* Display hint when "Other" is selected */}
       {value === OTHER_VALUE && !addingNew && (
         <p className="text-xs text-muted-foreground">Saved as "Other". Use "Add new…" to enter a specific name.</p>
       )}
@@ -207,9 +195,7 @@ function LocationSelect({ label, value, onChange, previousValues, placeholder }:
 }
 
 // ---------------------------------------------------------------------------
-// SmartCurrencySelect
-// Shows travel currencies first (ordered by recent use), then "Add…" which
-// opens an inline searchable picker. Selecting from picker adds to travel list.
+// SmartCurrencySelect — prominent pill-style selector
 // ---------------------------------------------------------------------------
 
 interface SmartCurrencySelectProps {
@@ -234,13 +220,12 @@ function SmartCurrencySelect({ value, onChange, orderedCurrencies, onCurrencyAdd
     return code.toLowerCase().includes(q) || name.toLowerCase().includes(q)
   })
 
-  // For the select: show travel currencies + current value (if not in list)
-  const selectOptions = [...new Set([...orderedCurrencies, value])]
+  // Resolve the currency symbol for the current value
+  const currencySymbol = ALL_CURRENCIES.find(([code]) => code === value)?.[1] ?? value
 
   if (pickerOpen) {
     return (
       <div className="flex flex-col gap-1">
-        <label className="text-sm font-medium">Currency</label>
         <div className="flex flex-col gap-1 rounded-md border bg-background p-2 shadow-md">
           <input
             ref={searchRef}
@@ -279,31 +264,22 @@ function SmartCurrencySelect({ value, onChange, orderedCurrencies, onCurrencyAdd
   }
 
   return (
-    <div className="flex flex-col gap-1">
-      <label className="text-sm font-medium">Currency</label>
-      <select
-        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-        value={value}
-        onChange={(e) => {
-          if (e.target.value === '__add__') {
-            setPickerOpen(true)
-          } else {
-            onChange(e.target.value)
-          }
-        }}
-      >
-        {selectOptions.map((code) => (
-          <option key={code} value={code}>{code}</option>
-        ))}
-        <option value="__add__">+ Add…</option>
-      </select>
-    </div>
+    // Prominent pill button — shows code + symbol, tapping opens the picker.
+    // Visually distinct from a standard dropdown so users notice it immediately.
+    <button
+      type="button"
+      onClick={() => setPickerOpen(true)}
+      className="flex h-9 items-center gap-1.5 rounded-full border-2 border-primary/30 bg-primary/5 px-4 text-sm font-semibold text-primary transition-colors hover:bg-primary/10"
+    >
+      <span>{value}</span>
+      <span className="text-primary/60">{currencySymbol}</span>
+      <span className="text-xs text-primary/40">▾</span>
+    </button>
   )
 }
 
 // ---------------------------------------------------------------------------
 // SmartCountrySelect
-// Shows travel countries first (ordered by recent use), then "Add…" picker.
 // ---------------------------------------------------------------------------
 
 interface SmartCountrySelectProps {
@@ -329,7 +305,6 @@ function SmartCountrySelect({ value, onChange, orderedCountries, onCountryAdded 
 
   const selectOptions = [
     ...orderedCountries,
-    // Include current value if not already in list
     ...(value && !orderedCountries.find((c) => c.label === value)
       ? [{ id: 'current', label: value, emoji: '🌍' }]
       : []),
@@ -338,7 +313,7 @@ function SmartCountrySelect({ value, onChange, orderedCountries, onCountryAdded 
   if (pickerOpen) {
     return (
       <div className="flex flex-col gap-1">
-        <label className="text-sm font-medium">Country</label>
+        <label className="text-xs font-medium text-muted-foreground">Country</label>
         <div className="flex flex-col gap-1 rounded-md border bg-background p-2 shadow-md">
           <input
             ref={searchRef}
@@ -377,16 +352,13 @@ function SmartCountrySelect({ value, onChange, orderedCountries, onCountryAdded 
 
   return (
     <div className="flex flex-col gap-1">
-      <label className="text-sm font-medium">Country</label>
+      <label className="text-xs font-medium text-muted-foreground">Country</label>
       <select
         className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
         value={value}
         onChange={(e) => {
-          if (e.target.value === '__add__') {
-            setPickerOpen(true)
-          } else {
-            onChange(e.target.value)
-          }
+          if (e.target.value === '__add__') setPickerOpen(true)
+          else onChange(e.target.value)
         }}
       >
         <option value="">— optional —</option>
@@ -404,18 +376,15 @@ function SmartCountrySelect({ value, onChange, orderedCountries, onCountryAdded 
 // ---------------------------------------------------------------------------
 // SmartLabeledItemSelect — dropdown for category or payment method
 // ---------------------------------------------------------------------------
-// Shows existing items from the travel's per-travel list (or global fallback),
-// plus a "+ Add new…" option that opens an inline text input.
-// When the user confirms a new item, it is saved to the travel list and
-// the parent is notified via onAddNew so it can update local state.
 
 interface SmartLabeledItemSelectProps {
   label: string
-  value: string                 // currently selected value (formatted "emoji label" string)
+  value: string
   onChange: (val: string) => void
-  items: string[]               // formatted display strings (already "emoji label")
-  onAddNew: (label: string) => void  // called with just the label text (no emoji)
+  items: string[]
+  onAddNew: (label: string) => void
   placeholder?: string
+  required?: boolean
 }
 
 function SmartLabeledItemSelect({
@@ -425,6 +394,7 @@ function SmartLabeledItemSelect({
   items,
   onAddNew,
   placeholder = '— optional —',
+  required,
 }: SmartLabeledItemSelectProps) {
   const [addingNew, setAddingNew] = useState(false)
   const [newInput, setNewInput] = useState('')
@@ -441,8 +411,8 @@ function SmartLabeledItemSelect({
   function handleConfirm() {
     const trimmed = newInput.trim()
     if (trimmed) {
-      onAddNew(trimmed)   // persists to Firestore and updates parent state
-      onChange(trimmed)   // sets form field to the new value
+      onAddNew(trimmed)
+      onChange(trimmed)
     }
     setAddingNew(false)
   }
@@ -455,7 +425,7 @@ function SmartLabeledItemSelect({
   if (addingNew) {
     return (
       <div className="flex flex-col gap-1">
-        <label className="text-sm font-medium">{label}</label>
+        <label className="text-xs font-medium text-muted-foreground">{label}</label>
         <div className="flex gap-2">
           <Input
             autoFocus
@@ -476,39 +446,19 @@ function SmartLabeledItemSelect({
 
   return (
     <div className="flex flex-col gap-1">
-      <label className="text-sm font-medium">{label}</label>
+      <label className="text-xs font-medium text-muted-foreground">{label}</label>
       <select
         className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
         value={value}
         onChange={handleSelectChange}
       >
-        <option value="">{placeholder}</option>
+        {!required && <option value="">{placeholder}</option>}
+        {required && !value && <option value="">— select —</option>}
         {items.map((item) => (
           <option key={item} value={item}>{item}</option>
         ))}
         <option value="__add_new__">+ Add new…</option>
       </select>
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Field wrapper
-// ---------------------------------------------------------------------------
-function FieldWrapper({
-  label,
-  error,
-  children,
-}: {
-  label: string
-  error?: string
-  children: React.ReactNode
-}) {
-  return (
-    <div className="flex flex-col gap-1">
-      <label className="text-sm font-medium">{label}</label>
-      {children}
-      {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
   )
 }
@@ -522,25 +472,12 @@ function round(x: number, dp: number): number {
   return Math.round(x * f) / f
 }
 
-/**
- * Splits `total` equally among travelMemberIds, rounded to 3dp internally.
- * Validity is checked at 2dp — matches SplitEditor's rounding model.
- * Using the functional setState updater (prev =>) with this helper avoids
- * stale-closure issues when reading current IDs inside a useEffect.
- */
 function distributeEqually(total: number, ids: string[]): Split[] {
   if (ids.length === 0) return []
   const amount = round(total / ids.length, 3)
   return ids.map((travelMemberId) => ({ travelMemberId, amount }))
 }
 
-
-// ---------------------------------------------------------------------------
-// Split mode detection (used when pre-filling edit mode)
-// ---------------------------------------------------------------------------
-
-// If all splits have the same amount (within 1 cent), the split was 'equal'.
-// Single-payer/single-beneficiary is always 'equal' (mode has no visible effect).
 function detectSplitMode(splits: Split[]): 'equal' | 'custom' {
   if (splits.length <= 1) return 'equal'
   const first = splits[0].amount
@@ -548,36 +485,110 @@ function detectSplitMode(splits: Split[]): 'equal' | 'custom' {
 }
 
 // ---------------------------------------------------------------------------
+// Type selector pill button
+// ---------------------------------------------------------------------------
+
+const TYPE_CONFIG: { type: TransactionType; label: string; emoji: string }[] = [
+  { type: 'expense',    label: 'Expense',    emoji: '💸' },
+  { type: 'transfer',   label: 'Transfer',   emoji: '🤝' },
+  { type: 'withdrawal', label: 'Withdrawal', emoji: '🏧' },
+  { type: 'adjustment', label: 'Adjustment', emoji: '⚖️' },
+]
+
+function TypeSelector({
+  value,
+  onChange,
+}: {
+  value: TransactionType
+  onChange: (t: TransactionType) => void
+}) {
+  return (
+    <div className="flex gap-1">
+      {TYPE_CONFIG.map(({ type, label, emoji }) => (
+        <button
+          key={type}
+          type="button"
+          onClick={() => onChange(type)}
+          className={`
+            flex-1 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors
+            ${value === type
+              ? 'bg-primary text-primary-foreground shadow-sm'
+              : 'bg-muted text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+            }
+          `}
+        >
+          {emoji} {label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// TransferSenderPicker — single-person dropdown for the "From" field
+// ---------------------------------------------------------------------------
+
+function TransferSenderPicker({
+  members,
+  selectedId,
+  onChange,
+  currentUserTravelMemberId,
+}: {
+  members: TravelMember[]
+  selectedId: string
+  onChange: (travelMemberId: string) => void
+  currentUserTravelMemberId: string
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-xs font-medium text-muted-foreground">From</label>
+      <select
+        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+        value={selectedId}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        {members.map((m) => (
+          <option key={m.travelMemberId} value={m.travelMemberId}>
+            {m.displayName}{m.travelMemberId === currentUserTravelMemberId ? ' (you)' : ''}
+          </option>
+        ))}
+      </select>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
+
 interface TransactionFormProps {
   travelId: string
   members: TravelMember[]
   travelSettings?: TravelSettings
   travelCategories?: LabeledItem[]
   travelPaymentMethods?: LabeledItem[]
-  // Per-travel currency and country lists (from Parameters tab)
-  travelCurrencies?: string[]         // ISO codes, ordered by user preference
-  travelCountries?: LabeledItem[]     // countries with flag emoji
-  travelCities?: LabeledItem[]        // cities for dedup check
+  travelCurrencies?: string[]
+  travelCountries?: LabeledItem[]
+  travelCities?: LabeledItem[]
   existingTransactions: TransactionWithStatus[]
-  // When set, the form opens in edit mode pre-filled from this transaction.
-  // When absent, the form opens in create mode with smart defaults.
   initialValues?: TransactionWithStatus
-  onSuccess: (txId: string) => void   // receives newTxId (create) or existing txId (edit)
+  /** Pre-set the type when opening for a new transaction (e.g. 'withdrawal' from DashboardTab). */
+  initialType?: TransactionType
+  onSuccess: (txId: string) => void
   onCancel: () => void
-  // Called after save when a new country or city was introduced — so parent
-  // (TravelDetailPage) can update travel.countries / travel.cities immediately
+  /** Called when user taps Delete in edit mode. */
+  onDelete?: (txId: string) => void
   onLocationAdded?: (newCountry: LabeledItem | null, newCity: LabeledItem | null) => void
-  // Called when user creates a new category from the form — parent updates travel.categories
   onCategoryAdded?: (item: LabeledItem) => void
-  // Called when user creates a new payment method from the form — parent updates travel.paymentMethods
   onPaymentMethodAdded?: (item: LabeledItem) => void
+  /** Called when user taps "Add" in solo-travel CTA — saves tx then navigates to Parameters. */
+  onNavigateToParameters?: () => void
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
+
 export function TransactionForm({
   travelId,
   members,
@@ -589,40 +600,52 @@ export function TransactionForm({
   travelCities,
   existingTransactions,
   initialValues,
+  initialType,
   onSuccess,
   onCancel,
+  onDelete,
   onLocationAdded,
   onCategoryAdded,
   onPaymentMethodAdded,
+  onNavigateToParameters,
 }: TransactionFormProps) {
-  // true when editing an existing transaction, false for a new one
   const isEdit = !!initialValues
   const { currentUser, userProfile } = useAuthStore()
 
   if (!currentUser || !userProfile) {
     return (
-      <p className="py-4 text-center text-sm text-destructive">
-        User profile unavailable. Please sign out and sign in again.
-      </p>
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-background">
+        <p className="text-sm text-destructive">
+          User profile unavailable. Please sign out and sign in again.
+        </p>
+      </div>
     )
   }
 
-  // Resolve the current user's travelMemberId — used to initialise splits and to show "You".
-  // Pattern: find the slot where userId matches the Firebase Auth UID.
+  // --- Current user's travel member slot ---
   const myMember = members.find((m) => m.userId === currentUser.uid)
   const myTravelMemberId = myMember?.travelMemberId ?? ''
+  const isSolo = members.length === 1
 
-  // --- Formula mode state ---
-  // `formulaMode` — whether the formula bar is currently shown instead of the plain amount input.
-  // When editing a transaction that has a saved formula, open in formula mode automatically.
+  // --- Transaction type ---
+  const [txType, setTxType] = useState<TransactionType>(
+    isEdit ? getTransactionType(initialValues!) : (initialType ?? 'expense')
+  )
+
+  // Helper: check if a field is visible for the current transaction type + settings
+  const fieldVisible = useCallback((field: FieldName): boolean => {
+    if (!FIELD_TYPES[field].includes(txType)) return false
+    // TravelSettings gates
+    const trackLocation = travelSettings?.trackLocation ?? true
+    if (field === 'country' || field === 'city') return trackLocation
+    return true
+  }, [txType, travelSettings])
+
+  // --- Formula mode ---
   const [formulaMode, setFormulaMode] = useState(isEdit && !!initialValues?.amountFormula)
-  // `formulaStr` — the raw formula string as typed by the user (e.g. "2*2.5 + 1.5").
-  // Pre-populated from the saved formula when editing.
   const [formulaStr, setFormulaStr] = useState(isEdit ? (initialValues?.amountFormula ?? '') : '')
 
-  // Effective category and payment method lists:
-  // use per-travel lists if available, else fall back to userProfile global lists.
-  // Per-travel items carry an optional emoji prefix for display.
+  // --- Effective lists ---
   const effectiveCategories: string[] =
     travelCategories && travelCategories.length > 0
       ? travelCategories.map((c) => c.emoji ? `${c.emoji} ${c.label}` : c.label)
@@ -633,16 +656,11 @@ export function TransactionForm({
       ? travelPaymentMethods.map((p) => p.emoji ? `${p.emoji} ${p.label}` : p.label)
       : userProfile.paymentMethods
 
-  // --- Currency list -------------------------------------------------------
-  // Travel currencies ordered as: previously used (from transactions, most recent first),
-  // then remaining travel currencies, then everything else is accessible via "Add…".
-  // Default currency = last transaction's currency, else userProfile.mainCurrency.
+  // --- Currency list ---
   const lastUsedCurrency = existingTransactions[0]?.currency ?? userProfile.mainCurrency
 
-  // Build ordered currency list: travel currencies come first, ordered by last use
   const orderedCurrencies = useMemo(() => {
     const travelSet = new Set(travelCurrencies ?? [])
-    // Most recently used first (transactions are already ordered desc by date)
     const recentlyUsed = [...new Set(existingTransactions.map((tx) => tx.currency))].filter(
       (c) => travelSet.has(c),
     )
@@ -650,8 +668,7 @@ export function TransactionForm({
     return [...recentlyUsed, ...rest]
   }, [travelCurrencies, existingTransactions])
 
-  // --- Country list --------------------------------------------------------
-  // Travel countries ordered by most recently used in transactions.
+  // --- Country list ---
   const orderedCountries = useMemo(() => {
     const travelCountryNames = new Set((travelCountries ?? []).map((c) => c.label.toLowerCase()))
     const recentlyUsed = [...new Set(existingTransactions.map((tx) => tx.country).filter(Boolean) as string[])].filter(
@@ -666,36 +683,21 @@ export function TransactionForm({
     ]
   }, [travelCountries, existingTransactions])
 
-  // Whether to show country/city fields.
-  // Defaults to true if the travel has no settings yet (backward compatible).
   const trackLocation = travelSettings?.trackLocation ?? true
-
-  // Solo travel: only 1 member — splits are auto-set, no UI shown
-  const isSolo = members.length === 1
-
-  // Derive previously used values once — memoized so it doesn't recompute
-  // on every keystroke. Depends on existingTransactions which changes rarely.
   const previousCities = useMemo(
     () => getPreviousValues(existingTransactions, 'city'),
     [existingTransactions],
   )
-
-  // Pre-fill city from the most recent transaction
   const lastCity = existingTransactions[0]?.city ?? ''
-
-  // --- Field state --------------------------------------------------------
-  // In edit mode, initial values come from initialValues.
-  // In create mode, smart defaults apply (last used currency/country/city, today's date).
-
   const lastCountry = existingTransactions[0]?.country ?? ''
 
+  // --- Field state ---
   const [date, setDate] = useState<string>(
     isEdit ? initialValues!.date : getTodayDDMMYYYY()
   )
   const [name, setName] = useState<string>(
     isEdit ? initialValues!.name : ''
   )
-  // Pre-filled to '0' so the mobile numeric keyboard shows 0.00 immediately.
   const [amountStr, setAmountStr] = useState<string>(
     isEdit ? String(initialValues!.totalAmount) : '0'
   )
@@ -717,21 +719,22 @@ export function TransactionForm({
   const [notes, setNotes] = useState<string>(
     isEdit ? (initialValues!.notes ?? '') : ''
   )
+  const [feesStr, setFeesStr] = useState<string>(
+    isEdit && initialValues!.fees != null ? String(initialValues!.fees) : ''
+  )
+  const [adjustmentMode, setAdjustmentMode] = useState<'expense' | 'balance_only'>(
+    isEdit ? (initialValues!.adjustmentMode ?? 'balance_only') : 'balance_only'
+  )
 
-  // --- Split state --------------------------------------------------------
-
+  // --- Split state ---
   const totalAmount = parseFloat(amountStr) || 0
 
-  // In edit mode, restore the saved splits and detect whether they were equal or custom.
-  // In create mode, default to the current user paying/benefiting the full amount.
   const [paidBy, setPaidBy] = useState<Split[]>(
-    // In create mode, default to the current user's travel slot paying the full amount
     isEdit ? initialValues!.paidBy : [{ travelMemberId: myTravelMemberId, amount: totalAmount }]
   )
   const [paidByMode, setPaidByMode] = useState<'equal' | 'custom'>(
     isEdit ? detectSplitMode(initialValues!.paidBy) : 'equal'
   )
-
   const [beneficiaries, setBeneficiaries] = useState<Split[]>(
     isEdit ? initialValues!.beneficiaries : [{ travelMemberId: myTravelMemberId, amount: totalAmount }]
   )
@@ -739,83 +742,149 @@ export function TransactionForm({
     isEdit ? detectSplitMode(initialValues!.beneficiaries) : 'equal'
   )
 
-  // Drawer open state
+  // Transfer: sender is a single member (paidBy[0])
+  const [transferSenderId, setTransferSenderId] = useState<string>(
+    isEdit && getTransactionType(initialValues!) === 'transfer'
+      ? (initialValues!.paidBy[0]?.travelMemberId ?? myTravelMemberId)
+      : myTravelMemberId
+  )
+
+  // Drawer open state for split editors
   const [paidByDrawerOpen, setPaidByDrawerOpen] = useState(false)
   const [beneficiaryDrawerOpen, setBeneficiaryDrawerOpen] = useState(false)
 
-  // --- Solo travel: keep splits silently in sync with totalAmount ----------
-  // When there is only one member, we never show the split UI. Instead we
-  // keep both splits up to date whenever totalAmount changes.
+  // --- Close confirmation ---
+  const [closeDialogOpen, setCloseDialogOpen] = useState(false)
+  // Track if the user has changed anything (dirty flag)
+  const [isDirty, setIsDirty] = useState(false)
+  // Mark dirty on any field change. We wrap setters for key fields.
+  const markDirty = useCallback(() => { if (!isDirty) setIsDirty(true) }, [isDirty])
+
+  // --- Solo travel: keep splits silently in sync with totalAmount ---
   useEffect(() => {
     if (!isSolo) return
-    // Use myTravelMemberId (the slot's stable id) rather than the Firebase Auth UID
     const soloSplit: Split[] = [{ travelMemberId: myTravelMemberId, amount: totalAmount }]
     setPaidBy(soloSplit)
     setBeneficiaries(soloSplit)
   }, [isSolo, myTravelMemberId, totalAmount])
 
-  // --- Multi-user equal mode: keep amounts in sync with totalAmount --------
-  // The SplitEditor inside each Drawer has the same sync logic, but shadcn/vaul
-  // renders Drawer content lazily (only on first open). This means the SplitEditor's
-  // useEffect never runs until the user opens the drawer — leaving amounts at 0
-  // and causing validation to fail. These effects mirror that logic directly in the
-  // form so the splits are always valid in equal mode, even if the drawer is never opened.
-  // The functional updater form (prev =>) reads current state, not the stale closure.
+  // --- Withdrawal / Adjustment: auto-set splits to current user ---
   useEffect(() => {
-    if (isSolo) return
-    if (paidByMode === 'equal') {
-      setPaidBy((prev) =>
-        prev.length === 0 ? prev : distributeEqually(totalAmount, prev.map((s) => s.travelMemberId))
-      )
-    }
-  }, [totalAmount, paidByMode, isSolo])
+    if (txType !== 'withdrawal' && txType !== 'adjustment') return
+    const selfSplit: Split[] = [{ travelMemberId: myTravelMemberId, amount: totalAmount }]
+    setPaidBy(selfSplit)
+    setBeneficiaries(selfSplit)
+  }, [txType, myTravelMemberId, totalAmount])
 
+  // --- Transfer: keep paidBy in sync with sender + amount ---
   useEffect(() => {
-    if (isSolo) return
+    if (txType !== 'transfer') return
+    setPaidBy([{ travelMemberId: transferSenderId, amount: totalAmount }])
+  }, [txType, transferSenderId, totalAmount])
+
+  // --- Transfer: when switching to transfer, set default beneficiaries to all OTHER members ---
+  useEffect(() => {
+    if (txType !== 'transfer') return
+    // Only set default beneficiaries if not editing (edit mode preserves saved splits)
+    if (isEdit) return
+    const otherIds = members
+      .filter((m) => m.travelMemberId !== transferSenderId)
+      .map((m) => m.travelMemberId)
+    if (otherIds.length > 0) {
+      setBeneficiaries(distributeEqually(totalAmount, otherIds))
+      setBeneficiaryMode('equal')
+    }
+    // Only run when transferSenderId changes (not on every totalAmount change)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [txType, transferSenderId, members, isEdit])
+
+  // --- Transfer: keep beneficiary amounts in sync with totalAmount when equal mode ---
+  useEffect(() => {
+    if (txType !== 'transfer') return
     if (beneficiaryMode === 'equal') {
       setBeneficiaries((prev) =>
         prev.length === 0 ? prev : distributeEqually(totalAmount, prev.map((s) => s.travelMemberId))
       )
     }
-  }, [totalAmount, beneficiaryMode, isSolo])
+  }, [txType, totalAmount, beneficiaryMode])
 
-  // --- Validation ---------------------------------------------------------
+  // --- Multi-user equal mode: keep amounts in sync ---
+  useEffect(() => {
+    if (isSolo || txType === 'withdrawal' || txType === 'adjustment' || txType === 'transfer') return
+    if (paidByMode === 'equal') {
+      setPaidBy((prev) =>
+        prev.length === 0 ? prev : distributeEqually(totalAmount, prev.map((s) => s.travelMemberId))
+      )
+    }
+  }, [totalAmount, paidByMode, isSolo, txType])
 
-  // Validity rounds both sides to 2dp — absorbs 3dp drift (e.g. 33.333×3 = 99.999 → 100.00)
+  useEffect(() => {
+    if (isSolo || txType === 'withdrawal' || txType === 'adjustment' || txType === 'transfer') return
+    if (beneficiaryMode === 'equal') {
+      setBeneficiaries((prev) =>
+        prev.length === 0 ? prev : distributeEqually(totalAmount, prev.map((s) => s.travelMemberId))
+      )
+    }
+  }, [totalAmount, beneficiaryMode, isSolo, txType])
+
+  // --- Validation ---
   const r2 = (x: number) => Math.round(x * 100) / 100
   const paidByValid =
-    isSolo || Math.abs(r2(paidBy.reduce((a, s) => a + s.amount, 0)) - r2(totalAmount)) < 0.01
+    isSolo || txType === 'withdrawal' || txType === 'adjustment'
+    || Math.abs(r2(paidBy.reduce((a, s) => a + s.amount, 0)) - r2(totalAmount)) < 0.01
   const beneficiaryValid =
-    isSolo || Math.abs(r2(beneficiaries.reduce((a, s) => a + s.amount, 0)) - r2(totalAmount)) < 0.01
+    isSolo || txType === 'withdrawal' || txType === 'adjustment'
+    || Math.abs(r2(beneficiaries.reduce((a, s) => a + s.amount, 0)) - r2(totalAmount)) < 0.01
 
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [submitted, setSubmitted] = useState<boolean>(false)
-  // Briefly true after a failed save attempt — drives the red flash on the Save button
   const [saveFlash, setSaveFlash] = useState<boolean>(false)
 
   function validate(): Record<string, string> {
     const errs: Record<string, string> = {}
     if (!date) errs.date = 'Date is required.'
-    if (!name.trim()) errs.name = 'Name is required.'
+
+    // Name: required for expense and transfer, optional for withdrawal/adjustment
+    if ((txType === 'expense' || txType === 'transfer') && !name.trim()) {
+      errs.name = 'Name is required.'
+    }
+
     const amount = parseFloat(amountStr)
-    // Allow 0 as a valid amount (e.g. free entry, comped meals).
-    // Only reject empty or non-numeric input.
     if (amountStr === '' || isNaN(amount)) {
       errs.amount = 'Enter a valid amount.'
     }
-    if (!paidByValid) errs.paidBy = 'Paid by amounts must equal the total.'
-    if (!beneficiaryValid) errs.beneficiaries = 'Split amounts must equal the total.'
+    // Withdrawals require a positive amount
+    if (txType === 'withdrawal' && (isNaN(amount) || amount <= 0)) {
+      errs.amount = 'Enter a positive amount.'
+    }
+
+    // Payment method: required for withdrawal and adjustment
+    if ((txType === 'withdrawal' || txType === 'adjustment') && !paymentMethod) {
+      errs.paymentMethod = 'Payment method is required.'
+    }
+
+    // Fees validation (withdrawal only)
+    if (txType === 'withdrawal' && feesStr.trim()) {
+      const feesVal = parseFloat(feesStr)
+      if (isNaN(feesVal) || feesVal < 0) errs.fees = 'Fees must be 0 or positive.'
+      else if (feesVal >= amount) errs.fees = 'Fees must be less than the withdrawal amount.'
+    }
+
+    // Split validation (expense and transfer only)
+    if (fieldVisible('split') && !isSolo) {
+      if (!paidByValid) errs.paidBy = 'Paid by amounts must equal the total.'
+      if (!beneficiaryValid) errs.beneficiaries = 'Split amounts must equal the total.'
+    }
+
     return errs
   }
 
-  // --- Submit handler -----------------------------------------------------
-
+  // --- Submit handler ---
   function handleSave() {
     setSubmitted(true)
     const errs = validate()
     setErrors(errs)
     if (Object.keys(errs).length > 0) {
-      // Flash the Save button red for 600ms to signal the problem
       setSaveFlash(true)
       setTimeout(() => setSaveFlash(false), 600)
       return
@@ -828,53 +897,58 @@ export function TransactionForm({
     const exchangeRate = getExchangeRate(currency, profile.mainCurrency)
     const totalAmountMain = Math.round(total * exchangeRate * 100) / 100
 
-    // Sync country/city to travel document so dropdowns update immediately
-    const countryToSync = trackLocation && country ? country : undefined
-    const cityToSync = trackLocation && city ? city : undefined
-    if (countryToSync || cityToSync) {
-      syncTransactionLocation(
-        travelId,
-        countryToSync,
-        cityToSync,
-        travelCountries ?? [],
-        travelCities ?? [],
-      ).then(({ newCountry, newCity }) => {
-        if (onLocationAdded && (newCountry || newCity)) {
-          onLocationAdded(newCountry, newCity)
-        }
-      }).catch(console.error)
+    // Auto-generate name for withdrawal/adjustment if blank
+    let txName = name.trim()
+    if (!txName) {
+      if (txType === 'withdrawal') txName = `Top-up ${paymentMethod}`
+      else if (txType === 'adjustment') txName = `Adjustment — ${paymentMethod}`
+      else txName = 'Transaction'
     }
 
-    // Shared data fields for both create and update.
-    // Optional fields set to undefined are handled appropriately in each service call.
+    // Sync country/city to travel document (expense only)
+    if (txType === 'expense') {
+      const countryToSync = trackLocation && country ? country : undefined
+      const cityToSync = trackLocation && city ? city : undefined
+      if (countryToSync || cityToSync) {
+        syncTransactionLocation(
+          travelId,
+          countryToSync,
+          cityToSync,
+          travelCountries ?? [],
+          travelCities ?? [],
+        ).then(({ newCountry, newCity }) => {
+          if (onLocationAdded && (newCountry || newCity)) {
+            onLocationAdded(newCountry, newCity)
+          }
+        }).catch(console.error)
+      }
+    }
+
+    // Build the data payload — fields not relevant to the type are set to undefined
+    // (updateTransaction uses deleteField() for undefined optional fields).
     const sharedData = {
       date,
-      name: name.trim(),
+      name: txName,
       totalAmount: total,
       currency,
       exchangeRate,
       totalAmountMain,
-      // Optional fields: use undefined so each service can decide how to handle them
-      category: category || undefined,
-      paymentMethod: paymentMethod || undefined,
-      country: (trackLocation && country) ? country : undefined,
-      city: (trackLocation && city) ? city : undefined,
+      category: fieldVisible('category') ? (category || undefined) : undefined,
+      paymentMethod: fieldVisible('paymentMethod') ? (paymentMethod || undefined) : undefined,
+      country: fieldVisible('country') && country ? country : undefined,
+      city: fieldVisible('city') && city ? city : undefined,
       paidBy,
       beneficiaries,
       lastModifiedBy: user.uid,
-      notes: notes.trim() || undefined,
-      amountFormula: formulaStr.trim() || undefined,
-      // Preserve wallet-tracker fields when editing (type, fees, adjustmentMode).
-      // Without this, updateTransaction would deleteField() them, silently
-      // converting a withdrawal/adjustment back to a plain expense.
-      type: isEdit ? initialValues!.type : undefined,
-      fees: isEdit ? initialValues!.fees : undefined,
-      adjustmentMode: isEdit ? initialValues!.adjustmentMode : undefined,
+      notes: fieldVisible('notes') ? (notes.trim() || undefined) : undefined,
+      amountFormula: fieldVisible('formula') ? (formulaStr.trim() || undefined) : undefined,
+      // Type: undefined for 'expense' (backward compat), explicit for others
+      type: txType === 'expense' ? undefined : txType,
+      fees: txType === 'withdrawal' ? (feesStr.trim() ? parseFloat(feesStr) : undefined) : undefined,
+      adjustmentMode: txType === 'adjustment' ? adjustmentMode : undefined,
     }
 
     if (isEdit) {
-      // updateTransaction uses deleteField() internally for undefined optional fields,
-      // so clearing category/city/notes actually removes them from Firestore.
       updateTransaction(travelId, initialValues!.txId, sharedData)
       onSuccess(initialValues!.txId)
     } else {
@@ -886,284 +960,462 @@ export function TransactionForm({
     }
   }
 
+  // --- Close with confirmation ---
+  function handleClose() {
+    if (isDirty) {
+      setCloseDialogOpen(true)
+    } else {
+      onCancel()
+    }
+  }
+
+  // --- Amount label adapts to type ---
+  const amountLabel = txType === 'transfer' ? 'Transfer amount'
+    : txType === 'withdrawal' ? 'Withdraw amount'
+    : 'Amount'
+
+  // Solo + transfer: the form only shows the type selector + CTA.
+  // All other fields and action buttons are hidden.
+  const soloTransfer = isSolo && txType === 'transfer'
+
+  // --- Form title ---
+  const formTitle = isEdit
+    ? `Edit ${txType === 'expense' ? 'expense' : txType}`
+    : `New ${txType === 'expense' ? 'expense' : txType}`
+
   // ---------------------------------------------------------------------------
-  // Render
+  // Render — full-screen overlay
   // ---------------------------------------------------------------------------
   return (
-    <div className="flex flex-col gap-4">
+    <div className="fixed inset-0 z-50 flex flex-col bg-background">
 
-      {/* Date — plain <input> (not shadcn Input) so the native OS date picker
-          opens correctly on mobile. shadcn's Input can intercept touch events
-          and prevent the calendar from appearing on iOS/Android. */}
-      <div className="flex flex-col gap-1">
-        <label className="text-sm font-medium">Date</label>
-        <input
-          type="date"
-          value={toInputFormat(date)}
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDate(fromInputFormat(e.target.value))}
-          className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-          // colorScheme tells the browser to adapt the date picker's internal
-          // colours to the current theme — prevents invisible text in dark mode
-          style={{ colorScheme: 'light dark' }}
-        />
-        {submitted && errors.date && (
-          <p className="text-xs text-destructive">{errors.date}</p>
-        )}
+      {/* Sticky top bar */}
+      <div className="flex shrink-0 items-center justify-between border-b px-4 py-3">
+        <button
+          type="button"
+          onClick={handleClose}
+          className="flex h-8 w-8 items-center justify-center rounded-full text-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          aria-label="Close"
+        >
+          ✕
+        </button>
+        <h2 className="text-sm font-semibold">{formTitle}</h2>
+        <Button
+          type="button"
+          size="sm"
+          disabled={soloTransfer}
+          className={`min-w-[60px] transition-colors ${saveFlash ? 'bg-destructive text-destructive-foreground hover:bg-destructive' : ''}`}
+          onClick={handleSave}
+        >
+          Save
+        </Button>
       </div>
 
-      {/* Name */}
-      <FieldWrapper label="Name" error={submitted ? errors.name : undefined}>
-        <Input
-          type="text"
-          placeholder="e.g. Dinner, Taxi, Hotel night"
-          value={name}
-          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
-        />
-      </FieldWrapper>
+      {/* Scrollable content */}
+      <div className="flex-1 overflow-y-auto px-4 py-4">
+        <div className="mx-auto flex max-w-lg flex-col gap-4">
 
-      {/* Amount + Currency */}
-      <div className="flex flex-col gap-2">
+          {/* ── Type selector ── */}
+          <TypeSelector value={txType} onChange={(t) => { setTxType(t); markDirty() }} />
 
-        {/* Formula bar — rendered ABOVE the amount row when formula mode is active */}
-        {formulaMode && (
-          <FormulaBar
-            value={formulaStr}
-            onChange={setFormulaStr}
-            onEvaluated={(result) => {
-              // Whenever the formula produces a valid number, push it into amountStr
-              // so the rest of the form (validation, splits) sees it immediately.
-              if (result !== null) setAmountStr(result.toFixed(2))
-            }}
-          />
-        )}
-
-        {/* Amount input row: [number input] [formula toggle] [currency] */}
-        <div className="flex gap-2 items-start">
-
-          {/* Amount — shown as read-only preview when formula mode is active */}
-          <div className="flex-1">
+          {/* ── Name ── */}
+          {!soloTransfer && fieldVisible('name') && (
             <div className="flex flex-col gap-1">
-              <label className="text-sm font-medium">Amount</label>
+              <Input
+                type="text"
+                placeholder={
+                  txType === 'withdrawal' ? 'e.g. ATM Bangkok (optional)'
+                  : txType === 'adjustment' ? 'e.g. Cash reconciliation (optional)'
+                  : txType === 'transfer' ? 'e.g. Settlement, Loan to Bob'
+                  : 'e.g. Dinner, Taxi, Hotel night'
+                }
+                value={name}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setName(e.target.value); markDirty() }}
+              />
+              {submitted && errors.name && (
+                <p className="text-xs text-destructive">{errors.name}</p>
+              )}
+            </div>
+          )}
 
-              {formulaMode ? (
-                // In formula mode: show the evaluated result as a read-only display.
-                // The real editing happens in the FormulaBar above.
-                <div className="flex h-9 items-center rounded-md border border-border bg-muted px-3 text-sm text-muted-foreground">
-                  {amountStr || <span className="italic">enter formula above</span>}
-                </div>
-              ) : (
-                <Input
-                  type="number"
-                  inputMode="decimal"
-                  step={0.01}
-                  min={0}
-                  placeholder="0.00"
-                  value={amountStr}
-                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAmountStr(e.target.value)}
+          {/* ── Date ── */}
+          {!soloTransfer && fieldVisible('date') && (
+            <div className="flex flex-col gap-1">
+              <input
+                type="date"
+                value={toInputFormat(date)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setDate(fromInputFormat(e.target.value)); markDirty() }}
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                style={{ colorScheme: 'light dark' }}
+              />
+              {submitted && errors.date && (
+                <p className="text-xs text-destructive">{errors.date}</p>
+              )}
+            </div>
+          )}
+
+          {/* ── Amount + Currency row ── */}
+          {!soloTransfer && fieldVisible('amount') && (
+            <div className="flex flex-col gap-2">
+
+              {/* Formula bar (when active) */}
+              {fieldVisible('formula') && formulaMode && (
+                <FormulaBar
+                  value={formulaStr}
+                  onChange={(v) => { setFormulaStr(v); markDirty() }}
+                  onEvaluated={(result) => {
+                    if (result !== null) setAmountStr(result.toFixed(2))
+                  }}
                 />
               )}
 
-              {submitted && errors.amount && (
-                <p className="text-xs text-destructive">{errors.amount}</p>
+              {/* [🧮] [Amount input] [Currency pill] */}
+              <div className="flex items-end gap-2">
+
+                {/* Formula toggle button */}
+                {fieldVisible('formula') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (formulaMode) {
+                        setFormulaMode(false)
+                      } else {
+                        if (amountStr && parseFloat(amountStr) > 0) setFormulaStr(amountStr)
+                        setFormulaMode(true)
+                      }
+                    }}
+                    title={formulaMode ? 'Close formula mode' : 'Enter formula mode'}
+                    aria-pressed={formulaMode}
+                    className={[
+                      'flex h-9 w-9 shrink-0 items-center justify-center rounded-md border text-base transition-colors',
+                      formulaMode
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-border bg-background text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+                    ].join(' ')}
+                  >
+                    🧮
+                  </button>
+                )}
+
+                {/* Amount input */}
+                <div className="flex-1">
+                  <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                    {amountLabel}
+                  </label>
+                  {formulaMode ? (
+                    <div className="flex h-9 items-center rounded-md border border-border bg-muted px-3 text-sm text-muted-foreground">
+                      {amountStr || <span className="italic">enter formula above</span>}
+                    </div>
+                  ) : (
+                    <Input
+                      type="number"
+                      inputMode="decimal"
+                      step={0.01}
+                      min={0}
+                      placeholder="0.00"
+                      value={amountStr}
+                      onFocus={(e: React.FocusEvent<HTMLInputElement>) => {
+                        if (e.target.value === '0') setAmountStr('')
+                      }}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setAmountStr(e.target.value); markDirty() }}
+                    />
+                  )}
+                  {submitted && errors.amount && (
+                    <p className="mt-1 text-xs text-destructive">{errors.amount}</p>
+                  )}
+                </div>
+
+                {/* Currency pill */}
+                <SmartCurrencySelect
+                  value={currency}
+                  onChange={(c) => { setCurrency(c); markDirty() }}
+                  travelId={travelId}
+                  orderedCurrencies={orderedCurrencies}
+                  onCurrencyAdded={(code) => {
+                    const next = [...(travelCurrencies ?? []), code]
+                    updateTravelCurrencies(travelId, next).catch(console.error)
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* ── Fees (withdrawal only) ── */}
+          {!soloTransfer && fieldVisible('fees') && (
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Fees (optional)</label>
+              <Input
+                type="number"
+                inputMode="decimal"
+                step="0.01"
+                min="0"
+                placeholder="0.00"
+                value={feesStr}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setFeesStr(e.target.value); markDirty() }}
+              />
+              <p className="text-xs text-muted-foreground">
+                Deducted from wallet balance (you received amount minus fees)
+              </p>
+              {submitted && errors.fees && (
+                <p className="text-xs text-destructive">{errors.fees}</p>
               )}
             </div>
-          </div>
-
-          {/* Formula mode toggle button — sits between amount and currency */}
-          <div className="flex flex-col gap-1">
-            {/* Spacer to align button with the input (label takes up ~1.25rem) */}
-            <div className="h-5" aria-hidden />
-            <button
-              type="button"
-              onClick={() => {
-                if (formulaMode) {
-                  // Exiting formula mode: keep evaluated amount, clear formula state.
-                  // amountStr is already set to the evaluated result via onEvaluated.
-                  setFormulaMode(false)
-                  // We deliberately KEEP formulaStr in state so it's saved to Firestore
-                  // even after the bar is closed. Only clear it if amount is manually edited after.
-                } else {
-                  // Entering formula mode: pre-populate formula with current amount if set.
-                  if (amountStr && parseFloat(amountStr) > 0) {
-                    setFormulaStr(amountStr)
-                  }
-                  setFormulaMode(true)
-                }
-              }}
-              title={formulaMode ? 'Close formula mode' : 'Enter formula mode'}
-              aria-pressed={formulaMode}
-              // Highlighted (accent bg) when formula mode is active, muted when not.
-              className={[
-                'flex h-9 w-9 items-center justify-center rounded-md border text-base transition-colors',
-                formulaMode
-                  ? 'border-primary bg-primary/10 text-primary'
-                  : 'border-border bg-background text-muted-foreground hover:bg-accent hover:text-accent-foreground',
-              ].join(' ')}
-            >
-              {/* Calculator emoji — universally understood, no icon library needed */}
-              🧮
-            </button>
-          </div>
-
-          {/* Currency selector — unchanged */}
-          <div className="w-28">
-            <SmartCurrencySelect
-              value={currency}
-              onChange={setCurrency}
-              travelId={travelId}
-              orderedCurrencies={orderedCurrencies}
-              onCurrencyAdded={(code) => {
-                const next = [...(travelCurrencies ?? []), code]
-                updateTravelCurrencies(travelId, next).catch(console.error)
-              }}
-            />
-          </div>
-        </div>
-
-  {/* "Encode from ticket" — v2 placeholder */}
-  {/* This button is intentionally disabled and non-functional.       */}
-  {/* The tooltip communicates the v2 roadmap intent to the user.     */}
-  <div className="relative group w-fit">
-    <button
-      type="button"
-      disabled
-      className="flex items-center gap-1.5 rounded-md border border-dashed border-border bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground cursor-not-allowed opacity-60"
-    >
-      📷 Encode a transaction from a ticket
-    </button>
-    {/* Tooltip — appears on hover (or long-press on mobile via `title` fallback) */}
-    <div
-      role="tooltip"
-      className="pointer-events-none absolute bottom-full left-0 mb-1.5 w-52 rounded-md bg-popover px-3 py-2 text-xs text-popover-foreground shadow-md border border-border opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-10"
-    >
-      📅 Coming in v2 — snap a photo of your receipt and let the AI fill in the transaction for you.
-    </div>
-  </div>
-
-</div>
-
-      {/* Country + City — only shown when travel.settings.trackLocation is true */}
-      {trackLocation && (
-        <>
-          <SmartCountrySelect
-            value={country}
-            onChange={setCountry}
-            travelId={travelId}
-            orderedCountries={orderedCountries}
-            onCountryAdded={(name, flag) => {
-              // Persist new country to travel list (use timestamp as id — nanoid not available here)
-              const next = [...(travelCountries ?? []), { id: `country-${Date.now()}`, label: name, emoji: flag }]
-              updateTravelList(travelId, 'countries', next).catch(console.error)
-            }}
-          />
-          <LocationSelect
-            label="City"
-            value={city}
-            onChange={setCity}
-            previousValues={previousCities}
-            placeholder="— optional —"
-          />
-        </>
-      )}
-
-      {/* Category — "+ Add new…" creates a new LabeledItem in the travel list */}
-      <SmartLabeledItemSelect
-        label="Category"
-        value={category}
-        onChange={setCategory}
-        items={effectiveCategories}
-        onAddNew={(label) => {
-          // Build a new LabeledItem and persist it to the travel's categories list
-          const newItem: LabeledItem = { id: `cat-${Date.now()}`, label }
-          const updatedList = [...(travelCategories ?? []), newItem]
-          updateTravelList(travelId, 'categories', updatedList).catch(console.error)
-          // Notify parent so TravelDetailPage updates local travel state immediately
-          onCategoryAdded?.(newItem)
-        }}
-      />
-
-      {/* Payment Method — same "+ Add new…" pattern */}
-      <SmartLabeledItemSelect
-        label="Payment Method"
-        value={paymentMethod}
-        onChange={setPaymentMethod}
-        items={effectivePaymentMethods}
-        onAddNew={(label) => {
-          const newItem: LabeledItem = { id: `pm-${Date.now()}`, label }
-          const updatedList = [...(travelPaymentMethods ?? []), newItem]
-          updateTravelList(travelId, 'paymentMethods', updatedList).catch(console.error)
-          onPaymentMethodAdded?.(newItem)
-        }}
-      />
-
-      {/* Notes */}
-      <FieldWrapper label="Notes">
-        <Textarea
-          placeholder="Any additional details…"
-          maxLength={300}
-          rows={2}
-          value={notes}
-          onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setNotes(e.target.value)}
-        />
-      </FieldWrapper>
-
-      {/* Split rows — hidden entirely for solo travel (1 member) */}
-      {!isSolo && (
-        <>
-          <SplitSummaryRow
-            label="Paid by"
-            splits={paidBy}
-            members={members}
-            mode={paidByMode}
-            isValid={paidByValid}
-            currentUserTravelMemberId={myTravelMemberId}
-            onClick={() => setPaidByDrawerOpen(true)}
-          />
-          {submitted && errors.paidBy && (
-            <p className="text-xs text-destructive">{errors.paidBy}</p>
           )}
 
-          <SplitSummaryRow
-            label="Split"
-            splits={beneficiaries}
-            members={members}
-            mode={beneficiaryMode}
-            isValid={beneficiaryValid}
-            currentUserTravelMemberId={myTravelMemberId}
-            onClick={() => setBeneficiaryDrawerOpen(true)}
-          />
-          {submitted && errors.beneficiaries && (
-            <p className="text-xs text-destructive">{errors.beneficiaries}</p>
+          {/* ── Adjustment mode ── */}
+          {!soloTransfer && fieldVisible('adjustmentMode') && (
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Adjustment mode</label>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setAdjustmentMode('balance_only'); markDirty() }}
+                  className={`flex-1 rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
+                    adjustmentMode === 'balance_only'
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-input bg-background text-muted-foreground hover:bg-accent'
+                  }`}
+                >
+                  Balance only
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setAdjustmentMode('expense'); markDirty() }}
+                  className={`flex-1 rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${
+                    adjustmentMode === 'expense'
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-input bg-background text-muted-foreground hover:bg-accent'
+                  }`}
+                >
+                  Count as expense
+                </button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {adjustmentMode === 'balance_only'
+                  ? 'Only corrects the wallet balance. Does not appear in spending stats or category breakdowns.'
+                  : 'Corrects the wallet balance and counts toward spending analytics (totals, categories, charts).'}
+              </p>
+            </div>
           )}
-        </>
-      )}
 
-      {/* Actions */}
-      <div className="flex flex-col gap-2 pt-2">
-        <div className="flex gap-2">
-          <Button type="button" variant="outline" className="flex-1" onClick={onCancel}>
-            Cancel
-          </Button>
-          {/* saveFlash briefly applies destructive colours to signal invalid fields */}
-          <Button
-            type="button"
-            className={`flex-1 transition-colors ${saveFlash ? 'bg-destructive text-destructive-foreground hover:bg-destructive' : ''}`}
-            onClick={handleSave}
-          >
-            Save
-          </Button>
+          {/* ── Paid by / Split section ── */}
+          {fieldVisible('split') && (
+            <>
+              {isSolo ? (
+                /* Solo travel CTA — saves the transaction first, then navigates to Parameters */
+                <div className="rounded-lg border border-dashed border-primary/30 bg-primary/5 px-4 py-3">
+                  <p className="text-xs text-muted-foreground">
+                    👥 Share this expense with your friends? Add them to this travel.
+                  </p>
+                  {onNavigateToParameters && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        // Save first, then navigate. handleSave calls onSuccess which
+                        // closes the form; onNavigateToParameters switches to the tab.
+                        handleSave()
+                        // Only navigate if save didn't produce validation errors
+                        if (Object.keys(validate()).length === 0) {
+                          onNavigateToParameters()
+                        }
+                      }}
+                      className="mt-2 text-xs font-medium text-primary hover:underline"
+                    >
+                      Save & add friends →
+                    </button>
+                  )}
+                </div>
+              ) : txType === 'transfer' ? (
+                /* Transfer: From (single person) + To (split editor) */
+                <div className="flex flex-col gap-3">
+                  <TransferSenderPicker
+                    members={members}
+                    selectedId={transferSenderId}
+                    onChange={(id) => { setTransferSenderId(id); markDirty() }}
+                    currentUserTravelMemberId={myTravelMemberId}
+                  />
+                  <SplitSummaryRow
+                    label="To"
+                    splits={beneficiaries}
+                    members={members}
+                    mode={beneficiaryMode}
+                    isValid={beneficiaryValid}
+                    currentUserTravelMemberId={myTravelMemberId}
+                    onClick={() => setBeneficiaryDrawerOpen(true)}
+                  />
+                  {submitted && errors.beneficiaries && (
+                    <p className="text-xs text-destructive">{errors.beneficiaries}</p>
+                  )}
+                </div>
+              ) : (
+                /* Expense: standard Paid by + Split rows */
+                <div className="flex flex-col gap-2">
+                  <SplitSummaryRow
+                    label="Paid by"
+                    splits={paidBy}
+                    members={members}
+                    mode={paidByMode}
+                    isValid={paidByValid}
+                    currentUserTravelMemberId={myTravelMemberId}
+                    onClick={() => setPaidByDrawerOpen(true)}
+                  />
+                  {submitted && errors.paidBy && (
+                    <p className="text-xs text-destructive">{errors.paidBy}</p>
+                  )}
+
+                  <SplitSummaryRow
+                    label="Split"
+                    splits={beneficiaries}
+                    members={members}
+                    mode={beneficiaryMode}
+                    isValid={beneficiaryValid}
+                    currentUserTravelMemberId={myTravelMemberId}
+                    onClick={() => setBeneficiaryDrawerOpen(true)}
+                  />
+                  {submitted && errors.beneficiaries && (
+                    <p className="text-xs text-destructive">{errors.beneficiaries}</p>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* ── Optional fields in 2-column grid ── */}
+          {/* Hidden entirely when solo + transfer (only the CTA matters) */}
+
+          {/* Row 1: Country + City */}
+          {!soloTransfer &&(fieldVisible('country') || fieldVisible('city')) && (
+            <div className="grid grid-cols-2 gap-3">
+              {fieldVisible('country') && (
+                <div className={!fieldVisible('city') ? 'col-span-2' : ''}>
+                  <SmartCountrySelect
+                    value={country}
+                    onChange={(v) => { setCountry(v); markDirty() }}
+                    travelId={travelId}
+                    orderedCountries={orderedCountries}
+                    onCountryAdded={(name, flag) => {
+                      const next = [...(travelCountries ?? []), { id: `country-${Date.now()}`, label: name, emoji: flag }]
+                      updateTravelList(travelId, 'countries', next).catch(console.error)
+                    }}
+                  />
+                </div>
+              )}
+              {fieldVisible('city') && (
+                <div className={!fieldVisible('country') ? 'col-span-2' : ''}>
+                  <LocationSelect
+                    label="City"
+                    value={city}
+                    onChange={(v) => { setCity(v); markDirty() }}
+                    previousValues={previousCities}
+                    placeholder="— optional —"
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Row 2: Category + Payment Method */}
+          {!soloTransfer &&(fieldVisible('category') || fieldVisible('paymentMethod')) && (
+            <div className="grid grid-cols-2 gap-3">
+              {fieldVisible('category') && (
+                <div className={!fieldVisible('paymentMethod') ? 'col-span-2' : ''}>
+                  <SmartLabeledItemSelect
+                    label="Category"
+                    value={category}
+                    onChange={(v) => { setCategory(v); markDirty() }}
+                    items={effectiveCategories}
+                    onAddNew={(label) => {
+                      const newItem: LabeledItem = { id: `cat-${Date.now()}`, label }
+                      const updatedList = [...(travelCategories ?? []), newItem]
+                      updateTravelList(travelId, 'categories', updatedList).catch(console.error)
+                      onCategoryAdded?.(newItem)
+                    }}
+                  />
+                </div>
+              )}
+              {fieldVisible('paymentMethod') && (
+                <div className={!fieldVisible('category') ? 'col-span-2' : ''}>
+                  <SmartLabeledItemSelect
+                    label={txType === 'withdrawal' ? 'Top up' : 'Payment Method'}
+                    value={paymentMethod}
+                    onChange={(v) => { setPaymentMethod(v); markDirty() }}
+                    items={effectivePaymentMethods}
+                    required={txType === 'withdrawal' || txType === 'adjustment'}
+                    onAddNew={(label) => {
+                      const newItem: LabeledItem = { id: `pm-${Date.now()}`, label }
+                      const updatedList = [...(travelPaymentMethods ?? []), newItem]
+                      updateTravelList(travelId, 'paymentMethods', updatedList).catch(console.error)
+                      onPaymentMethodAdded?.(newItem)
+                    }}
+                  />
+                  {submitted && errors.paymentMethod && (
+                    <p className="text-xs text-destructive">{errors.paymentMethod}</p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Notes (full width) ── */}
+          {!soloTransfer &&fieldVisible('notes') && (
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-muted-foreground">Notes</label>
+              <Textarea
+                placeholder="Any additional details…"
+                maxLength={300}
+                rows={2}
+                value={notes}
+                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => { setNotes(e.target.value); markDirty() }}
+              />
+            </div>
+          )}
+
+          {/* After-save error summary */}
+          {submitted && Object.keys(errors).length > 0 && (
+            <p className="text-center text-xs text-destructive">
+              {'Please fix: ' + Object.keys(errors).map((k) =>
+                ({
+                  date: 'Date', name: 'Name', amount: 'Amount',
+                  paidBy: 'Paid by', beneficiaries: 'Split',
+                  paymentMethod: 'Payment method', fees: 'Fees',
+                } as Record<string, string>)[k] ?? k
+              ).join(', ')}
+            </p>
+          )}
+
+          {/* Bottom action bar — duplicates top Save for easy thumb reach */}
+          {!soloTransfer && (
+            <div className="flex flex-col gap-2 pt-2">
+              <div className="flex gap-2">
+                <Button type="button" variant="outline" className="flex-1" onClick={handleClose}>
+                  Close
+                </Button>
+                <Button
+                  type="button"
+                  className={`flex-1 transition-colors ${saveFlash ? 'bg-destructive text-destructive-foreground hover:bg-destructive' : ''}`}
+                  onClick={handleSave}
+                >
+                  Save
+                </Button>
+              </div>
+              {/* Delete button — only in edit mode */}
+              {isEdit && onDelete && (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  className="w-full"
+                  onClick={() => onDelete(initialValues!.txId)}
+                >
+                  Delete
+                </Button>
+              )}
+            </div>
+          )}
+
         </div>
-        {/* After a failed save attempt, list which fields need attention */}
-        {submitted && Object.keys(errors).length > 0 && (
-          <p className="text-center text-xs text-destructive">
-            {'Please fix: ' + Object.keys(errors).map((k) =>
-              ({ date: 'Date', name: 'Name', amount: 'Amount', paidBy: 'Paid by', beneficiaries: 'Split' } as Record<string, string>)[k] ?? k
-            ).join(', ')}
-          </p>
-        )}
       </div>
 
-      {/* Paid By bottom sheet */}
+      {/* ── Paid By drawer (expense only, multi-user) ── */}
       <Drawer open={paidByDrawerOpen} onOpenChange={setPaidByDrawerOpen}>
         <DrawerContent>
           <DrawerHeader>
@@ -1179,22 +1431,18 @@ export function TransactionForm({
             label="Paid by"
           />
           <div className="px-4 pb-6 pt-2">
-            <Button
-              type="button"
-              className="w-full"
-              onClick={() => setPaidByDrawerOpen(false)}
-            >
+            <Button type="button" className="w-full" onClick={() => setPaidByDrawerOpen(false)}>
               Done
             </Button>
           </div>
         </DrawerContent>
       </Drawer>
 
-      {/* Beneficiaries bottom sheet */}
+      {/* ── Beneficiaries drawer (expense + transfer, multi-user) ── */}
       <Drawer open={beneficiaryDrawerOpen} onOpenChange={setBeneficiaryDrawerOpen}>
         <DrawerContent>
           <DrawerHeader>
-            <DrawerTitle>Split between</DrawerTitle>
+            <DrawerTitle>{txType === 'transfer' ? 'Transfer to' : 'Split between'}</DrawerTitle>
           </DrawerHeader>
           <SplitEditor
             members={members}
@@ -1203,19 +1451,35 @@ export function TransactionForm({
             onChange={setBeneficiaries}
             mode={beneficiaryMode}
             onModeChange={setBeneficiaryMode}
-            label="Split between"
+            label={txType === 'transfer' ? 'Transfer to' : 'Split between'}
           />
           <div className="px-4 pb-6 pt-2">
-            <Button
-              type="button"
-              className="w-full"
-              onClick={() => setBeneficiaryDrawerOpen(false)}
-            >
+            <Button type="button" className="w-full" onClick={() => setBeneficiaryDrawerOpen(false)}>
               Done
             </Button>
           </div>
         </DrawerContent>
       </Drawer>
+
+      {/* ── Close confirmation dialog ── */}
+      <AlertDialog open={closeDialogOpen} onOpenChange={setCloseDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{isEdit ? 'Discard changes?' : 'Discard transaction?'}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {isEdit
+                ? 'The changes are not saved and will be lost.'
+                : 'The transaction is not saved and will be lost.'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={onCancel} className="bg-destructive text-white hover:bg-destructive/90">
+              Discard
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
     </div>
   )
