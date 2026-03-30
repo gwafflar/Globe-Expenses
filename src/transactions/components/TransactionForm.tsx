@@ -568,6 +568,8 @@ interface TransactionFormProps {
   travelCategories?: LabeledItem[]
   travelPaymentMethods?: LabeledItem[]
   travelCurrencies?: string[]
+  // The travel's reference currency for exchange rate computation.
+  mainCurrency: string
   travelCountries?: LabeledItem[]
   travelCities?: LabeledItem[]
   existingTransactions: TransactionWithStatus[]
@@ -596,6 +598,7 @@ export function TransactionForm({
   travelCategories,
   travelPaymentMethods,
   travelCurrencies,
+  mainCurrency,
   travelCountries,
   travelCities,
   existingTransactions,
@@ -657,7 +660,8 @@ export function TransactionForm({
       : userProfile.paymentMethods
 
   // --- Currency list ---
-  const lastUsedCurrency = existingTransactions[0]?.currency ?? userProfile.mainCurrency
+  // Default currency for new transactions — most recent transaction's currency, or the travel's main.
+  const lastUsedCurrency = existingTransactions[0]?.currency ?? mainCurrency
 
   const orderedCurrencies = useMemo(() => {
     const travelSet = new Set(travelCurrencies ?? [])
@@ -894,7 +898,8 @@ export function TransactionForm({
     const profile = userProfile!
 
     const total = parseFloat(amountStr)
-    const exchangeRate = getExchangeRate(currency, profile.mainCurrency)
+    // Exchange rate computed against the travel's mainCurrency (not the user's personal preference).
+    const exchangeRate = getExchangeRate(currency, mainCurrency)
     const totalAmountMain = Math.round(total * exchangeRate * 100) / 100
 
     // Auto-generate name for withdrawal/adjustment if blank

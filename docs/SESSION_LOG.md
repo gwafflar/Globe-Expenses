@@ -1635,3 +1635,90 @@ WithdrawalForm.tsx deleted. All withdrawal behavior (fees field, auto-name, requ
 - [ ] PWA icons
 - [ ] Display Mode in Transactions tab
 - [ ] Move composite indexes to `firestore.indexes.json`
+
+---
+
+## 📝 Working Session 016.1 — 30 March 2026
+
+**Type**: Architecture refactor
+**Tools used**: Claude Code (CLI)
+
+### Summary
+
+Moved `mainCurrency` from per-user (`UserProfile.mainCurrency`) to per-travel (`Travel.mainCurrency`). Previously, each user's transactions computed `exchangeRate` and `totalAmountMain` against their own personal mainCurrency, creating inconsistent balances in multi-user travels. Now every transaction in a travel uses the same reference currency.
+
+### Problem
+
+- `mainCurrency` lived in `UserProfile` — in a shared travel, two users with different mainCurrency settings would store different `exchangeRate`/`totalAmountMain` values for the same transaction, making balances and analytics inconsistent.
+- `DashboardTab` and sheet export already used `travel.currencies[0]` as a separate fallback, creating a second inconsistency with the rest of the app.
+
+### Solution: per-travel mainCurrency
+
+- **New field**: `Travel.mainCurrency?: string` (ISO 4217). Optional for backward compat with legacy docs.
+- **Set at creation**: `CreateTravelModal` now has a currency dropdown (full `ALL_CURRENCIES` list from `pickerData.ts`), defaulting to the user's `UserProfile.mainCurrency`.
+- **Locked after creation**: ParametersTab shows mainCurrency as read-only with "set at creation — cannot be modified" badge. Editable + batch recomputation of all transactions is deferred to v2.
+- **Canonical reader**: `getTravelMainCurrency(travel)` helper in `travels/types.ts` — returns `travel.mainCurrency ?? travel.currencies[0] ?? 'EUR'`. All consumers use this.
+- **UserProfile.mainCurrency retained** — only used as the default when creating new travels.
+
+### Data flow change
+
+```
+BEFORE:  TravelDetailPage → userProfile.mainCurrency → all tabs + form
+AFTER:   TravelDetailPage → getTravelMainCurrency(travel) → all tabs + form
+```
+
+All downstream consumers (TransactionForm, ReconciliationDialog, DashboardTab, BalanceTab, TransactionsTab, sheet export/import) now receive `mainCurrency` from the travel, not from the user profile.
+
+### Currency architecture (current state for future reference)
+
+- **Exchange rates are hardcoded** in `exchangeRates.ts`: `EXCHANGE_RATES` maps 15 currencies to EUR (e.g. `USD: 0.92` means 1 USD = 0.92 EUR). EUR is the internal pivot.
+- **`getExchangeRate(from, to)`** cross-rates via EUR: `EXCHANGE_RATES[from] / EXCHANGE_RATES[to]`. Returns `1.0` for unknown currencies (safe fallback).
+- **`SUPPORTED_CURRENCIES`** (15 codes) = keys of `EXCHANGE_RATES`. Used only for currencies with known rates.
+- **`ALL_CURRENCIES`** (180+ entries) in `pickerData.ts` = `[code, symbol, name]` tuples. Used for UI pickers.
+- **Per-transaction storage**: `currency` (ISO 4217), `exchangeRate` (rate from tx currency → travel mainCurrency), `totalAmountMain` (pre-computed `totalAmount × exchangeRate`).
+- **Balance/analytics use `split.amount × tx.exchangeRate`** (recomputed from splits, not `totalAmountMain`) — this ensures per-member attribution is correct.
+- **Wallet tracking** uses raw amounts per-currency (no conversion).
+- **Settlement currency** is a separate display-only conversion in BalanceTab (user picks currency + rate at view time).
+
+### v2 considerations for currency refactor
+
+- **Editable mainCurrency**: when changed, batch-recompute `exchangeRate` + `totalAmountMain` for all transactions in the travel. Hardcoded rates make this deterministic/idempotent. Needs confirmation dialog + loading state. Firestore `writeBatch` with 500-op batching (same pattern as `deleteTravel`).
+- **Live exchange rates**: replace `EXCHANGE_RATES` with an API. Would need rate-at-date storage (historical rates per transaction) and a migration from hardcoded to live.
+- **ProfilePage currency picker**: the "coming soon" placeholder in Preferences section is still present. Could be wired to `updateUserProfile(uid, { mainCurrency })` — only affects default for new travel creation.
+
+### Files modified
+
+| File | Changes |
+|------|---------|
+| `src/travels/types.ts` | Added `mainCurrency?: string` to `Travel`, added `getTravelMainCurrency()` helper |
+| `src/travels/services/travelService.ts` | Added `mainCurrency` to `CreateTravelInput` + `createTravel()`, seeds `currencies: [mainCurrency]` |
+| `src/travels/components/CreateTravelModal.tsx` | Added currency dropdown (full `ALL_CURRENCIES` list), new `defaultMainCurrency` prop |
+| `src/travels/pages/TravelsPage.tsx` | Pass `defaultMainCurrency` to `CreateTravelModal` |
+| `src/travels/pages/TravelDetailPage.tsx` | Switched mainCurrency from `userProfile` to `getTravelMainCurrency(travel)`, reads field from Firestore, passes to `TransactionForm` |
+| `src/travels/components/TravelTabs.tsx` | Pass `mainCurrency` to `DashboardTab` |
+| `src/travels/components/tabs/DashboardTab.tsx` | Accept `mainCurrency` prop, removed local `travel.currencies[0]` computation, pass to `ReconciliationDialog` |
+| `src/transactions/components/TransactionForm.tsx` | Accept `mainCurrency` prop, use for exchange rate computation + default currency |
+| `src/transactions/components/ReconciliationDialog.tsx` | Accept `mainCurrency` prop instead of `userProfile.mainCurrency` |
+| `src/travels/components/tabs/ParametersTab.tsx` | Read-only mainCurrency display + CurrencyPicker guard (main currency cannot be unchecked) |
+| `src/shared/utils/sheetExport.ts` | Use `getTravelMainCurrency(travel)` |
+| `src/shared/components/ImportXlsxDialog.tsx` | Use `getTravelMainCurrency(travel)` |
+
+### Decisions made (binding)
+
+| # | Decision | Notes |
+|---|----------|-------|
+| 1 | mainCurrency is per-travel, not per-user | Ensures consistent exchange rates across all members |
+| 2 | Locked after creation (v1) | Editable + batch recomputation deferred to v2 |
+| 3 | UserProfile.mainCurrency retained | Used as default when creating new travels |
+| 4 | getTravelMainCurrency() is canonical reader | Fallback chain: mainCurrency → currencies[0] → 'EUR' |
+| 5 | CurrencyPicker guards mainCurrency | Cannot uncheck the main currency from travel's currency list |
+
+### Carry-forward items (open)
+
+- [ ] **Editable mainCurrency (v2)** — batch recompute all transactions when changed
+- [ ] **ProfilePage currency picker** — wire the "coming soon" placeholder to `updateUserProfile`
+- [ ] **Live exchange rates (v2)** — replace hardcoded rates, store historical rate per transaction
+- [ ] Per-travel field customization
+- [ ] Cloud Function `onTravelDeleted` (v2)
+- [ ] PWA icons
+- [ ] Display Mode in Transactions tab

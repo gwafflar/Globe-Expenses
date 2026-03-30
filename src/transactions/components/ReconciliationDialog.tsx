@@ -34,6 +34,8 @@ interface ReconciliationDialogProps {
   travelId: string
   balance: WalletBalance
   currentTravelMemberId: string
+  // The travel's reference currency for exchange rate computation.
+  mainCurrency: string
   onSuccess: (txId: string) => void
 }
 
@@ -63,6 +65,7 @@ export function ReconciliationDialog({
   travelId,
   balance,
   currentTravelMemberId,
+  mainCurrency,
   onSuccess,
 }: ReconciliationDialogProps) {
   const { currentUser, userProfile } = useAuthStore()
@@ -80,7 +83,7 @@ export function ReconciliationDialog({
     if (!currentUser || !userProfile || !hasValidInput || !hasDiff) return
     setSaving(true)
 
-    const exchangeRate = getExchangeRate(balance.currency, userProfile.mainCurrency)
+    const exchangeRate = getExchangeRate(balance.currency, mainCurrency)
     // The adjustment amount is the absolute difference.
     // The sign convention: positive diff means user has MORE than expected (wallet gains),
     // negative diff means user has LESS (wallet loses / missing money).

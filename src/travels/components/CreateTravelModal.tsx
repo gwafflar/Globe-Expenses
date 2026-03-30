@@ -7,12 +7,15 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { ALL_CURRENCIES } from '@/shared/data/pickerData'
 
 interface CreateTravelModalProps {
   isOpen: boolean
   onClose: () => void
   uid: string
   displayName: string
+  // The user's preferred currency — pre-fills the main currency picker.
+  defaultMainCurrency: string
   // Called with the new travel's Firestore doc ID after successful creation.
   onCreated?: (travelId: string) => void
 }
@@ -22,11 +25,14 @@ export function CreateTravelModal({
   onClose,
   uid,
   displayName,
+  defaultMainCurrency,
   onCreated,
 }: CreateTravelModalProps) {
   const [name, setName] = useState<string>('')
   const [emoji, setEmoji] = useState<string>('')
   const [description, setDescription] = useState<string>('')
+  // Main currency for the travel — locked after creation (editable in v2).
+  const [mainCurrency, setMainCurrency] = useState<string>(defaultMainCurrency)
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
@@ -54,6 +60,7 @@ export function CreateTravelModal({
         name,
         emoji,
         description,
+        mainCurrency,
       })
 
       onClose()
@@ -65,6 +72,7 @@ export function CreateTravelModal({
       setName('')
       setEmoji('')
       setDescription('')
+      setMainCurrency(defaultMainCurrency)
     } catch (error) {
       // Log the raw error to the console so we can see the underlying
       // Firebase / network error details during development.
@@ -112,6 +120,25 @@ export function CreateTravelModal({
                 value={emoji}
                 onChange={(event) => setEmoji(event.target.value)}
               />
+            </div>
+
+            {/* Main currency — the reference currency for all exchange rate conversions.
+                Locked after creation (editable + batch recompute is v2). */}
+            <div className="space-y-2">
+              <Label htmlFor="travel-currency">Main currency</Label>
+              <select
+                id="travel-currency"
+                value={mainCurrency}
+                onChange={(e) => setMainCurrency(e.target.value)}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              >
+                {ALL_CURRENCIES.map(([code, symbol, name]) => (
+                  <option key={code} value={code}>{code} ({symbol}) — {name}</option>
+                ))}
+              </select>
+              <p className="text-xs text-muted-foreground">
+                All amounts will be converted to this currency. Cannot be changed after creation.
+              </p>
             </div>
 
             <div className="space-y-2">

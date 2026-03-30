@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { nanoid } from 'nanoid'
 import type { LabeledItem, Travel, TravelMember } from '@/travels/types'
+import { getTravelMainCurrency } from '@/travels/types'
 import {
   updateTravelCurrencies,
   updateTravelList,
@@ -87,9 +88,12 @@ function CollapsiblePicker({
 function CurrencyPicker({
   selected,
   onChange,
+  lockedCurrency,
 }: {
   selected: string[]
   onChange: (codes: string[]) => void
+  // The travel's mainCurrency — always checked, cannot be unchecked.
+  lockedCurrency?: string
 }) {
   const [search, setSearch] = useState('')
 
@@ -99,6 +103,8 @@ function CurrencyPicker({
   })
 
   function toggle(code: string) {
+    // Prevent unchecking the locked (main) currency
+    if (code === lockedCurrency && selected.includes(code)) return
     onChange(selected.includes(code) ? selected.filter((c) => c !== code) : [...selected, code])
   }
 
@@ -123,18 +129,21 @@ function CurrencyPicker({
           )}
           {filtered.map(([code, symbol, name]) => {
             const checked = selected.includes(code)
+            const isLocked = code === lockedCurrency
             return (
               <button
                 key={code}
                 type="button"
                 onClick={() => toggle(code)}
-                className={`flex items-center gap-3 rounded px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent/40 ${checked ? 'bg-accent/20' : ''}`}
+                disabled={isLocked}
+                className={`flex items-center gap-3 rounded px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent/40 ${checked ? 'bg-accent/20' : ''} ${isLocked ? 'opacity-60 cursor-not-allowed' : ''}`}
               >
                 <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px] ${checked ? 'border-primary bg-primary text-primary-foreground' : 'border-input'}`}>
                   {checked && '✓'}
                 </span>
                 <span className="min-w-0">
                   <span className="font-medium">{code}</span>
+                  {isLocked && <span className="ml-1 text-xs text-muted-foreground">(main)</span>}
                   <span className="ml-1 text-muted-foreground">({symbol})</span>
                   <span className="ml-1 text-muted-foreground">— {name}</span>
                 </span>
@@ -965,7 +974,28 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
 
       {/* Currencies */}
       <Section title="Currencies">
-        <CurrencyPicker selected={travel.currencies ?? []} onChange={handleCurrenciesChange} />
+        {/* Read-only main currency display — locked after creation (editable + recompute is v2). */}
+        {(() => {
+          const mc = getTravelMainCurrency(travel)
+          const match = ALL_CURRENCIES.find(([code]) => code === mc)
+          const label = match ? `${mc} (${match[1]}) — ${match[2]}` : mc
+          return (
+            <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-3 py-2">
+              <div>
+                <p className="text-sm font-medium">Main currency</p>
+                <p className="text-xs text-muted-foreground">{label}</p>
+              </div>
+              <span className="rounded-full border px-2 py-0.5 text-[10px] text-muted-foreground">
+                set at creation — cannot be modified
+              </span>
+            </div>
+          )
+        })()}
+        <CurrencyPicker
+          selected={travel.currencies ?? []}
+          onChange={handleCurrenciesChange}
+          lockedCurrency={getTravelMainCurrency(travel)}
+        />
       </Section>
 
       {/* Categories */}

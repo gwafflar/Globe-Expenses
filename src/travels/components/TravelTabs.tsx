@@ -197,6 +197,7 @@ export function TravelTabs({
                   transactions={transactions}
                   currentUserUid={currentUserUid}
                   isSolo={isSolo}
+                  mainCurrency={mainCurrency}
                   onEditTransaction={onEditTransaction}
                   onAddWithdrawal={onAddWithdrawal}
                 />

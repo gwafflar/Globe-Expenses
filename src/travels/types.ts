@@ -65,6 +65,10 @@ export interface Travel {
   createdBy: string
   createdAt: Timestamp
   currencies: string[]
+  // The reference currency for exchange rate conversions in this travel.
+  // All transactions compute exchangeRate and totalAmountMain relative to this currency.
+  // Absent on legacy docs — resolved via getTravelMainCurrency().
+  mainCurrency?: string  // ISO 4217
   settings?: TravelSettings
 
   // Per-travel lists (v1 extension).
@@ -79,4 +83,16 @@ export interface Travel {
   // Per-user archive: UIDs of members who have archived this travel.
   // Absent on older documents — read as [].
   archivedByUids: string[]
+}
+
+// ---------------------------------------------------------------------------
+// getTravelMainCurrency — resolves the effective main currency for a travel.
+//
+// Handles legacy documents that lack the mainCurrency field by falling back
+// to the first entry in currencies[], then to 'EUR' as a last resort.
+// Every consumer should call this instead of reading travel.mainCurrency directly.
+// ---------------------------------------------------------------------------
+
+export function getTravelMainCurrency(travel: Travel): string {
+  return travel.mainCurrency ?? travel.currencies[0] ?? 'EUR'
 }

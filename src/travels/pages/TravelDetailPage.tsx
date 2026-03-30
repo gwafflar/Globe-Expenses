@@ -10,7 +10,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { doc, getDoc } from 'firebase/firestore'
 import { db } from '@/services/firebase'
 import type { LabeledItem, Travel } from '@/travels/types'
-import { normaliseMember } from '@/travels/types'
+import { normaliseMember, getTravelMainCurrency } from '@/travels/types'
 import { useAuthStore } from '@/auth/store/useAuthStore'
 import { usePendingInvites } from '@/friends/hooks/usePendingInvites'
 import { ChevronLeft } from 'lucide-react'
@@ -151,9 +151,9 @@ export function TravelDetailPage() {
   // Holds the txId the user wants to delete — non-null opens the confirmation dialog
   const [deletingTxId, setDeletingTxId] = useState<string | null>(null)
 
-  // Settlement currency: allows settlements to be displayed in a different currency
-  // than mainCurrency. Rate means: 1 mainCurrency = settlementRate settlementCurrency.
-  const mainCurrency = userProfile?.mainCurrency ?? 'EUR'
+  // mainCurrency is now per-travel, not per-user.
+  // getTravelMainCurrency handles legacy docs that lack the field.
+  const mainCurrency = travel ? getTravelMainCurrency(travel) : 'EUR'
   const [settlementCurrency, setSettlementCurrency] = useState<string>(mainCurrency)
   const [settlementRate, setSettlementRate] = useState<number>(1)
 
@@ -202,6 +202,7 @@ export function TravelDetailPage() {
             createdBy: d.createdBy as string,
             createdAt: d.createdAt,
             currencies: d.currencies ?? [],
+            mainCurrency: d.mainCurrency as string | undefined,
             settings: d.settings,
             categories: d.categories ?? [],
             paymentMethods: d.paymentMethods ?? [],
@@ -485,6 +486,7 @@ export function TravelDetailPage() {
           travelCategories={travel.categories}
           travelPaymentMethods={travel.paymentMethods}
           travelCurrencies={travel.currencies}
+          mainCurrency={mainCurrency}
           travelCountries={travel.countries}
           travelCities={travel.cities}
           existingTransactions={transactions}

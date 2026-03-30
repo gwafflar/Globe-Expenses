@@ -54,6 +54,7 @@ interface DashboardTabProps {
   transactions: TransactionWithStatus[]
   currentUserUid: string
   isSolo: boolean
+  mainCurrency: string
   onEditTransaction: (txId: string) => void
   onAddWithdrawal?: () => void
 }
@@ -99,12 +100,10 @@ export function DashboardTab({
   transactions,
   currentUserUid,
   isSolo,
+  mainCurrency,
   onEditTransaction,
   onAddWithdrawal,
 }: DashboardTabProps) {
-  // The main currency for this travel — first in the currencies array.
-  const mainCurrency = travel.currencies[0] ?? 'EUR'
-
   // ---------------------------------------------------------------------------
   // State
   // ---------------------------------------------------------------------------
@@ -2002,6 +2001,7 @@ export function DashboardTab({
           travelId={travel.travelId}
           balance={reconcileBalance}
           currentTravelMemberId={currentTravelMemberId}
+          mainCurrency={mainCurrency}
           onSuccess={() => setReconcileBalance(null)}
         />
       )}

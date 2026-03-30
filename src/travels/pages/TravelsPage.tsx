@@ -222,6 +222,7 @@ export function TravelsPage() {
           isOpen={isCreateModalOpen}
           onClose={() => setIsCreateModalOpen(false)}
           uid={userId}
+          defaultMainCurrency={userProfile?.mainCurrency ?? 'EUR'}
           onCreated={(travelId) => navigate(`/travels/${travelId}`)}
           displayName={
             currentUser?.displayName && currentUser.displayName.trim() !== ''

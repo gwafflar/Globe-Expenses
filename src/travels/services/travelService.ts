@@ -49,10 +49,11 @@ interface CreateTravelInput {
   name: string
   emoji?: string
   description?: string
+  mainCurrency: string  // ISO 4217 — the reference currency for all exchange rate conversions
 }
 
 export async function createTravel(input: CreateTravelInput): Promise<string> {
-  const { uid, displayName, name, emoji, description } = input
+  const { uid, displayName, name, emoji, description, mainCurrency } = input
 
   const travelsRef = collection(db, 'travels')
 
@@ -72,7 +73,8 @@ export async function createTravel(input: CreateTravelInput): Promise<string> {
     memberUids: [uid],
     createdBy: uid,
     createdAt: serverTimestamp(),
-    currencies: [],
+    currencies: [mainCurrency],  // seed with main currency so it appears in dropdowns
+    mainCurrency,
     // Per-travel lists initialised empty
     categories: [],
     paymentMethods: [],

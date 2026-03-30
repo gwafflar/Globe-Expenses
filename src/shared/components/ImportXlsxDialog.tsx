@@ -10,6 +10,7 @@ import { useCallback, useMemo, useRef, useState } from 'react'
 import { arrayUnion, doc, updateDoc } from 'firebase/firestore'
 import { db } from '@/services/firebase'
 import type { Travel, LabeledItem } from '@/travels/types'
+import { getTravelMainCurrency } from '@/travels/types'
 import type { ParsedSheetRow } from '@/shared/utils/sheetImport'
 import { CollapsibleCard } from '@/travels/components/CollapsibleCard'
 import { getFlagForCountry } from '@/shared/data/pickerData'
@@ -503,7 +504,7 @@ export function ImportXlsxDialog({
     setIsImporting(true)
     setStep('result')
 
-    const mainCurrency = travel.currencies[0] ?? 'EUR'
+    const mainCurrency = getTravelMainCurrency(travel)
     const result = await importParsedRows(
       travel.travelId,
       parseResult.rows,

@@ -15,6 +15,7 @@ import XLSXStyleRaw from 'xlsx-js-style'
 import type * as XLSXTypes from 'xlsx'
 const XLSXStyle = XLSXStyleRaw as unknown as typeof XLSXTypes
 import type { Travel, TravelMember } from '@/travels/types'
+import { getTravelMainCurrency } from '@/travels/types'
 import type { Transaction } from '@/transactions/types'
 import { EXCHANGE_RATES } from '@/shared/utils/exchangeRates'
 import { buildColumnMap, colLetter } from '@/shared/utils/sheetColumns'
@@ -621,7 +622,7 @@ export async function exportTravelToXlsx(
   transactions: Transaction[],
 ): Promise<void> {
   const N            = Math.max(1, travel.members.length)
-  const mainCurrency = travel.currencies[0] ?? 'EUR'
+  const mainCurrency = getTravelMainCurrency(travel)
   const numCurrencies  = Object.keys(EXCHANGE_RATES).length
   const ratesDataStart = N + 8
   const ratesDataEnd   = ratesDataStart + numCurrencies - 1
