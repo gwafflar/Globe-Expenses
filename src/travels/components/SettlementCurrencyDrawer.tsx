@@ -24,6 +24,8 @@ interface SettlementCurrencyDrawerProps {
   currentCurrency: string
   currentRate: number
   onApply: (currency: string, rate: number) => void
+  /** Per-travel default exchange rates. Used to pre-fill rates for known currencies. */
+  defaultRates?: Record<string, number>
 }
 
 export function SettlementCurrencyDrawer({
@@ -33,6 +35,7 @@ export function SettlementCurrencyDrawer({
   currentCurrency,
   currentRate,
   onApply,
+  defaultRates,
 }: SettlementCurrencyDrawerProps) {
   const [selectedCurrency, setSelectedCurrency] = useState(currentCurrency)
   const [rateInput, setRateInput] = useState(currentRate.toString())
@@ -52,8 +55,12 @@ export function SettlementCurrencyDrawer({
     if (code === mainCurrency) {
       setRateInput('1')
     } else {
-      // getExchangeRate(from, to) returns: 1 from = X to
-      const rate = getExchangeRate(mainCurrency, code)
+      // For settlement we need: 1 mainCurrency = X code.
+      // defaultRates stores: 1 code = X mainCurrency. So we invert it.
+      const storedRate = defaultRates?.[code]
+      const rate = storedRate !== undefined && storedRate > 0
+        ? parseFloat((1 / storedRate).toPrecision(6))
+        : getExchangeRate(mainCurrency, code)
       // If rate is 1 and it's not the same currency, the pair is unknown → force manual entry
       if (rate === 1) {
         setRateInput('')

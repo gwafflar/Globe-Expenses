@@ -69,6 +69,10 @@ export interface Travel {
   // All transactions compute exchangeRate and totalAmountMain relative to this currency.
   // Absent on legacy docs — resolved via getTravelMainCurrency().
   mainCurrency?: string  // ISO 4217
+  // Per-travel exchange rates: { "USD": 0.92, "MYR": 0.20 } means 1 USD = 0.92 mainCurrency.
+  // Seeded from hardcoded defaults at travel creation. User-editable in ParametersTab.
+  // Absent on legacy docs — consumers fall back to hardcoded EXCHANGE_RATES.
+  defaultRates?: Record<string, number>
   settings?: TravelSettings
 
   // Per-travel lists (v1 extension).

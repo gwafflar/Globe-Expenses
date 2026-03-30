@@ -2002,6 +2002,7 @@ export function DashboardTab({
           balance={reconcileBalance}
           currentTravelMemberId={currentTravelMemberId}
           mainCurrency={mainCurrency}
+          defaultRates={travel.defaultRates}
           onSuccess={() => setReconcileBalance(null)}
         />
       )}

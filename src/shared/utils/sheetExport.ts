@@ -231,11 +231,23 @@ function buildParamsSheet(travel: Travel, mainCurrency: string, N: number): WS {
   str(ws, 1, ratesHeaderRow, 'Currency',                hdrDark(C.NAVY))
   str(ws, 2, ratesHeaderRow, 'Rate (units per main ccy)', hdrDark(C.NAVY))
 
+  // Build the rate table from travel.defaultRates (if available), falling back to hardcoded.
+  // Include all currencies from defaultRates + hardcoded EXCHANGE_RATES.
+  const travelRates = travel.defaultRates ?? {}
   const rateMainEur = EXCHANGE_RATES[mainCurrency] ?? 1
-  const sortedCurrencies = Object.keys(EXCHANGE_RATES).sort()
+  const allCurrencyCodes = new Set([...Object.keys(EXCHANGE_RATES), ...Object.keys(travelRates)])
+  const sortedCurrencies = Array.from(allCurrencyCodes).sort()
   sortedCurrencies.forEach((code, i) => {
     const row  = ratesDataStart + i
-    const rate = code === mainCurrency ? 1 : rateMainEur / (EXCHANGE_RATES[code] ?? 1)
+    // Prefer travel-specific rate, then derive from hardcoded table
+    let rate: number
+    if (code === mainCurrency) {
+      rate = 1
+    } else if (travelRates[code] !== undefined) {
+      rate = travelRates[code]
+    } else {
+      rate = rateMainEur / (EXCHANGE_RATES[code] ?? 1)
+    }
     str(ws, 1, row, code,  labelCell())
     num(ws, 2, row, rate,  dataCell())
   })
@@ -623,7 +635,8 @@ export async function exportTravelToXlsx(
 ): Promise<void> {
   const N            = Math.max(1, travel.members.length)
   const mainCurrency = getTravelMainCurrency(travel)
-  const numCurrencies  = Object.keys(EXCHANGE_RATES).length
+  const allCodes = new Set([...Object.keys(EXCHANGE_RATES), ...Object.keys(travel.defaultRates ?? {})])
+  const numCurrencies = allCodes.size
   const ratesDataStart = N + 8
   const ratesDataEnd   = ratesDataStart + numCurrencies - 1
 

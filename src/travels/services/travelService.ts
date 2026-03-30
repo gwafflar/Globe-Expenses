@@ -18,6 +18,7 @@ import { nanoid } from 'nanoid'
 import { db } from '@/services/firebase'
 import type { LabeledItem, TravelMember, TravelSettings } from '@/travels/types'
 import { getFlagForCountry } from '@/shared/data/pickerData'
+import { buildDefaultRates } from '@/shared/utils/exchangeRates'
 
 // ---------------------------------------------------------------------------
 // serialiseMember — strips undefined field values before writing to Firestore.
@@ -75,6 +76,8 @@ export async function createTravel(input: CreateTravelInput): Promise<string> {
     createdAt: serverTimestamp(),
     currencies: [mainCurrency],  // seed with main currency so it appears in dropdowns
     mainCurrency,
+    // Seed exchange rates from hardcoded defaults, relative to mainCurrency.
+    defaultRates: buildDefaultRates(mainCurrency),
     // Per-travel lists initialised empty
     categories: [],
     paymentMethods: [],
@@ -129,6 +132,20 @@ export async function updateTravelCurrencies(
 ): Promise<void> {
   const ref = doc(db, 'travels', travelId)
   await updateDoc(ref, { currencies })
+}
+
+// ---------------------------------------------------------------------------
+// Update a single default exchange rate for a currency.
+// Uses dot-notation to update a single key without overwriting the whole map.
+// ---------------------------------------------------------------------------
+
+export async function updateTravelDefaultRate(
+  travelId: string,
+  currencyCode: string,
+  rate: number,
+): Promise<void> {
+  const ref = doc(db, 'travels', travelId)
+  await updateDoc(ref, { [`defaultRates.${currencyCode}`]: rate })
 }
 
 export async function updateTravelList(

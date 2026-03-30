@@ -100,6 +100,62 @@ export function computeBalances(
 }
 
 // ---------------------------------------------------------------------------
+// computeBalancesRaw — same as computeBalances but ignores exchangeRate.
+//
+// Use this when all balance-affecting transactions share a single currency
+// AND the settlement is displayed in that same currency. By skipping the
+// conversion to mainCurrency and back, we avoid lossy round-trip distortion
+// (e.g. MYR → EUR → MYR with slightly different rates).
+// ---------------------------------------------------------------------------
+
+export function computeBalancesRaw(
+  transactions: Transaction[],
+  members: TravelMember[],
+): MemberBalance[] {
+  const netMap = new Map<string, number>()
+  for (const m of members) {
+    netMap.set(m.travelMemberId, 0)
+  }
+
+  for (const tx of transactions) {
+    // Use raw split amounts — no exchange rate multiplication
+    for (const split of tx.paidBy) {
+      const prev = netMap.get(split.travelMemberId) ?? 0
+      netMap.set(split.travelMemberId, prev + split.amount)
+    }
+    for (const split of tx.beneficiaries) {
+      const prev = netMap.get(split.travelMemberId) ?? 0
+      netMap.set(split.travelMemberId, prev - split.amount)
+    }
+  }
+
+  const nameMap = new Map<string, string>()
+  for (const m of members) {
+    nameMap.set(m.travelMemberId, m.displayName)
+  }
+
+  const balances: MemberBalance[] = []
+  for (const [id, raw] of netMap) {
+    balances.push({
+      memberId: id,
+      displayName: nameMap.get(id) ?? id,
+      net: round2(raw),
+    })
+  }
+  return balances
+}
+
+/**
+ * Detects whether all transactions use the same currency.
+ * Returns the common currency code, or null if mixed.
+ */
+export function getSingleCurrency(transactions: Transaction[]): string | null {
+  if (transactions.length === 0) return null
+  const first = transactions[0].currency
+  return transactions.every((tx) => tx.currency === first) ? first : null
+}
+
+// ---------------------------------------------------------------------------
 // computeSettlements
 // ---------------------------------------------------------------------------
 

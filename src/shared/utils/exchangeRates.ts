@@ -28,21 +28,32 @@ export const SUPPORTED_CURRENCIES: string[] = Array.from(Object.keys(EXCHANGE_RA
 /**
  * Returns the exchange rate to convert 1 unit of `currency` into `mainCurrency`.
  *
- * Cross-rate derivation:
- *   Both rates are stored as "X EUR per 1 unit".
- *   So:  currency → EUR  =  EXCHANGE_RATES[currency]
- *        EUR → mainCurrency  =  1 / EXCHANGE_RATES[mainCurrency]
- *   Combined:  currency → mainCurrency  =  EXCHANGE_RATES[currency] / EXCHANGE_RATES[mainCurrency]
+ * If `travelRates` is provided, it is used as the primary source.
+ * `travelRates` stores rates relative to the travel's mainCurrency:
+ *   travelRates[currency] = how many mainCurrency units per 1 unit of that currency.
+ *   Example: travelRates["USD"] = 0.92 → 1 USD = 0.92 mainCurrency.
  *
- *   Example: 1 USD → MYR
- *     EXCHANGE_RATES[USD] = 0.92  (1 USD = 0.92 EUR)
- *     EXCHANGE_RATES[MYR] = 0.20  (1 MYR = 0.20 EUR, so 1 EUR = 5 MYR)
- *     result = 0.92 / 0.20 = 4.6  → 1 USD = 4.6 MYR  ✓
+ * Fallback: if the currency is not in travelRates, derive from the hardcoded
+ * EXCHANGE_RATES table via cross-rate through EUR.
+ *
+ *   Cross-rate derivation (hardcoded fallback):
+ *   Both rates are stored as "X EUR per 1 unit".
+ *   currency → mainCurrency  =  EXCHANGE_RATES[currency] / EXCHANGE_RATES[mainCurrency]
  */
-export function getExchangeRate(currency: string, mainCurrency: string): number {
+export function getExchangeRate(
+  currency: string,
+  mainCurrency: string,
+  travelRates?: Record<string, number>,
+): number {
   // Trivial case: same currency, rate is exactly 1.
   if (currency === mainCurrency) return 1.0
 
+  // 1. Try travel-specific rates first (already stored relative to mainCurrency).
+  if (travelRates?.[currency] !== undefined) {
+    return travelRates[currency]
+  }
+
+  // 2. Fallback: derive from hardcoded EUR-based table.
   const fromRate = EXCHANGE_RATES[currency]
   const toRate = EXCHANGE_RATES[mainCurrency]
 
@@ -56,4 +67,22 @@ export function getExchangeRate(currency: string, mainCurrency: string): number 
   }
 
   return fromRate / toRate
+}
+
+/**
+ * Builds initial defaultRates for a given mainCurrency from the hardcoded table.
+ * Returns rates for all supported currencies except the mainCurrency itself.
+ * Each rate = "1 unit of currency = X mainCurrency".
+ */
+export function buildDefaultRates(mainCurrency: string): Record<string, number> {
+  const rates: Record<string, number> = {}
+  const toRate = EXCHANGE_RATES[mainCurrency]
+  if (toRate === undefined) return rates
+
+  for (const [code, fromRate] of Object.entries(EXCHANGE_RATES)) {
+    if (code === mainCurrency) continue
+    // Round to 6 significant digits to avoid floating-point noise
+    rates[code] = parseFloat((fromRate / toRate).toPrecision(6))
+  }
+  return rates
 }

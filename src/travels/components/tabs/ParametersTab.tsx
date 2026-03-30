@@ -8,6 +8,7 @@ import {
   updateTravelCurrencies,
   updateTravelList,
   updateTravelMeta,
+  updateTravelDefaultRate,
   addUnclaimedMember,
   renameTravelMember,
   claimTravelMember,
@@ -39,6 +40,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { ALL_CURRENCIES, ALL_COUNTRIES } from '@/shared/data/pickerData'
+import { getExchangeRate } from '@/shared/utils/exchangeRates'
 import { Share2, UserPlus, Check } from 'lucide-react'
 
 // ---------------------------------------------------------------------------
@@ -153,6 +155,108 @@ function CurrencyPicker({
         </div>
       </div>
     </CollapsiblePicker>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// ExchangeRateEditor — editable exchange rates for each currency in the travel.
+//
+// Shows all currencies in the travel's currencies list (except mainCurrency),
+// each with an editable rate. The rate can be entered in either direction:
+//   - "1 local = X main" (the stored format)
+//   - "1 main = X local" (the inverse, for convenience)
+// Changing one input auto-updates the other.
+// ---------------------------------------------------------------------------
+
+function ExchangeRateRow({
+  code,
+  mainCurrency,
+  rate,
+  travelId,
+  onRateChange,
+}: {
+  code: string
+  mainCurrency: string
+  rate: number         // stored rate: 1 local = rate mainCurrency
+  travelId: string
+  onRateChange: (code: string, newRate: number) => void
+}) {
+  // "1 local = X main" (the stored format)
+  const [localToMain, setLocalToMain] = useState(rate.toString())
+  // "1 main = X local" (the inverse)
+  const [mainToLocal, setMainToLocal] = useState(
+    rate > 0 ? parseFloat((1 / rate).toPrecision(6)).toString() : ''
+  )
+
+  // Sync from props when travel.defaultRates changes externally
+  useEffect(() => {
+    setLocalToMain(rate.toString())
+    setMainToLocal(rate > 0 ? parseFloat((1 / rate).toPrecision(6)).toString() : '')
+  }, [rate])
+
+  // User edits the "1 local = X main" field
+  function handleLocalToMainChange(val: string) {
+    setLocalToMain(val)
+    const parsed = parseFloat(val)
+    if (!isNaN(parsed) && parsed > 0) {
+      setMainToLocal(parseFloat((1 / parsed).toPrecision(6)).toString())
+    }
+  }
+
+  // User edits the "1 main = X local" field
+  function handleMainToLocalChange(val: string) {
+    setMainToLocal(val)
+    const parsed = parseFloat(val)
+    if (!isNaN(parsed) && parsed > 0) {
+      setLocalToMain(parseFloat((1 / parsed).toPrecision(6)).toString())
+    }
+  }
+
+  // Persist on blur from either field
+  function handleBlur() {
+    const parsed = parseFloat(localToMain)
+    if (!isNaN(parsed) && parsed > 0 && parsed !== rate) {
+      updateTravelDefaultRate(travelId, code, parsed).catch(console.error)
+      onRateChange(code, parsed)
+    }
+  }
+
+  // Look up symbol for display
+  const match = ALL_CURRENCIES.find(([c]) => c === code)
+  const symbol = match ? match[1] : ''
+
+  return (
+    <div className="flex flex-col gap-1.5 rounded-lg border bg-card px-3 py-2.5">
+      <span className="text-sm font-medium">{code} {symbol && `(${symbol})`}</span>
+      <div className="flex items-center gap-2 text-xs">
+        {/* 1 local = X main */}
+        <span className="shrink-0 text-muted-foreground">1 {code} =</span>
+        <input
+          type="number"
+          inputMode="decimal"
+          step="any"
+          value={localToMain}
+          onChange={(e) => handleLocalToMainChange(e.target.value)}
+          onBlur={handleBlur}
+          className="w-24 rounded border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        />
+        <span className="shrink-0 text-muted-foreground">{mainCurrency}</span>
+      </div>
+      <div className="flex items-center gap-2 text-xs">
+        {/* 1 main = X local */}
+        <span className="shrink-0 text-muted-foreground">1 {mainCurrency} =</span>
+        <input
+          type="number"
+          inputMode="decimal"
+          step="any"
+          value={mainToLocal}
+          onChange={(e) => handleMainToLocalChange(e.target.value)}
+          onBlur={handleBlur}
+          className="w-24 rounded border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        />
+        <span className="shrink-0 text-muted-foreground">{code}</span>
+      </div>
+    </div>
   )
 }
 
@@ -997,6 +1101,43 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
           lockedCurrency={getTravelMainCurrency(travel)}
         />
       </Section>
+
+      {/* Exchange Rates — editable default rates for each currency vs mainCurrency */}
+      {(() => {
+        const mc = getTravelMainCurrency(travel)
+        // Show all currencies in the travel's list except the main currency.
+        const currenciesWithRates = (travel.currencies ?? []).filter((c) => c !== mc)
+
+        if (currenciesWithRates.length === 0) return null
+
+        return (
+          <Section title="Exchange rates">
+            <p className="text-xs text-muted-foreground">
+              Default rates for new transactions. Editing a rate only affects future transactions.
+            </p>
+            {currenciesWithRates.map((code) => {
+              // Read from travel.defaultRates, fall back to hardcoded cross-rate
+              const storedRate = travel.defaultRates?.[code]
+              const rate = storedRate ?? getExchangeRate(code, mc)
+              return (
+                <ExchangeRateRow
+                  key={code}
+                  code={code}
+                  mainCurrency={mc}
+                  rate={rate}
+                  travelId={travel.travelId}
+                  onRateChange={(c, newRate) => {
+                    // Optimistic local update so other components see the change immediately
+                    onTravelChange({
+                      defaultRates: { ...(travel.defaultRates ?? {}), [c]: newRate },
+                    })
+                  }}
+                />
+              )
+            })}
+          </Section>
+        )
+      })()}
 
       {/* Categories */}
       <Section title="Categories">

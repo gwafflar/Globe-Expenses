@@ -1638,7 +1638,7 @@ WithdrawalForm.tsx deleted. All withdrawal behavior (fees field, auto-name, requ
 
 ---
 
-## 📝 Working Session 016.1 — 30 March 2026
+## 📝 Working Session 017 — 30 March 2026
 
 **Type**: Architecture refactor
 **Tools used**: Claude Code (CLI)
@@ -1718,6 +1718,131 @@ All downstream consumers (TransactionForm, ReconciliationDialog, DashboardTab, B
 - [ ] **Editable mainCurrency (v2)** — batch recompute all transactions when changed
 - [ ] **ProfilePage currency picker** — wire the "coming soon" placeholder to `updateUserProfile`
 - [ ] **Live exchange rates (v2)** — replace hardcoded rates, store historical rate per transaction
+- [ ] Per-travel field customization
+- [ ] Cloud Function `onTravelDeleted` (v2)
+- [ ] PWA icons
+- [ ] Display Mode in Transactions tab
+
+---
+
+## 📝 Working Session 018 — 30 March 2026
+
+**Type**: Feature — exchange rate refactor
+**Tools used**: Claude Code (CLI)
+
+### Summary
+
+Refactored exchange rates from hardcoded-only to per-travel editable default rates with per-transaction override capability. Added same-currency balance optimization to avoid lossy round-trip conversions.
+
+### Problem
+
+- Exchange rates were hardcoded in `exchangeRates.ts` (15 currencies, EUR pivot). Users had no way to adjust rates to match actual rates encountered during travel.
+- When settling in the transaction currency (e.g. MYR) with a different rate than was used for individual transactions, the MYR→EUR→MYR round-trip introduced distortion.
+
+### Solution
+
+#### 1. Per-travel `defaultRates`
+
+- **New field**: `Travel.defaultRates?: Record<string, number>` — maps currency codes to rates relative to the travel's mainCurrency (e.g. `{ "USD": 0.92 }` means 1 USD = 0.92 mainCurrency).
+- **Seeded at creation**: `buildDefaultRates(mainCurrency)` computes initial rates from the hardcoded table. All new travels start with rates for all 15 hardcoded currencies.
+- **Editable in ParametersTab**: new "Exchange rates" section shows each currency in the travel's list (except mainCurrency) with editable rates in both directions (1 local = X main, 1 main = X local). Changes auto-save on blur via `updateTravelDefaultRate()`.
+- **Firestore writes**: `updateTravelDefaultRate(travelId, code, rate)` uses dot-notation (`defaultRates.${code}`) for atomic single-key updates.
+
+#### 2. `getExchangeRate()` now accepts travel rates
+
+- Signature: `getExchangeRate(currency, mainCurrency, travelRates?)`.
+- Lookup order: `travelRates[currency]` → hardcoded cross-rate → `1.0` fallback.
+- All consumers updated to pass `travel.defaultRates` where available.
+
+#### 3. Per-transaction rate override in TransactionForm
+
+- When `currency !== mainCurrency`, a discrete rate hint appears below the amount/currency row: `1 USD = 0.92 EUR ✎`.
+- Tapping it expands an inline editor with the current rate, live conversion preview, and two actions:
+  - **Save as default rate** — persists the override as the travel's new default for that currency.
+  - **Reset** — reverts to the travel's default rate.
+- Override is stored in the transaction's `exchangeRate` field (no schema change — field already existed).
+
+#### 4. Same-currency balance optimization
+
+- `getSingleCurrency(transactions)` detects when all balance-affecting transactions use one currency.
+- When `singleCurrency === settlementCurrency`, BalanceTab uses `computeBalancesRaw()` (no `exchangeRate` multiplication). This eliminates the lossy round-trip (e.g. all-MYR trip settling in MYR).
+- `computeMemberTotals()` also supports raw mode, so paid/share subtotles are consistent.
+
+#### 5. Downstream consumers updated
+
+- **SettlementCurrencyDrawer**: uses `travel.defaultRates` to pre-fill the rate when selecting a settlement currency (inverts the stored rate since settlement is mainCurrency → target).
+- **ReconciliationDialog**: uses `travel.defaultRates` for adjustment exchange rates.
+- **XLSX export**: rate table on Parameters sheet now reflects `travel.defaultRates` (with hardcoded fallback for currencies not in the travel's rates).
+- **XLSX import**: unchanged — uses rate from sheet (locked at export time), falls back to hardcoded. This is correct: imported transactions should keep their original rates.
+
+### Data flow
+
+```
+Hardcoded EXCHANGE_RATES (EUR pivot)
+    ↓ buildDefaultRates(mainCurrency) at travel creation
+Travel.defaultRates (per-travel, user-editable)
+    ↓ getExchangeRate(currency, mainCurrency, travelRates)
+TransactionForm: shows rate, allows override
+    ↓
+Transaction.exchangeRate (locked per-transaction)
+    ↓
+Balance/Dashboard/Export (consumed as before)
+    ↓ (optimization)
+BalanceTab: raw-amount path when singleCurrency === settlementCurrency
+```
+
+### Files modified
+
+| File | Changes |
+|------|---------|
+| `src/travels/types.ts` | Added `defaultRates?: Record<string, number>` to Travel |
+| `src/shared/utils/exchangeRates.ts` | `getExchangeRate()` now accepts `travelRates?` param; added `buildDefaultRates()` |
+| `src/travels/services/travelService.ts` | Added `updateTravelDefaultRate()`, seed `defaultRates` in `createTravel()` |
+| `src/travels/hooks/useTravels.ts` | Read `mainCurrency` and `defaultRates` from Firestore |
+| `src/travels/pages/TravelDetailPage.tsx` | Read `defaultRates` from Firestore, pass to TransactionForm with callback |
+| `src/travels/components/tabs/ParametersTab.tsx` | New `ExchangeRateRow` component, new "Exchange rates" section |
+| `src/transactions/components/TransactionForm.tsx` | Exchange rate display + override UI, `defaultRates` prop, "save as default" |
+| `src/travels/utils/balanceUtils.ts` | Added `computeBalancesRaw()`, `getSingleCurrency()` |
+| `src/travels/components/tabs/BalanceTab.tsx` | Same-currency optimization, `defaultRates` prop passthrough |
+| `src/travels/components/TravelTabs.tsx` | Pass `travel.defaultRates` to BalanceTab |
+| `src/travels/components/SettlementCurrencyDrawer.tsx` | `defaultRates` prop, use travel rates for pre-fill |
+| `src/transactions/components/ReconciliationDialog.tsx` | `defaultRates` prop, use travel rates for adjustments |
+| `src/travels/components/tabs/DashboardTab.tsx` | Pass `travel.defaultRates` to ReconciliationDialog |
+| `src/shared/utils/sheetExport.ts` | Rate table uses `travel.defaultRates` with hardcoded fallback |
+
+### Decisions made (binding)
+
+| # | Decision | Notes |
+|---|----------|-------|
+| 1 | defaultRates stored per-travel | Seeded from hardcoded, user-editable, independent per travel |
+| 2 | Rates stored as "1 currency = X mainCurrency" | Same convention as hardcoded table; invertible for display |
+| 3 | Per-transaction override via existing exchangeRate field | No schema change needed |
+| 4 | "Save as default" is opt-in | User must explicitly click to persist override as new default |
+| 5 | Editing default rate only affects future transactions | Past transactions keep their locked rate |
+| 6 | Same-currency optimization uses raw amounts | Avoids lossy MYR→EUR→MYR round-trip when settling in tx currency |
+| 7 | Import keeps using sheet rates + hardcoded fallback | Imported transactions should preserve original rates |
+
+### v2 items (structured roadmap)
+
+1. **Live exchange rates — global shared table**
+   - New Firestore document `config/exchangeRates` containing daily rates for all currencies (EUR pivot).
+   - Updated by a Cloud Function on a daily schedule via a free API (e.g. frankfurter.app).
+   - Readable by all authenticated users (no per-travel duplication).
+   - **Rate priority chain**: `tx.exchangeRate` (locked per-transaction) → `travel.defaultRates` (user-edited overrides) → global live rates → hardcoded `EXCHANGE_RATES` (offline fallback).
+   - `getExchangeRate()` gains a 4th source: `getExchangeRate(from, to, travelRates?, globalRates?)`.
+   - Optional per-travel toggle: auto-sync `defaultRates` from global table (overwrite travel defaults with latest global rates on travel open or periodically). When disabled, user's manual rates are preserved.
+
+2. **Per-currency balance tracking** — full `Map<member, Map<currency, amount>>` for accurate settlement in any currency regardless of currency mix. Replaces the current single-currency optimization.
+3. **Payment-method-specific rates** — `PaymentMethod.defaultRate?: number` override. Rules: cash = last withdrawal rate, card = card-specific rate.
+4. **Editable mainCurrency** — batch recompute all transactions when changed.
+
+### Carry-forward items (open)
+
+- [ ] **Editable mainCurrency (v2)** — batch recompute all transactions when changed
+- [ ] **ProfilePage currency picker** — wire the "coming soon" placeholder
+- [ ] **Live exchange rates (v2)** — global `config/exchangeRates` doc + Cloud Function + auto-sync toggle
+- [ ] **Per-currency balance tracking (v2)** — full multi-currency balance map
+- [ ] **Payment-method-specific rates (v2)** — cash/card rate rules
 - [ ] Per-travel field customization
 - [ ] Cloud Function `onTravelDeleted` (v2)
 - [ ] PWA icons

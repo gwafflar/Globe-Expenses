@@ -12,7 +12,9 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import {
   computeBalances,
+  computeBalancesRaw,
   computeSettlements,
+  getSingleCurrency,
 } from '@/travels/utils/balanceUtils'
 import { normalizeTransactionSplits } from '@/travels/components/tabs/dashboardHelpers'
 import { affectsBalance } from '@/transactions/utils/walletHelpers'
@@ -48,17 +50,22 @@ interface MemberTotals {
   share: number
 }
 
-/** Compute total paid and total share (beneficiary) per member, in main currency. */
+/**
+ * Compute total paid and total share (beneficiary) per member.
+ * When useRaw is true, amounts are used directly (no exchange rate);
+ * otherwise amounts are converted to main currency via tx.exchangeRate.
+ */
 function computeMemberTotals(
   transactions: TransactionWithStatus[],
   members: TravelMember[],
+  useRaw = false,
 ): Map<string, MemberTotals> {
   const totals = new Map<string, MemberTotals>()
   for (const m of members) {
     totals.set(m.travelMemberId, { paid: 0, share: 0 })
   }
   for (const tx of transactions) {
-    const rate = tx.exchangeRate
+    const rate = useRaw ? 1 : tx.exchangeRate
     for (const s of tx.paidBy) {
       const t = totals.get(s.travelMemberId)
       if (t) t.paid += s.amount * rate
@@ -108,6 +115,8 @@ interface BalanceTabProps {
   settlementRate: number
   onSettlementCurrencyChange: (currency: string) => void
   onSettlementRateChange: (rate: number) => void
+  /** Per-travel default exchange rates, passed to SettlementCurrencyDrawer. */
+  defaultRates?: Record<string, number>
 }
 
 // ---------------------------------------------------------------------------
@@ -124,6 +133,7 @@ export function BalanceTab({
   settlementRate,
   onSettlementCurrencyChange,
   onSettlementRateChange,
+  defaultRates,
 }: BalanceTabProps) {
   const [copied, setCopied] = useState(false)
   const [currencyDialogOpen, setCurrencyDrawerOpen] = useState(false)
@@ -142,18 +152,28 @@ export function BalanceTab({
     [normalizedTx],
   )
 
-  // Core computations — memoised so they don't recompute on unrelated re-renders
+  // Detect if all balance-affecting transactions use a single currency.
+  // When the settlement currency matches this single currency, we skip the
+  // mainCurrency conversion to avoid lossy round-trip distortion (e.g. MYR→EUR→MYR).
+  const singleCurrency = useMemo(() => getSingleCurrency(spendingTx), [spendingTx])
+  const useRawBalances = singleCurrency !== null && settlementCurrency === singleCurrency
+
+  // Core computations — memoised so they don't recompute on unrelated re-renders.
+  // When useRawBalances is true, balances are computed in the transaction currency
+  // (no exchange rate applied), and the settlement rate is ignored (effectively 1).
   const balances = useMemo(
-    () => computeBalances(spendingTx, members),
-    [spendingTx, members],
+    () => useRawBalances
+      ? computeBalancesRaw(spendingTx, members)
+      : computeBalances(spendingTx, members),
+    [spendingTx, members, useRawBalances],
   )
   const settlements = useMemo(
     () => computeSettlements(balances),
     [balances],
   )
   const memberTotals = useMemo(
-    () => computeMemberTotals(spendingTx, members),
-    [spendingTx, members],
+    () => computeMemberTotals(spendingTx, members, useRawBalances),
+    [spendingTx, members, useRawBalances],
   )
 
   // Build a travelMemberId → index map for deterministic avatar colours
@@ -195,10 +215,17 @@ export function BalanceTab({
     )
   }
 
+  // When useRawBalances is true, balances are already in the settlement currency.
+  // No need to apply settlementRate — use 1 instead.
+  const displayRate = useRawBalances ? 1 : settlementRate
+  // Display currency for balances: in raw mode, use the single transaction currency;
+  // otherwise use mainCurrency for the net balance section.
+  const balanceDisplayCurrency = useRawBalances ? settlementCurrency : mainCurrency
+
   // ── Copy handler — uses settlement currency for amounts ──
   function handleCopy() {
     const lines = settlements.map(
-      (s) => `${s.fromName} → ${s.toName}: ${fmt(toSettlement(s.amount, settlementRate), settlementCurrency)}`,
+      (s) => `${s.fromName} → ${s.toName}: ${fmt(toSettlement(s.amount, displayRate), settlementCurrency)}`,
     )
     const text = [
       `${travelName} — settlement summary`,
@@ -256,7 +283,7 @@ export function BalanceTab({
                 <p className="truncate text-sm font-medium">{b.displayName}</p>
                 {totals && (
                   <p className="text-xs text-muted-foreground">
-                    paid {fmt(totals.paid, mainCurrency)} · share {fmt(totals.share, mainCurrency)}
+                    paid {fmt(totals.paid, balanceDisplayCurrency)} · share {fmt(totals.share, balanceDisplayCurrency)}
                   </p>
                 )}
               </div>
@@ -264,7 +291,7 @@ export function BalanceTab({
               {/* Net amount + bar */}
               <div className="flex flex-col items-end gap-0.5">
                 <span className={`text-sm font-semibold tabular-nums ${netClass(b.net)}`}>
-                  {netPrefix(b.net)}{fmt(b.net, mainCurrency)}
+                  {netPrefix(b.net)}{fmt(b.net, balanceDisplayCurrency)}
                 </span>
                 {/* Proportional bar */}
                 <div className="h-1 w-14 rounded-full bg-muted">
@@ -298,7 +325,7 @@ export function BalanceTab({
                   <span className="truncate text-sm">{s.toName}</span>
                   <Avatar memberId={s.toId} />
                   <span className="ml-auto text-sm font-medium tabular-nums">
-                    {fmt(toSettlement(s.amount, settlementRate), settlementCurrency)}
+                    {fmt(toSettlement(s.amount, displayRate), settlementCurrency)}
                   </span>
               </Card>
             ))}
@@ -335,6 +362,7 @@ export function BalanceTab({
         currentCurrency={settlementCurrency}
         currentRate={settlementRate}
         onApply={handleSettlementApply}
+        defaultRates={defaultRates}
       />
     </div>
   )

@@ -203,6 +203,7 @@ export function TravelDetailPage() {
             createdAt: d.createdAt,
             currencies: d.currencies ?? [],
             mainCurrency: d.mainCurrency as string | undefined,
+            defaultRates: d.defaultRates as Record<string, number> | undefined,
             settings: d.settings,
             categories: d.categories ?? [],
             paymentMethods: d.paymentMethods ?? [],
@@ -487,6 +488,14 @@ export function TravelDetailPage() {
           travelPaymentMethods={travel.paymentMethods}
           travelCurrencies={travel.currencies}
           mainCurrency={mainCurrency}
+          defaultRates={travel.defaultRates}
+          onDefaultRateChanged={(code, rate) => {
+            // Optimistic local update so the rate is immediately reflected in the form
+            setTravel((prev) => prev ? {
+              ...prev,
+              defaultRates: { ...(prev.defaultRates ?? {}), [code]: rate },
+            } : prev)
+          }}
           travelCountries={travel.countries}
           travelCities={travel.cities}
           existingTransactions={transactions}

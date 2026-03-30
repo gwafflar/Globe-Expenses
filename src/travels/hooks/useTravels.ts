@@ -68,6 +68,8 @@ export function useTravels(userId: string | undefined): UseTravelsResult {
             createdBy: data.createdBy as string,
             createdAt: data.createdAt,
             currencies: data.currencies ?? [],
+            mainCurrency: data.mainCurrency as string | undefined,
+            defaultRates: data.defaultRates as Record<string, number> | undefined,
             settings: data.settings,
             // Per-travel lists — default to [] for older documents that pre-date this field
             categories: data.categories ?? [],

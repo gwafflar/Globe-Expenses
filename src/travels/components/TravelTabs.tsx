@@ -189,6 +189,7 @@ export function TravelTabs({
                   settlementRate={settlementRate}
                   onSettlementCurrencyChange={onSettlementCurrencyChange}
                   onSettlementRateChange={onSettlementRateChange}
+                  defaultRates={travel.defaultRates}
                 />
               )}
               {tab.id === 'dashboard' && (

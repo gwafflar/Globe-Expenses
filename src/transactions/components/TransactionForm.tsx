@@ -18,7 +18,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import type { LabeledItem, TravelMember, TravelSettings } from '@/travels/types'
-import { updateTravelCurrencies, updateTravelList, syncTransactionLocation } from '@/travels/services/travelService'
+import { updateTravelCurrencies, updateTravelList, updateTravelDefaultRate, syncTransactionLocation } from '@/travels/services/travelService'
 import { ALL_CURRENCIES, ALL_COUNTRIES } from '@/shared/data/pickerData'
 import type { Split, TransactionType } from '@/transactions/types'
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
@@ -570,6 +570,10 @@ interface TransactionFormProps {
   travelCurrencies?: string[]
   // The travel's reference currency for exchange rate computation.
   mainCurrency: string
+  // Per-travel default exchange rates (relative to mainCurrency). Falls back to hardcoded rates.
+  defaultRates?: Record<string, number>
+  /** Called when user saves a custom rate as the new travel default. */
+  onDefaultRateChanged?: (code: string, rate: number) => void
   travelCountries?: LabeledItem[]
   travelCities?: LabeledItem[]
   existingTransactions: TransactionWithStatus[]
@@ -599,6 +603,8 @@ export function TransactionForm({
   travelPaymentMethods,
   travelCurrencies,
   mainCurrency,
+  defaultRates,
+  onDefaultRateChanged,
   travelCountries,
   travelCities,
   existingTransactions,
@@ -729,6 +735,22 @@ export function TransactionForm({
   const [adjustmentMode, setAdjustmentMode] = useState<'expense' | 'balance_only'>(
     isEdit ? (initialValues!.adjustmentMode ?? 'balance_only') : 'balance_only'
   )
+
+  // --- Exchange rate override ---
+  // null = use the default rate; a number = user has manually set this transaction's rate.
+  const [rateOverride, setRateOverride] = useState<number | null>(
+    // When editing, if the stored rate differs from the current default, treat it as an override
+    isEdit ? initialValues!.exchangeRate : null
+  )
+  // Controls whether the rate editing row is expanded
+  const [rateExpanded, setRateExpanded] = useState(false)
+
+  // The effective exchange rate for this transaction
+  const effectiveRate = useMemo(() => {
+    if (currency === mainCurrency) return 1.0
+    if (rateOverride !== null) return rateOverride
+    return getExchangeRate(currency, mainCurrency, defaultRates)
+  }, [currency, mainCurrency, rateOverride, defaultRates])
 
   // --- Split state ---
   const totalAmount = parseFloat(amountStr) || 0
@@ -898,8 +920,8 @@ export function TransactionForm({
     const profile = userProfile!
 
     const total = parseFloat(amountStr)
-    // Exchange rate computed against the travel's mainCurrency (not the user's personal preference).
-    const exchangeRate = getExchangeRate(currency, mainCurrency)
+    // Exchange rate: use user override if set, otherwise travel default, otherwise hardcoded fallback.
+    const exchangeRate = effectiveRate
     const totalAmountMain = Math.round(total * exchangeRate * 100) / 100
 
     // Auto-generate name for withdrawal/adjustment if blank
@@ -1142,6 +1164,109 @@ export function TransactionForm({
                   }}
                 />
               </div>
+
+              {/* Exchange rate hint — shown when currency differs from mainCurrency */}
+              {currency !== mainCurrency && (
+                <div className="mt-1">
+                  {!rateExpanded ? (
+                    // Collapsed: two-line rate display, tap to expand
+                    <button
+                      type="button"
+                      onClick={() => setRateExpanded(true)}
+                      className="flex flex-col items-start text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      <span>
+                        1 {currency} = {effectiveRate.toPrecision(6)} {mainCurrency}
+                        {rateOverride !== null && ' (custom)'}
+                      </span>
+                      <span>
+                        1 {mainCurrency} = {effectiveRate > 0 ? parseFloat((1 / effectiveRate).toPrecision(6)) : '—'} {currency}
+                        <span className="ml-1 text-[10px]">✎</span>
+                      </span>
+                    </button>
+                  ) : (
+                    // Expanded: editable rate in both directions with save-as-default option
+                    <div className="flex flex-col gap-1.5 rounded-lg border bg-muted/30 p-2">
+                      {/* Direction 1: 1 local = X main (stored format) */}
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="shrink-0 text-muted-foreground">1 {currency} =</span>
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          step="any"
+                          value={rateOverride !== null ? rateOverride : effectiveRate}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value)
+                            if (!isNaN(val) && val > 0) {
+                              setRateOverride(val)
+                              markDirty()
+                            }
+                          }}
+                          className="w-28 rounded border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                        />
+                        <span className="shrink-0 text-muted-foreground">{mainCurrency}</span>
+                      </div>
+                      {/* Direction 2: 1 main = X local (inverse, for convenience) */}
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="shrink-0 text-muted-foreground">1 {mainCurrency} =</span>
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          step="any"
+                          value={effectiveRate > 0 ? parseFloat((1 / effectiveRate).toPrecision(6)) : ''}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value)
+                            if (!isNaN(val) && val > 0) {
+                              // Invert to get the stored format (1 local = X main)
+                              setRateOverride(parseFloat((1 / val).toPrecision(6)))
+                              markDirty()
+                            }
+                          }}
+                          className="w-28 rounded border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                        />
+                        <span className="shrink-0 text-muted-foreground">{currency}</span>
+                      </div>
+                      {totalAmount > 0 && (
+                        <p className="text-[10px] text-muted-foreground">
+                          {totalAmount} {currency} = {(totalAmount * effectiveRate).toFixed(2)} {mainCurrency}
+                        </p>
+                      )}
+                      <div className="flex items-center gap-2">
+                        {/* Save as new travel default */}
+                        {rateOverride !== null && rateOverride !== getExchangeRate(currency, mainCurrency, defaultRates) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              updateTravelDefaultRate(travelId, currency, rateOverride).catch(console.error)
+                              onDefaultRateChanged?.(currency, rateOverride)
+                            }}
+                            className="text-[10px] text-primary hover:underline"
+                          >
+                            Save as default rate
+                          </button>
+                        )}
+                        {/* Reset to default */}
+                        {rateOverride !== null && (
+                          <button
+                            type="button"
+                            onClick={() => { setRateOverride(null); markDirty() }}
+                            className="text-[10px] text-muted-foreground hover:underline"
+                          >
+                            Reset
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setRateExpanded(false)}
+                          className="ml-auto text-[10px] text-muted-foreground hover:underline"
+                        >
+                          Close
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

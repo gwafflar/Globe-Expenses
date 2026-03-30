@@ -29,3 +29,7 @@ dist-ssr
 
 # Firebase service account key — never commit
 scripts/serviceAccountKey.json
+
+
+# directory used to share screenshots with Claude Code
+screenshots/*
