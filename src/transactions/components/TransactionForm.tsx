@@ -1165,6 +1165,13 @@ export function TransactionForm({
                 />
               </div>
 
+              {/* Cost in main currency — shown when currency differs from mainCurrency */}
+              {currency !== mainCurrency && totalAmount > 0 && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  = {(totalAmount * effectiveRate).toFixed(2)} {mainCurrency}
+                </p>
+              )}
+
               {/* Exchange rate hint — shown when currency differs from mainCurrency */}
               {currency !== mainCurrency && (
                 <div className="mt-1">

@@ -4,7 +4,7 @@
 //   - Avatar (initials-based, color derived from UID) + name + nametag
 //   - Identity: edit display name and @nametag
 //   - Security: email (read-only), send password reset email
-//   - Preferences: main currency (placeholder), theme (v2 placeholder)
+//   - Preferences: favorite main travel currency (editable), theme (v2 placeholder)
 //   - Friends: placeholder (v2)
 //   - Contact developer: expandable card with mail / Discord / Telegram
 //   - Sign out (red, with confirmation dialog)
@@ -43,6 +43,7 @@ import {
 import { ChevronLeft, LogOut, Mail, UserPlus, Check, X, Search, Share2 } from 'lucide-react'
 import { createShareableInvite } from '@/friends/services/friendService'
 import { InstallPromptBanner } from '@/shared/components/InstallPromptBanner'
+import { ALL_CURRENCIES } from '@/shared/data/pickerData'
 
 // ---------------------------------------------------------------------------
 // Avatar color
@@ -111,6 +112,11 @@ export function ProfilePage() {
   const [nametag, setNametag] = useState((userProfile?.nametag ?? '').replace(/^@/, ''))
   const [identitySaving, setIdentitySaving] = useState(false)
   const [identityMsg, setIdentityMsg] = useState<{ ok: boolean; text: string } | null>(null)
+
+  // Preferences: main currency
+  const [mainCurrency, setMainCurrency] = useState(userProfile?.mainCurrency ?? 'EUR')
+  const [mainCurrencySaving, setMainCurrencySaving] = useState(false)
+  const [mainCurrencyMsg, setMainCurrencyMsg] = useState<{ ok: boolean; text: string } | null>(null)
 
   // Password reset
   const [resetState, setResetState] = useState<'idle' | 'sent' | 'error'>('idle')
@@ -211,6 +217,26 @@ export function ProfilePage() {
       }
     } finally {
       setIdentitySaving(false)
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Save main currency (favorite default for new travels)
+  // -------------------------------------------------------------------------
+
+  async function handleSaveMainCurrency() {
+    if (!currentUser) return
+    setMainCurrencySaving(true)
+    setMainCurrencyMsg(null)
+    try {
+      await updateUserProfile(currentUser.uid, { mainCurrency })
+      // Update Zustand cache so new travels created with this user default to the new currency
+      setUserProfile({ ...userProfile, mainCurrency })
+      setMainCurrencyMsg({ ok: true, text: 'Saved.' })
+    } catch {
+      setMainCurrencyMsg({ ok: false, text: 'Failed to save. Please try again.' })
+    } finally {
+      setMainCurrencySaving(false)
     }
   }
 
@@ -459,15 +485,36 @@ export function ProfilePage() {
 
         {/* Preferences */}
         <Section title="Preferences">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium">Main currency</p>
-              <p className="text-xs text-muted-foreground">{userProfile.mainCurrency}</p>
+          {/* Favorite main travel currency — used as default when creating new travels */}
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="mainCurrency">Favorite main travel currency</Label>
+            <p className="text-xs text-muted-foreground">
+              Used as the default when you create a new travel. Can be overridden per travel.
+            </p>
+            <select
+              id="mainCurrency"
+              value={mainCurrency}
+              onChange={(e) => setMainCurrency(e.target.value)}
+              className="rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            >
+              {ALL_CURRENCIES.map(([code, symbol, name]) => (
+                <option key={code} value={code}>{code} ({symbol}) — {name}</option>
+              ))}
+            </select>
+            <div className="flex items-center gap-3">
+              <Button
+                type="button"
+                onClick={handleSaveMainCurrency}
+                disabled={mainCurrencySaving || mainCurrency === userProfile.mainCurrency}
+              >
+                {mainCurrencySaving ? 'Saving…' : 'Save'}
+              </Button>
+              {mainCurrencyMsg && (
+                <p className={`text-xs ${mainCurrencyMsg.ok ? 'text-green-600' : 'text-destructive'}`}>
+                  {mainCurrencyMsg.text}
+                </p>
+              )}
             </div>
-            {/* Placeholder — editable currency picker coming in a future session */}
-            <span className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">
-              coming soon
-            </span>
           </div>
 
           {/* Theme toggle — v2 */}

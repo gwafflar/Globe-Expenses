@@ -1396,7 +1396,7 @@ Extracted helper functions: `matchesDimension()`, `matchesSearch()`, `extractDim
 
 ---
 
-## 📝 Working Session 014 — 25 March 2026
+## ✨ Working Session 014 — 25 March 2026
 
 **Type**: Design, planning & implementation
 **Tools used**: Claude Code (claude-opus-4-6)
@@ -1462,7 +1462,7 @@ Pure functions: `computeWalletBalances()` takes full tx list + travelMemberId + 
 
 ---
 
-## 📝 Working Session 014.2 — 29 March 2026
+## 💄 Working Session 014.2 — 29 March 2026
 
 **Type**: UI refinement
 **Tools used**: Claude Code (claude-opus-4-6)
@@ -1514,7 +1514,7 @@ Wrote a full implementation prompt for **unified TransactionForm with type selec
 
 ---
 
-## 📝 Working Session 015 — March 2026
+## 🐛 Working Session 015 — March 2026
 
 **Type**: Bug fixes — XLSX import/export pipeline
 **Tools used**: Claude Web, Claude Code (CLI)
@@ -1568,7 +1568,7 @@ Fixed 6 bugs in the import/export round-trip pipeline, plus 2 small UI fixes. Al
 
 ---
 
-## 📝 Working Session 016 — 29–30 March 2026
+## ✨💄 Working Session 016 — 29–30 March 2026
 
 **Type**: Feature + UI redesign
 **Tools used**: Claude Code (CLI)
@@ -1638,7 +1638,7 @@ WithdrawalForm.tsx deleted. All withdrawal behavior (fees field, auto-name, requ
 
 ---
 
-## 📝 Working Session 017 — 30 March 2026
+## ♻️ Working Session 017.1 — 30 March 2026
 
 **Type**: Architecture refactor
 **Tools used**: Claude Code (CLI)
@@ -1725,7 +1725,7 @@ All downstream consumers (TransactionForm, ReconciliationDialog, DashboardTab, B
 
 ---
 
-## 📝 Working Session 018 — 30 March 2026
+## ♻️✨ Working Session 017.2 — 30 March 2026
 
 **Type**: Feature — exchange rate refactor
 **Tools used**: Claude Code (CLI)

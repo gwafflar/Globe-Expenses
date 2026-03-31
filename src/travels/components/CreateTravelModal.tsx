@@ -137,7 +137,11 @@ export function CreateTravelModal({
                 ))}
               </select>
               <p className="text-xs text-muted-foreground">
-                All amounts will be converted to this currency. Cannot be changed after creation.
+                All amounts will be converted to this currency. ⚠️ This choice is definitive and{" "}
+                <span className="text-red-500">
+                  cannot be changed after creation.
+                </span>{" "}
+                Might be editable in a future v2.
               </p>
             </div>
 
