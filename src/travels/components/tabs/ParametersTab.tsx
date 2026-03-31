@@ -42,6 +42,7 @@ import {
 import { ALL_CURRENCIES, ALL_COUNTRIES } from '@/shared/data/pickerData'
 import { getExchangeRate } from '@/shared/utils/exchangeRates'
 import { Share2, UserPlus, Check } from 'lucide-react'
+import { FeedbackForm } from '@/feedback/components/FeedbackForm'
 
 // ---------------------------------------------------------------------------
 // Section wrapper
@@ -1179,6 +1180,11 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
           placeholder="City name…"
           onItemsChange={handleListChange('cities')}
         />
+      </Section>
+
+      {/* Feedback — embedded form for quick beta feedback */}
+      <Section title="Feedback">
+        <FeedbackForm source="ParametersTab" />
       </Section>
 
       {/* ----------------------------------------------------------------- */}

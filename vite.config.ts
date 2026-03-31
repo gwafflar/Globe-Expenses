@@ -44,6 +44,7 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
         // The main bundle exceeds Workbox's default 2 MiB limit; raise it to 3 MiB
         maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
+        navigateFallbackDenylist: [/^\/__\//]
       },
     }),
   ],

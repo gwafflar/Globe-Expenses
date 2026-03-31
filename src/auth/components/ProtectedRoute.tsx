@@ -5,6 +5,7 @@
 
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { useAuthStore } from '@/auth/store/useAuthStore'
+import { BetaBanner } from '@/feedback/components/BetaBanner'
 
 export function ProtectedRoute() {
   const { currentUser, isAuthReady } = useAuthStore()
@@ -36,6 +37,12 @@ export function ProtectedRoute() {
   // <Outlet /> is a React Router v6 placeholder which renders any child
   // route element nested under this ProtectedRoute in the <Routes> tree.
   // This lets us wrap multiple protected pages with a single guard.
-  return <Outlet />
+  // BetaBanner sits above all protected page content for maximum visibility.
+  return (
+    <>
+      <BetaBanner />
+      <Outlet />
+    </>
+  )
 }
 

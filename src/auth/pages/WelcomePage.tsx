@@ -14,6 +14,8 @@ import { useAuthStore } from '@/auth/store/useAuthStore'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { WifiOff, Users, Wallet, Plane, BarChart3, Github } from 'lucide-react'
+import { BetaBanner } from '@/feedback/components/BetaBanner'
+import { FeedbackForm } from '@/feedback/components/FeedbackForm'
 
 // Returns true when the app is running as an installed PWA (standalone window).
 function isInstalledPWA(): boolean {
@@ -75,6 +77,9 @@ export function WelcomePage() {
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
+      {/* Beta feedback banner — always visible at the very top */}
+      <BetaBanner />
+
       {/* Hero section */}
       <div className="flex flex-1 flex-col items-center justify-center px-6 pb-8 pt-16">
         {/* App icon / branding */}
@@ -143,6 +148,16 @@ export function WelcomePage() {
               </p>
             </div>
           ))}
+        </div>
+      </div>
+
+      {/* Feedback section — embedded form for maximum visibility on the welcome page */}
+      <div className="border-t px-6 py-8">
+        <div className="mx-auto max-w-lg">
+          <h2 className="mb-3 text-center text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+            Feedback
+          </h2>
+          <FeedbackForm source="WelcomePage" />
         </div>
       </div>
     </div>

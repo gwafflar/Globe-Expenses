@@ -1847,3 +1847,116 @@ BalanceTab: raw-amount path when singleCurrency === settlementCurrency
 - [ ] Cloud Function `onTravelDeleted` (v2)
 - [ ] PWA icons
 - [ ] Display Mode in Transactions tab
+
+
+---
+
+## 📝 Working Session 018.1 — 31 March 2026
+
+**Type**: Feature implementation
+**Tools used**: Claude Code (claude-code CLI)
+
+### What was done
+
+- **Welcome page (`/welcome`)**: new landing page for unauthenticated users, replacing `/login` as the default entry point.
+  - App branding with `icon-512.png`, tagline, 3 action buttons (Sign in, Continue with Google, Create an account).
+  - Google "G" color logo (inline SVG) on the Google button.
+  - 6 feature highlights in a responsive grid (2 cols mobile, 3 cols wider screens): multi-currency travels, split with friends, cash tracker, works offline, in-depth statistics, open-source & free (with GitHub link).
+  - Auto-redirects authenticated users to `/travels`. Forwards `?redirect=` params to login/register.
+- **ProtectedRoute** now redirects to `/welcome` instead of `/login`.
+- **Register page validation**: client-side field validation with inline red error labels and red input borders. Helper text on display name ("Can be changed later") and password (no password-reset warning). Browser native `type="email"` validation replaced with `type="text" inputMode="email"` so custom errors appear instead of browser tooltip.
+- **Login & Register pages**: added "← Back to Welcome" link at the bottom.
+- **4 pre-existing TS build errors fixed**: ProfilePage `userProfile` non-null assertion, TransactionForm unused variables, TravelDetailPage `requestTab` union type.
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `src/auth/pages/WelcomePage.tsx` | **New** — welcome/landing page |
+| `src/App.tsx` | Added `/welcome` route |
+| `src/auth/components/ProtectedRoute.tsx` | Redirect to `/welcome` instead of `/login` |
+| `src/auth/pages/LoginPage.tsx` | Added back-to-welcome link |
+| `src/auth/pages/RegisterPage.tsx` | Client-side validation, helper text, back-to-welcome link |
+| `src/auth/pages/ProfilePage.tsx` | Fix TS error (non-null assertion on `userProfile`) |
+| `src/transactions/components/TransactionForm.tsx` | Fix TS errors (unused variables) |
+| `src/travels/pages/TravelDetailPage.tsx` | Fix TS error (`requestTab` union type) |
+
+## 📝 Working Session 018.2 — 31 March 2026
+Tried to fix Google OAuth on PWA
+Failed - Code stashed
+---
+
+## 📝 Working Session 018.3 — 31 March 2026
+
+**Type**: Feature implementation
+**Tools used**: Claude Code (claude-code CLI)
+
+### What was built
+
+**In-app beta feedback form** — allows beta users to submit feedback directly from the app.
+
+### Components created
+
+| File | Description |
+|------|-------------|
+| `src/feedback/services/feedbackService.ts` | `submitFeedback()` — writes to Firestore `/feedback/{id}`. Accepts authenticated and anonymous users. Awaited (not fire-and-forget) so UI can show success/failure. Image upload code commented out pending Firebase Storage setup. |
+| `src/feedback/components/FeedbackForm.tsx` | Reusable form: bilingual label (EN/FR), textarea, send button with loading spinner, success animation. Includes collapsible "Contact developer" card (Discord + GitHub links + "Made with 💜" footer). Image picker commented out. |
+| `src/feedback/components/BetaBanner.tsx` | Amber bilingual banner ("Beta — Your feedback is welcome!"). Clicking opens a Dialog with FeedbackForm. |
+
+### Integration points
+
+- **ProtectedRoute** — BetaBanner above `<Outlet />` (visible on all authenticated pages)
+- **WelcomePage** — BetaBanner at top + embedded FeedbackForm section at bottom
+- **ProfilePage** — Embedded FeedbackForm in "Feedback" section (replaced standalone "Contact developer" card)
+- **ParametersTab** — Embedded FeedbackForm before "Manage travel" section
+
+### Other changes
+
+- `src/services/firebase.ts` — Firebase Storage import commented out (pending Storage bucket setup)
+- `src/auth/pages/ProfilePage.tsx` — Removed standalone "Contact developer" section (now inside FeedbackForm)
+- `vite.config.ts` — Fixed pre-existing missing comma after manifest object (line 39)
+
+### Firestore data model
+
+```
+/feedback/{feedbackId}
+  - userId: string          // Auth UID or 'anonymous'
+  - displayName: string     // User name or 'Anonymous'
+  - text: string
+  - source: string          // 'ProfilePage' | 'ParametersTab' | 'WelcomePage' | 'BetaBanner'
+  - userAgent: string
+  - createdAt: serverTimestamp
+  - imageUrl?: string       // (future, when Storage is configured)
+```
+
+### Firestore security rule required
+
+```
+match /feedback/{feedbackId} {
+  allow create: if true;    // allows anonymous feedback from WelcomePage
+}
+```
+
+### Decisions made
+
+| # | Decision | Rationale |
+|---|----------|-----------|
+| 1 | Anonymous feedback allowed | Users who can't authenticate should still be able to report issues |
+| 2 | Image upload deferred | Firebase Storage free tier requires US region; project Firestore is in Europe. Bucket creation fails. Code is commented out, ready to uncomment. |
+| 3 | `setDoc` awaited (not fire-and-forget) | Unlike transactions, feedback needs success/failure shown to the user |
+| 4 | BetaBanner opens Dialog (not scroll-to) | Form is only embedded on 3 pages but banner is on all pages — dialog works everywhere |
+| 5 | Contact developer card inside FeedbackForm | Single source of truth, visible everywhere the form appears |
+
+### Deferred / v2
+
+- [ ] Image upload — enable when Firebase Storage bucket is configured (all code commented out, ready)
+- [ ] 5 MB limit + image/* MIME enforcement (client-side + Storage rules)
+- [ ] Firebase Storage security rules (authenticated, size limit, content type)
+
+
+Session 18.4
+UI/UX quick improvements
+Session 18.4.1
+- Bad connexion -> Banner turn off wifi to go offline
+Session 18.4.2
+- Balance settlemet

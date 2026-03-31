@@ -4,6 +4,7 @@
 import { initializeApp } from 'firebase/app'
 import { getAuth } from 'firebase/auth'
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore'
+// import { getStorage } from 'firebase/storage'  // uncomment when Firebase Storage is configured
 
 // Vite exposes env variables prefixed with VITE_ via import.meta.env
 const firebaseConfig = {
@@ -20,6 +21,9 @@ const app = initializeApp(firebaseConfig)
 
 // Auth instance — used for login, registration, session management
 export const auth = getAuth(app)
+
+// Firebase Storage — uncomment when Storage is configured
+// export const storage = getStorage(app)
 
 // Firestore instance — offline persistence configured at init time (Firestore v9+ API)
 // persistentLocalCache: caches Firestore data in IndexedDB for offline reads
