@@ -561,6 +561,14 @@ function TransferSenderPicker({
 // Props
 // ---------------------------------------------------------------------------
 
+/** Pre-fill data for opening the form as a new transfer (e.g. from BalanceTab settlements). */
+export interface TransferPrefill {
+  amount: number
+  currency: string
+  fromMemberId: string  // sender (paidBy)
+  toMemberId: string    // receiver (beneficiary)
+}
+
 interface TransactionFormProps {
   travelId: string
   members: TravelMember[]
@@ -580,6 +588,8 @@ interface TransactionFormProps {
   initialValues?: TransactionWithStatus
   /** Pre-set the type when opening for a new transaction (e.g. 'withdrawal' from DashboardTab). */
   initialType?: TransactionType
+  /** Pre-fill transfer fields for a new transaction (e.g. settlement from BalanceTab). */
+  transferPrefill?: TransferPrefill
   onSuccess: (txId: string) => void
   onCancel: () => void
   /** Called when user taps Delete in edit mode. */
@@ -610,6 +620,7 @@ export function TransactionForm({
   existingTransactions,
   initialValues,
   initialType,
+  transferPrefill,
   onSuccess,
   onCancel,
   onDelete,
@@ -706,13 +717,19 @@ export function TransactionForm({
     isEdit ? initialValues!.date : getTodayDDMMYYYY()
   )
   const [name, setName] = useState<string>(
-    isEdit ? initialValues!.name : ''
+    isEdit ? initialValues!.name
+      : transferPrefill ? 'Settlement'
+      : ''
   )
   const [amountStr, setAmountStr] = useState<string>(
-    isEdit ? String(initialValues!.totalAmount) : '0'
+    isEdit ? String(initialValues!.totalAmount)
+      : transferPrefill ? String(transferPrefill.amount)
+      : '0'
   )
   const [currency, setCurrency] = useState<string>(
-    isEdit ? initialValues!.currency : lastUsedCurrency
+    isEdit ? initialValues!.currency
+      : transferPrefill ? transferPrefill.currency
+      : lastUsedCurrency
   )
   const [category, setCategory] = useState<string>(
     isEdit ? (initialValues!.category ?? '') : ''
@@ -756,13 +773,19 @@ export function TransactionForm({
   const totalAmount = parseFloat(amountStr) || 0
 
   const [paidBy, setPaidBy] = useState<Split[]>(
-    isEdit ? initialValues!.paidBy : [{ travelMemberId: myTravelMemberId, amount: totalAmount }]
+    isEdit ? initialValues!.paidBy
+      // When pre-filling a transfer (e.g. from settlement), set sender as sole payer
+      : transferPrefill ? [{ travelMemberId: transferPrefill.fromMemberId, amount: transferPrefill.amount }]
+      : [{ travelMemberId: myTravelMemberId, amount: totalAmount }]
   )
   const [paidByMode, setPaidByMode] = useState<'equal' | 'custom'>(
     isEdit ? detectSplitMode(initialValues!.paidBy) : 'equal'
   )
   const [beneficiaries, setBeneficiaries] = useState<Split[]>(
-    isEdit ? initialValues!.beneficiaries : [{ travelMemberId: myTravelMemberId, amount: totalAmount }]
+    isEdit ? initialValues!.beneficiaries
+      // When pre-filling a transfer (e.g. settlement), set receiver as sole beneficiary
+      : transferPrefill ? [{ travelMemberId: transferPrefill.toMemberId, amount: transferPrefill.amount }]
+      : [{ travelMemberId: myTravelMemberId, amount: totalAmount }]
   )
   const [beneficiaryMode, setBeneficiaryMode] = useState<'equal' | 'custom'>(
     isEdit ? detectSplitMode(initialValues!.beneficiaries) : 'equal'
@@ -772,6 +795,7 @@ export function TransactionForm({
   const [transferSenderId, setTransferSenderId] = useState<string>(
     isEdit && getTransactionType(initialValues!) === 'transfer'
       ? (initialValues!.paidBy[0]?.travelMemberId ?? myTravelMemberId)
+      : transferPrefill ? transferPrefill.fromMemberId
       : myTravelMemberId
   )
 
@@ -811,8 +835,8 @@ export function TransactionForm({
   // --- Transfer: when switching to transfer, set default beneficiaries to all OTHER members ---
   useEffect(() => {
     if (txType !== 'transfer') return
-    // Only set default beneficiaries if not editing (edit mode preserves saved splits)
-    if (isEdit) return
+    // Preserve saved splits in edit mode, and pre-filled splits from settlement
+    if (isEdit || transferPrefill) return
     const otherIds = members
       .filter((m) => m.travelMemberId !== transferSenderId)
       .map((m) => m.travelMemberId)

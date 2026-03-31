@@ -19,6 +19,8 @@ import {
 import { normalizeTransactionSplits } from '@/travels/components/tabs/dashboardHelpers'
 import { affectsBalance } from '@/transactions/utils/walletHelpers'
 import { SettlementCurrencyDrawer } from '@/travels/components/SettlementCurrencyDrawer'
+import type { TransferPrefill } from '@/transactions/components/TransactionForm'
+import { Check, Plus } from 'lucide-react'
 
 // ---------------------------------------------------------------------------
 // Avatar colour palette — cycles when members > palette length
@@ -117,6 +119,8 @@ interface BalanceTabProps {
   onSettlementRateChange: (rate: number) => void
   /** Per-travel default exchange rates, passed to SettlementCurrencyDrawer. */
   defaultRates?: Record<string, number>
+  /** Opens TransactionForm in transfer mode, optionally pre-filled with settlement data. */
+  onCreateTransfer?: (prefill?: TransferPrefill) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -134,6 +138,7 @@ export function BalanceTab({
   onSettlementCurrencyChange,
   onSettlementRateChange,
   defaultRates,
+  onCreateTransfer,
 }: BalanceTabProps) {
   const [copied, setCopied] = useState(false)
   const [currencyDialogOpen, setCurrencyDrawerOpen] = useState(false)
@@ -317,21 +322,44 @@ export function BalanceTab({
           </h3>
 
           <div className="flex flex-col gap-2">
-            {settlements.map((s, i) => (
-              <Card key={i} className="flex items-center gap-2 px-3 py-2.5">
-                  <Avatar memberId={s.fromId} />
-                  <span className="truncate text-sm">{s.fromName}</span>
-                  <span className="text-xs text-muted-foreground">→</span>
-                  <span className="truncate text-sm">{s.toName}</span>
-                  <Avatar memberId={s.toId} />
-                  <span className="ml-auto text-sm font-medium tabular-nums">
-                    {fmt(toSettlement(s.amount, displayRate), settlementCurrency)}
-                  </span>
-              </Card>
-            ))}
+            {settlements.map((s, i) => {
+              const settlementAmount = toSettlement(s.amount, displayRate)
+              return (
+                <Card key={i} className="flex flex-col gap-2 px-3 py-2.5">
+                  {/* Settlement row: from → to + amount */}
+                  <div className="flex items-center gap-2">
+                    <Avatar memberId={s.fromId} />
+                    <span className="truncate text-sm">{s.fromName}</span>
+                    <span className="text-xs text-muted-foreground">→</span>
+                    <span className="truncate text-sm">{s.toName}</span>
+                    <Avatar memberId={s.toId} />
+                    <span className="ml-auto text-sm font-medium tabular-nums">
+                      {fmt(settlementAmount, settlementCurrency)}
+                    </span>
+                  </div>
+                  {/* "Mark as paid" button — opens TransactionForm as a pre-filled transfer */}
+                  {onCreateTransfer && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full text-xs"
+                      onClick={() => onCreateTransfer({
+                        amount: settlementAmount,
+                        currency: settlementCurrency,
+                        fromMemberId: s.fromId,
+                        toMemberId: s.toId,
+                      })}
+                    >
+                      <Check className="mr-1 h-3.5 w-3.5" />
+                      Mark as paid
+                    </Button>
+                  )}
+                </Card>
+              )
+            })}
           </div>
 
-          {/* Change currency + copy — separated by a discreet border */}
+          {/* Change currency + copy + add settlement — separated by a discreet border */}
           <div className="mt-3 flex flex-col gap-2 border-t pt-3">
             <Button
               variant="ghost"
@@ -350,6 +378,16 @@ export function BalanceTab({
             >
               {copied ? 'Copied!' : 'Copy settlement summary'}
             </Button>
+            {/* General "Add a settlement" — opens a blank transfer form */}
+            {onCreateTransfer && (
+              <Button
+                className="w-full"
+                onClick={() => onCreateTransfer()}
+              >
+                <Plus className="mr-1 h-4 w-4" />
+                Add a settlement
+              </Button>
+            )}
           </div>
         </>
       )}

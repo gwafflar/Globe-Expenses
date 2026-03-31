@@ -4,7 +4,7 @@
 // then renders TravelTabs which owns the three-tab UI.
 // Transaction list is subscribed via useTransactions (onSnapshot).
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 
 import { doc, getDoc } from 'firebase/firestore'
@@ -13,7 +13,7 @@ import type { LabeledItem, Travel } from '@/travels/types'
 import { normaliseMember, getTravelMainCurrency } from '@/travels/types'
 import { useAuthStore } from '@/auth/store/useAuthStore'
 import { usePendingInvites } from '@/friends/hooks/usePendingInvites'
-import { ChevronLeft } from 'lucide-react'
+import { ChevronLeft, WifiOff } from 'lucide-react'
 
 function avatarHue(uid: string): number {
   let hash = 0
@@ -22,7 +22,7 @@ function avatarHue(uid: string): number {
 }
 import { useTransactions, type TransactionWithStatus } from '@/transactions/hooks/useTransactions'
 import { Button } from '@/components/ui/button'
-import { TransactionForm } from '@/transactions/components/TransactionForm'
+import { TransactionForm, type TransferPrefill } from '@/transactions/components/TransactionForm'
 import type { TransactionType } from '@/transactions/types'
 import { TravelTabs } from '@/travels/components/TravelTabs'
 import { InstallPromptBanner } from '@/shared/components/InstallPromptBanner'
@@ -142,6 +142,8 @@ export function TravelDetailPage() {
   const [editingTx, setEditingTx] = useState<TransactionWithStatus | null>(null)
   // Pre-set type for new transactions (e.g. 'withdrawal' from DashboardTab)
   const [formInitialType, setFormInitialType] = useState<TransactionType | undefined>(undefined)
+  // Pre-fill data for new transfers (e.g. from BalanceTab settlement buttons)
+  const [transferPrefill, setTransferPrefill] = useState<TransferPrefill | undefined>(undefined)
   // Incremented each time the form is opened — passed as `key` to TransactionForm
   // so React unmounts and remounts it fresh, ensuring useState pre-fills (country,
   // city, currency) pick up the latest values from existingTransactions.
@@ -227,16 +229,22 @@ export function TravelDetailPage() {
   }
 
   // Opens the new-expense form and forces TransactionForm to remount (fresh state).
-  function openForm(initialType?: TransactionType) {
+  function openForm(initialType?: TransactionType, prefill?: TransferPrefill) {
     setFormKey((k) => k + 1)
     setEditingTx(null)
     setFormInitialType(initialType)
+    setTransferPrefill(prefill)
     setIsFormOpen(true)
   }
 
   // Opens the withdrawal form — now just opens the unified form with initialType.
   function openWithdrawalForm() {
     openForm('withdrawal')
+  }
+
+  // Opens the transfer form, optionally pre-filled with settlement data from BalanceTab.
+  function openTransferForm(prefill?: TransferPrefill) {
+    openForm('transfer', prefill)
   }
 
   // Called by TransactionsTab accordion with a txId — all types now open the same form.
@@ -313,6 +321,22 @@ export function TravelDetailPage() {
   // Loading / error states
   // ---------------------------------------------------------------------------
 
+  // Show an offline hint after 2 seconds of loading — helps users on flaky
+  // connections understand they can switch to airplane mode to use cached data.
+  const [showSlowHint, setShowSlowHint] = useState(false)
+  const slowHintTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    if (loadingTravel) {
+      slowHintTimer.current = setTimeout(() => setShowSlowHint(true), 2000)
+    } else {
+      setShowSlowHint(false)
+    }
+    return () => {
+      if (slowHintTimer.current) clearTimeout(slowHintTimer.current)
+    }
+  }, [loadingTravel])
+
   if (loadingTravel) {
     return (
       <div className="flex min-h-screen flex-col bg-background">
@@ -322,8 +346,17 @@ export function TravelDetailPage() {
           </button>
           <h1 className="text-base font-semibold">Loading travel…</h1>
         </header>
-        <main className="flex flex-1 items-center justify-center">
+        <main className="flex flex-1 flex-col items-center justify-center gap-4 px-6">
           <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+          {showSlowHint && (
+            <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+              <WifiOff className="mt-0.5 h-4 w-4 shrink-0" />
+              <p>
+                You seem to have connection issues. If the travel doesn&apos;t load,
+                try turning off Wi-Fi and mobile data to use the app offline.
+              </p>
+            </div>
+          )}
         </main>
       </div>
     )
@@ -369,15 +402,17 @@ export function TravelDetailPage() {
           All travels
         </button>
 
-        {/* Centre: travel emoji + name */}
-        <div className="flex items-center gap-2">
+        {/* Centre: travel emoji + name — tap to go to Parameters tab */}
+        <button
+          type="button"
+          onClick={() => setRequestTab('parameters')}
+          className="flex items-center gap-2 hover:opacity-70 transition-opacity"
+        >
           <div className="flex h-8 w-8 items-center justify-center rounded-full bg-secondary text-lg">
             {travel.emoji || '🌍'}
           </div>
-          <div>
-            <h1 className="text-base font-semibold leading-tight">{travel.name}</h1>
-          </div>
-        </div>
+          <h1 className="text-base font-semibold leading-tight">{travel.name}</h1>
+        </button>
 
         {/* Right: profile avatar with pending-invites badge */}
         <button
@@ -422,6 +457,7 @@ export function TravelDetailPage() {
           onSettlementCurrencyChange={setSettlementCurrency}
           onSettlementRateChange={setSettlementRate}
           onAddExpense={openForm}
+          onCreateTransfer={openTransferForm}
           onAddWithdrawal={openWithdrawalForm}
           onEditTransaction={handleEditById}
           onDeleteTransaction={handleDeleteTransaction}
@@ -501,6 +537,7 @@ export function TravelDetailPage() {
           existingTransactions={transactions}
           initialValues={editingTx ?? undefined}
           initialType={formInitialType}
+          transferPrefill={transferPrefill}
           onSuccess={handleTransactionSaved}
           onCancel={() => { setIsFormOpen(false); setEditingTx(null) }}
           onDelete={(txId) => {

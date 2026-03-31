@@ -12,6 +12,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Travel } from '@/travels/types'
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
+import type { TransferPrefill } from '@/transactions/components/TransactionForm'
 import { TransactionsTab } from '@/travels/components/tabs/TransactionsTab'
 import { BalanceTab } from '@/travels/components/tabs/BalanceTab'
 import { DashboardTab } from '@/travels/components/tabs/DashboardTab'
@@ -53,6 +54,8 @@ interface TravelTabsProps {
   onEditTransaction: (txId: string) => void
   onDeleteTransaction: (txId: string) => void
   onTravelChange: (updated: Partial<Travel>) => void
+  /** Opens TransactionForm in transfer mode, optionally pre-filled with settlement data. */
+  onCreateTransfer?: (prefill?: TransferPrefill) => void
   /** When set, TravelTabs switches to this tab. Caller should reset to undefined after. */
   requestTab?: typeof TABS[number]['id']
   onRequestTabHandled?: () => void
@@ -79,6 +82,7 @@ export function TravelTabs({
   onEditTransaction,
   onDeleteTransaction,
   onTravelChange,
+  onCreateTransfer,
   requestTab,
   onRequestTabHandled,
 }: TravelTabsProps) {
@@ -190,6 +194,7 @@ export function TravelTabs({
                   onSettlementCurrencyChange={onSettlementCurrencyChange}
                   onSettlementRateChange={onSettlementRateChange}
                   defaultRates={travel.defaultRates}
+                  onCreateTransfer={onCreateTransfer}
                 />
               )}
               {tab.id === 'dashboard' && (
