@@ -4,6 +4,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { ProtectedRoute } from '@/auth/components/ProtectedRoute'
 import { LoginPage } from '@/auth/pages/LoginPage'
 import { RegisterPage } from '@/auth/pages/RegisterPage'
+import { WelcomePage } from '@/auth/pages/WelcomePage'
 import { TravelsPage } from '@/travels/pages/TravelsPage'
 import { TravelDetailPage } from '@/travels/pages/TravelDetailPage'
 import { ProfilePage } from '@/auth/pages/ProfilePage'
@@ -17,7 +18,8 @@ export default function App() {
       {/* Default route: redirect root to /travels */}
       <Route path="/" element={<Navigate to="/travels" replace />} />
 
-      {/* Public routes: login & register are always accessible */}
+      {/* Public routes: welcome, login & register are always accessible */}
+      <Route path="/welcome" element={<WelcomePage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
 

@@ -279,7 +279,7 @@ export function TravelDetailPage() {
   const isSolo = (travel?.members.length ?? 0) === 1
 
   // Tab navigation request — used by the solo-travel CTA to switch to Parameters
-  const [requestTab, setRequestTab] = useState<string | undefined>(undefined)
+  const [requestTab, setRequestTab] = useState<'transactions' | 'balance' | 'dashboard' | 'parameters' | undefined>(undefined)
 
   const handleBack = () => navigate('/travels')
 

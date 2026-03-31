@@ -232,6 +232,12 @@ export function LoginPage() {
               Register
             </Link>
           </p>
+
+          <p className="text-center text-sm">
+            <Link to="/welcome" className="text-muted-foreground hover:text-foreground hover:underline">
+              &larr; Back to Welcome
+            </Link>
+          </p>
         </CardContent>
       </Card>
     </div>

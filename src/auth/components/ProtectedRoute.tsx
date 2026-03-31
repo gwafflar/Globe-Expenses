@@ -29,7 +29,7 @@ export function ProtectedRoute() {
   // e.g. /invite/abc123 → /login?redirect=%2Finvite%2Fabc123
   if (!currentUser) {
     const redirect = encodeURIComponent(location.pathname)
-    return <Navigate to={`/login?redirect=${redirect}`} replace />
+    return <Navigate to={`/welcome?redirect=${redirect}`} replace />
   }
 
   // If we reach this point, auth is ready *and* we have a user.

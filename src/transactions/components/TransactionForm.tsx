@@ -206,7 +206,7 @@ interface SmartCurrencySelectProps {
   onCurrencyAdded: (code: string) => void
 }
 
-function SmartCurrencySelect({ value, onChange, orderedCurrencies, onCurrencyAdded }: SmartCurrencySelectProps) {
+function SmartCurrencySelect({ value, onChange, onCurrencyAdded }: SmartCurrencySelectProps) {
   const [pickerOpen, setPickerOpen] = useState(false)
   const [search, setSearch] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
@@ -917,7 +917,7 @@ export function TransactionForm({
     }
 
     const user = currentUser!
-    const profile = userProfile!
+
 
     const total = parseFloat(amountStr)
     // Exchange rate: use user override if set, otherwise travel default, otherwise hardcoded fallback.

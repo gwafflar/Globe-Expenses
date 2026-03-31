@@ -231,7 +231,7 @@ export function ProfilePage() {
     try {
       await updateUserProfile(currentUser.uid, { mainCurrency })
       // Update Zustand cache so new travels created with this user default to the new currency
-      setUserProfile({ ...userProfile, mainCurrency })
+      setUserProfile({ ...userProfile!, mainCurrency })
       setMainCurrencyMsg({ ok: true, text: 'Saved.' })
     } catch {
       setMainCurrencyMsg({ ok: false, text: 'Failed to save. Please try again.' })
@@ -261,7 +261,7 @@ export function ProfilePage() {
 
   async function handleSignOut() {
     await signOut()
-    navigate('/login', { replace: true })
+    navigate('/welcome', { replace: true })
   }
 
   // -------------------------------------------------------------------------

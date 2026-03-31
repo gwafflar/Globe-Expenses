@@ -47,10 +47,25 @@ export function RegisterPage() {
   const [showPassword, setShowPassword] = useState(false) // toggles password visibility
   const [isLoading, setIsLoading] = useState<boolean>(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  // Per-field validation errors, shown inline below each input
+  const [fieldErrors, setFieldErrors] = useState<{ displayName?: string; email?: string; password?: string }>({})
+
+  // Client-side validation before hitting Firebase
+  function validate(): boolean {
+    const errors: typeof fieldErrors = {}
+    if (!displayName.trim()) errors.displayName = 'Please enter a display name.'
+    if (!email.trim()) errors.email = 'Please enter your email address.'
+    else if (!/^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/.test(email.trim())) errors.email = 'This email address doesn\u2019t look valid.'
+    if (!password) errors.password = 'Please enter a password.'
+    else if (password.length < 6) errors.password = 'Password must be at least 6 characters.'
+    setFieldErrors(errors)
+    return Object.keys(errors).length === 0
+  }
 
   const handleRegister = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setErrorMessage(null)
+    if (!validate()) return
     setIsLoading(true)
 
     try {
@@ -72,12 +87,16 @@ export function RegisterPage() {
 
       navigate(redirectTo, { replace: true })
     } catch (error) {
-      const message =
-        (error && typeof error === 'object' && 'code' in error
-          ? mapRegisterError(error as FirebaseError)
-          : 'Unable to create your account. Please try again.')
-
-      setErrorMessage(message)
+      // Show invalid-email as a field-level error rather than a generic banner
+      if (error && typeof error === 'object' && 'code' in error && (error as FirebaseError).code === 'auth/invalid-email') {
+        setFieldErrors((prev) => ({ ...prev, email: 'This email address doesn\u2019t look valid.' }))
+      } else {
+        const message =
+          (error && typeof error === 'object' && 'code' in error
+            ? mapRegisterError(error as FirebaseError)
+            : 'Unable to create your account. Please try again.')
+        setErrorMessage(message)
+      }
     } finally {
       setIsLoading(false)
     }
@@ -95,39 +114,44 @@ export function RegisterPage() {
         </CardHeader>
         <CardContent className="space-y-6">
           <form onSubmit={handleRegister} className="space-y-4">
-            <div className="space-y-2">
+            <div className="space-y-1">
               <Label htmlFor="displayName">Display name</Label>
               <Input
                 id="displayName"
                 type="text"
                 autoComplete="name"
-                required
                 value={displayName}
-                onChange={(event) => setDisplayName(event.target.value)}
+                onChange={(event) => { setDisplayName(event.target.value); setFieldErrors((e) => ({ ...e, displayName: undefined })) }}
+                className={fieldErrors.displayName ? 'border-destructive' : ''}
               />
+              {fieldErrors.displayName
+                ? <p className="text-xs text-destructive">{fieldErrors.displayName}</p>
+                : <p className="text-xs text-muted-foreground">How do you want your name to appear on the app? Can be changed later.</p>
+              }
             </div>
-            <div className="space-y-2">
+            <div className="space-y-1">
               <Label htmlFor="email">Email</Label>
               <Input
                 id="email"
-                type="email"
+                type="text"
+                inputMode="email"
                 autoComplete="email"
-                required
                 value={email}
-                onChange={(event) => setEmail(event.target.value)}
+                onChange={(event) => { setEmail(event.target.value); setFieldErrors((e) => ({ ...e, email: undefined })) }}
+                className={fieldErrors.email ? 'border-destructive' : ''}
               />
+              {fieldErrors.email && <p className="text-xs text-destructive">{fieldErrors.email}</p>}
             </div>
-            <div className="space-y-2">
+            <div className="space-y-1">
               <Label htmlFor="password">Password</Label>
               <div className="relative">
                 <Input
                   id="password"
                   type={showPassword ? 'text' : 'password'}
                   autoComplete="new-password"
-                  required
                   value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  className="pr-10"
+                  onChange={(event) => { setPassword(event.target.value); setFieldErrors((e) => ({ ...e, password: undefined })) }}
+                  className={`pr-10 ${fieldErrors.password ? 'border-destructive' : ''}`}
                 />
                 <button
                   type="button"
@@ -139,6 +163,10 @@ export function RegisterPage() {
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
+              {fieldErrors.password
+                ? <p className="text-xs text-destructive">{fieldErrors.password}</p>
+                : <p className="text-xs text-muted-foreground">{'Please use a password that you will remember. Password reset is not yet implemented. If you forget your password, you basically lose your account \u00AF\\_(\u30C4)_/\u00AF'}</p>
+              }
             </div>
 
             {errorMessage && (
@@ -161,6 +189,12 @@ export function RegisterPage() {
               className="font-medium text-primary hover:underline"
             >
               Sign in
+            </Link>
+          </p>
+
+          <p className="text-center text-sm">
+            <Link to="/welcome" className="text-muted-foreground hover:text-foreground hover:underline">
+              &larr; Back to Welcome
             </Link>
           </p>
         </CardContent>
