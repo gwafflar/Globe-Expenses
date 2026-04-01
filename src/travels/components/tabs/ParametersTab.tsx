@@ -377,9 +377,10 @@ interface EditableLabeledListProps {
   field: ListField
   placeholder: string
   onItemsChange: (items: LabeledItem[]) => void
+  hideEmoji?: boolean
 }
 
-function EditableLabeledList({ items, travelId, field, placeholder, onItemsChange }: EditableLabeledListProps) {
+function EditableLabeledList({ items, travelId, field, placeholder, onItemsChange, hideEmoji }: EditableLabeledListProps) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editLabel, setEditLabel] = useState('')
   const [addLabel, setAddLabel] = useState('')
@@ -432,7 +433,7 @@ function EditableLabeledList({ items, travelId, field, placeholder, onItemsChang
     <div className="flex flex-col gap-1.5">
       {items.map((item) => (
         <div key={item.id} className="flex items-center gap-2 rounded-lg border bg-card px-3 py-2">
-          <EmojiInput value={item.emoji ?? ''} onChange={(v) => updateEmoji(item.id, v)} ariaLabel="Emoji" />
+          {!hideEmoji && <EmojiInput value={item.emoji ?? ''} onChange={(v) => updateEmoji(item.id, v)} ariaLabel="Emoji" />}
           {editingId === item.id ? (
             <input
               ref={editInputRef}
@@ -456,7 +457,7 @@ function EditableLabeledList({ items, travelId, field, placeholder, onItemsChang
       ))}
 
       <div key={addRowKey} className="flex items-center gap-2 rounded-lg border border-dashed px-3 py-2">
-        <EmojiInput value={addEmoji} onChange={setAddEmoji} ariaLabel="New item emoji" />
+        {!hideEmoji && <EmojiInput value={addEmoji} onChange={setAddEmoji} ariaLabel="New item emoji" />}
         <input
           type="text"
           value={addLabel}
@@ -1179,6 +1180,7 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
           field="cities"
           placeholder="City name…"
           onItemsChange={handleListChange('cities')}
+          hideEmoji
         />
       </Section>
 
