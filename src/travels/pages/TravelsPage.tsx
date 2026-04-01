@@ -164,7 +164,7 @@ export function TravelsPage() {
               Create your first trip to start tracking shared expenses with your travel companions.
             </p>
             <Button type="button" onClick={handleOpenCreateTravel}>
-              Create your first trip
+              🚀 Create your first trip
             </Button>
           </div>
         ) : (

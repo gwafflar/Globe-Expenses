@@ -1959,4 +1959,6 @@ UI/UX quick improvements
 Session 18.4.1
 - Bad connexion -> Banner turn off wifi to go offline
 Session 18.4.2
-- Balance settlemet
+- Balance settlement
+Session 18.4.3
+Travel header is now clickable and redirects to parameters

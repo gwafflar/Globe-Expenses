@@ -77,10 +77,10 @@ export function FeedbackForm({ source, onSuccess }: FeedbackFormProps) {
     <div className="flex flex-col gap-3">
       {/* Label */}
       <p className="text-sm text-muted-foreground">
-        Your feedback is important! Share a bug, a suggestion, or anything you'd like to improve. Add you contact info if you want to be contacted.
+        Your feedback is important! Instantaneously share a bug, a suggestion, or anything you'd like to improve. Add you contact info if you want to be contacted.
       </p>
       <p className="text-xs text-muted-foreground italic">
-        Votre avis compte ! Signalez un bug, une suggestion, ou toute piste d'am&eacute;lioration. Ajoute tes informations de contact si tu souhaites &ecirc;tre recontact&eacute;.
+        Votre avis compte ! Signalez instantanément un bug, une suggestion, ou toute piste d'am&eacute;lioration. Ajoute tes informations de contact si tu souhaites &ecirc;tre recontact&eacute;.
       </p>
 
       {/* Text area */}

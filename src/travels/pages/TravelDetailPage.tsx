@@ -1,7 +1,7 @@
 // src/travels/pages/TravelDetailPage.tsx
 //
 // Travel detail page. Fetches the travel document once on mount (getDoc),
-// then renders TravelTabs which owns the three-tab UI.
+// then renders TravelTabs which owns the four-tab UI.
 // Transaction list is subscribed via useTransactions (onSnapshot).
 
 import { useEffect, useRef, useState } from 'react'
@@ -57,7 +57,7 @@ function SaveBanner({ state, onDismiss }: { state: BannerState; onDismiss: () =>
     <div className={`fixed left-0 right-0 top-0 z-50 px-4 py-3 text-center text-sm font-medium text-white shadow-md ${
       state === 'pending' ? 'bg-orange-500' : 'bg-green-600'
     }`}>
-      {state === 'pending' ? '⏳ Saved locally — will sync when back online' : '✅ Transaction saved'}
+      {state === 'pending' ? '⏳ Saved locally — will sync with the server' : '✅ Transaction saved'}
     </div>
   )
 }

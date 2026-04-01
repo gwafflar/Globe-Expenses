@@ -178,13 +178,13 @@ function PendingBadge({ isPending }: { isPending: boolean }) {
         className="ml-1 cursor-help rounded-full bg-orange-100 px-1.5 py-0.5 text-[10px] font-medium text-orange-600"
         title="Saved locally — will sync when back online."
       >
-        ⏳ not synced
+        ⏳ Pending
       </span>
     )
   if (showSynced)
     return (
       <span className="ml-1 rounded-full bg-green-100 px-1.5 py-0.5 text-[10px] font-medium text-green-700">
-        ✅ synced
+        ✅ Saved
       </span>
     )
   return null
@@ -849,8 +849,8 @@ export function TransactionsTab({
         <div className="flex h-40 flex-col items-center justify-center gap-3 text-center">
           <p className="text-sm font-medium">No expenses recorded yet.</p>
           <p className="max-w-xs text-xs text-muted-foreground">Tap + to add your first expense.</p>
-          <Button type="button" size="sm" onClick={onAddExpense}>
-            Add your first expense
+          <Button type="button" size="sm" onClick={() => onAddExpense()}>
+            💸 Add your first expense
           </Button>
         </div>
       ) : filteredTransactions.length === 0 && hasActiveFilters ? (

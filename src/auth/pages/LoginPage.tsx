@@ -13,6 +13,8 @@ import {
 import type { FirebaseError } from 'firebase/app'
 import { auth } from '@/services/firebase'
 import { useAuthStore } from '@/auth/store/useAuthStore'
+import { GoogleLogo } from '@/auth/components/GoogleLogo'
+import { GooglePwaHint, markPwaGoogleAttempted, isPwaGoogleAttempted, clearPwaGoogleAttempted } from '@/auth/components/GooglePwaHint'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -68,6 +70,9 @@ export function LoginPage() {
   const [showPassword, setShowPassword] = useState(false) // toggles password visibility
   const [isLoading, setIsLoading] = useState<boolean>(false) // tracks whether a sign-in request is in progress
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  // Shown on PWA after clicking Google button or returning from a failed redirect.
+  // Initialised from sessionStorage so it survives the signInWithRedirect round-trip.
+  const [showPwaHint, setShowPwaHint] = useState(() => isPwaGoogleAttempted())
 
   // When running as an installed PWA, Google sign-in uses a redirect flow.
   // On mount we check if we're returning from a Google redirect and, if so,
@@ -78,7 +83,8 @@ export function LoginPage() {
     getRedirectResult(auth)
       .then((result) => {
         if (result?.user) {
-          // User successfully signed in via redirect — navigate to the app.
+          // User successfully signed in via redirect — clear the flag and navigate.
+          clearPwaGoogleAttempted()
           navigate(redirectTo, { replace: true })
         }
       })
@@ -101,7 +107,9 @@ export function LoginPage() {
     try {
       // Firebase Auth call for email/password login.
       await signInWithEmailAndPassword(auth, email, password)
-      navigate(redirectTo, { replace: true })
+      // Don't navigate here — the useEffect watching currentUser handles it
+      // once the Zustand store is fully populated (avoids a brief bounce
+      // through /welcome when ProtectedRoute hasn't seen the user yet).
     } catch (error) {
       // Narrow unknown error to FirebaseError when possible.
       const message =
@@ -110,7 +118,6 @@ export function LoginPage() {
           : 'Unable to sign in. Please try again.')
 
       setErrorMessage(message)
-    } finally {
       setIsLoading(false)
     }
   }
@@ -122,6 +129,9 @@ export function LoginPage() {
     try {
       const provider = new GoogleAuthProvider()
       if (isInstalledPWA()) {
+        // Persist flag in sessionStorage so the hint survives the redirect round-trip.
+        markPwaGoogleAttempted()
+        setShowPwaHint(true)
         // In standalone PWA mode, signInWithPopup is blocked by some browsers.
         // Use redirect flow instead: page navigates away and comes back;
         // getRedirectResult() on the next mount picks up the credential.
@@ -131,7 +141,7 @@ export function LoginPage() {
       }
       // Normal browser: popup works fine.
       await signInWithPopup(auth, provider)
-      navigate(redirectTo, { replace: true })
+      // Don't navigate — useEffect watching currentUser handles it.
     } catch (error) {
       const message =
         (error && typeof error === 'object' && 'code' in error
@@ -139,7 +149,6 @@ export function LoginPage() {
           : 'Unable to sign in with Google. Please try again.')
 
       setErrorMessage(message)
-    } finally {
       setIsLoading(false)
     }
   }
@@ -215,12 +224,15 @@ export function LoginPage() {
           <Button
             type="button"
             variant="outline"
-            className="w-full bg-background"
+            className="w-full bg-background gap-2"
             disabled={isLoading}
             onClick={handleGoogleSignIn}
           >
-            Sign in with Google
+            <GoogleLogo />
+            Continue with Google
           </Button>
+
+          <GooglePwaHint visible={showPwaHint} />
 
           <p className="text-center text-sm text-muted-foreground">
             Don&apos;t have an account?{' '}

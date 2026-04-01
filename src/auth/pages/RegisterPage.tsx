@@ -2,15 +2,22 @@
 // Uses Firebase Auth for registration and relies on the global auth store's
 // onAuthStateChanged listener to create the Firestore user document.
 
-import { useState, type FormEvent } from 'react'
+import { useState, useEffect, type FormEvent } from 'react'
 import { Eye, EyeOff } from 'lucide-react'
 import { Link, useNavigate, useLocation } from 'react-router-dom'
 import {
   createUserWithEmailAndPassword,
   updateProfile,
+  GoogleAuthProvider,
+  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
 } from 'firebase/auth'
 import type { FirebaseError } from 'firebase/app'
 import { auth } from '@/services/firebase'
+import { useAuthStore } from '@/auth/store/useAuthStore'
+import { GoogleLogo } from '@/auth/components/GoogleLogo'
+import { GooglePwaHint, markPwaGoogleAttempted, isPwaGoogleAttempted, clearPwaGoogleAttempted } from '@/auth/components/GooglePwaHint'
 import {
   Card,
   CardContent,
@@ -36,10 +43,47 @@ function mapRegisterError(error: FirebaseError): string {
   }
 }
 
+// Returns true when the app is running as an installed PWA (standalone window).
+// signInWithPopup doesn't work reliably in standalone mode — use redirect instead.
+function isInstalledPWA(): boolean {
+  return (
+    window.matchMedia('(display-mode: standalone)').matches ||
+    (window.navigator as unknown as { standalone?: boolean }).standalone === true
+  )
+}
+
 export function RegisterPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const redirectTo = new URLSearchParams(location.search).get('redirect') || '/travels'
+
+  // Watch global auth state — once the Zustand store has the user (after
+  // onAuthStateChanged fires and loads the profile), navigate to the app.
+  const { currentUser, isAuthReady } = useAuthStore()
+  useEffect(() => {
+    if (isAuthReady && currentUser) {
+      navigate(redirectTo, { replace: true })
+    }
+  }, [currentUser, isAuthReady, navigate, redirectTo])
+
+  // Handle Google redirect result for installed PWA mode.
+  useEffect(() => {
+    if (!isInstalledPWA()) return
+    setIsLoading(true)
+    getRedirectResult(auth)
+      .then((result) => {
+        if (result?.user) {
+          clearPwaGoogleAttempted()
+        } else {
+          setIsLoading(false)
+        }
+        // If result.user exists, the useEffect above will handle navigation.
+      })
+      .catch(() => {
+        setErrorMessage('Unable to sign in with Google. Please try again.')
+        setIsLoading(false)
+      })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [displayName, setDisplayName] = useState<string>('')
   const [email, setEmail] = useState<string>('')
@@ -47,6 +91,9 @@ export function RegisterPage() {
   const [showPassword, setShowPassword] = useState(false) // toggles password visibility
   const [isLoading, setIsLoading] = useState<boolean>(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  // Shown on PWA after clicking Google button or returning from a failed redirect.
+  // Initialised from sessionStorage so it survives the signInWithRedirect round-trip.
+  const [showPwaHint, setShowPwaHint] = useState(() => isPwaGoogleAttempted())
   // Per-field validation errors, shown inline below each input
   const [fieldErrors, setFieldErrors] = useState<{ displayName?: string; email?: string; password?: string }>({})
 
@@ -85,7 +132,9 @@ export function RegisterPage() {
       // and creates / updates that document when it detects a logged-in user.
       // Duplicating that logic here would cause two concurrent writes.
 
-      navigate(redirectTo, { replace: true })
+      // Don't navigate here — the useEffect watching currentUser handles it
+      // once the Zustand store is fully populated (avoids a brief bounce
+      // through /welcome when ProtectedRoute hasn't seen the user yet).
     } catch (error) {
       // Show invalid-email as a field-level error rather than a generic banner
       if (error && typeof error === 'object' && 'code' in error && (error as FirebaseError).code === 'auth/invalid-email') {
@@ -97,7 +146,33 @@ export function RegisterPage() {
             : 'Unable to create your account. Please try again.')
         setErrorMessage(message)
       }
-    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleGoogleSignIn = async () => {
+    setErrorMessage(null)
+    setIsLoading(true)
+
+    try {
+      const provider = new GoogleAuthProvider()
+      if (isInstalledPWA()) {
+        // Persist flag in sessionStorage so the hint survives the redirect round-trip.
+        markPwaGoogleAttempted()
+        setShowPwaHint(true)
+        // In standalone PWA mode, signInWithPopup is blocked by some browsers.
+        // Use redirect flow instead.
+        await signInWithRedirect(auth, provider)
+        return
+      }
+      await signInWithPopup(auth, provider)
+      // Don't navigate — useEffect watching currentUser handles it.
+    } catch (error) {
+      const message =
+        (error && typeof error === 'object' && 'code' in error
+          ? mapRegisterError(error as FirebaseError)
+          : 'Unable to sign in with Google. Please try again.')
+      setErrorMessage(message)
       setIsLoading(false)
     }
   }
@@ -181,6 +256,25 @@ export function RegisterPage() {
               {isLoading ? 'Creating account…' : 'Create account'}
             </Button>
           </form>
+
+          <div className="flex items-center justify-center">
+            <span className="h-px w-16 bg-border" />
+            <span className="px-3 text-xs text-muted-foreground">or</span>
+            <span className="h-px w-16 bg-border" />
+          </div>
+
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full bg-background gap-2"
+            disabled={isLoading}
+            onClick={handleGoogleSignIn}
+          >
+            <GoogleLogo />
+            Continue with Google
+          </Button>
+
+          <GooglePwaHint visible={showPwaHint} />
 
           <p className="text-center text-sm text-muted-foreground">
             Already have an account?{' '}

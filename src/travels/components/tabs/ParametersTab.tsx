@@ -855,7 +855,7 @@ function MembersSection({
             {!friendsLoading && invitableFriends.length === 0 && (
               <p className="py-2 text-center text-xs text-muted-foreground">
                 {friends.length === 0
-                  ? 'No friends yet. Add friends from your profile page.'
+                  ? "No friends yet. Add friends from your profile page. Your friends don't have the app yet? Share the invite link with the button below 'Generate invite link' so they can join! You can also add their name without an account using the button above 'Add a friend without an account'."
                   : 'All your friends are already in this travel.'}
               </p>
             )}
@@ -1206,6 +1206,14 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
                 ? (isArchived ? 'Archived!' : 'Unarchived!')
                 : (isArchived ? 'Unarchive this travel' : 'Archive this travel')}
           </Button>
+          {/* Explanation label — different wording for solo vs multi-user travels */}
+          {!isArchived && !archiveDone && (
+            <p className="text-xs text-muted-foreground">
+              {isOnlyUser
+                ? 'Move this travel to an archive directory. You will still be able to open it and add or edit transactions.'
+                : 'Move this travel to an archive directory. You will remain a member of this travel, and still be able to open it and add or edit transactions. This will have no impact on other participants.'}
+            </p>
+          )}
 
           {/* Visual confirmation banner after archiving */}
           {archiveDone && (
