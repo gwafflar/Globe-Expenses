@@ -46,12 +46,16 @@ The frontend is organized into the following top-level modules:
 - **travels/** — Travel list, travel creation, travel detail view
   - `travels/components/TravelTabs.tsx` — four-tab container with swipe gesture (Transactions / Balance / Dashboard / Parameters)
   - `travels/components/tabs/TransactionsTab.tsx` — transaction list with pending badges, tap-to-edit
-  - `travels/components/tabs/BalanceTab.tsx` — balance/settlement (placeholder)
+  - `travels/components/tabs/BalanceTab.tsx` — net balances per member, greedy settlement computation, settlement currency selector, copy-to-clipboard, "Mark as paid" pre-fill into transfer form
   - `travels/components/tabs/DashboardTab.tsx` — read-only analytics: hero totals, spending-over-time, recent days by category, by-category breakdown, per-person stats, currencies summary
   - `travels/components/tabs/dashboardHelpers.ts` — pure TypeScript helpers (no React): period filtering, member stats, colour palette, formatting, split normalization
   - `travels/components/CollapsibleCard.tsx` — reusable collapsible card (used by Dashboard; planned for Balance tab)
   - `travels/components/tabs/ParametersTab.tsx` — all per-travel editable lists and settings, members section with invite
 - **transactions/** — Transaction form (create + edit), transaction service
+- **feedback/** — In-app beta feedback form and banner
+  - `feedback/services/feedbackService.ts` — writes to `/feedback/{id}` (awaited, not fire-and-forget; supports anonymous users)
+  - `feedback/components/FeedbackForm.tsx` — bilingual (EN/FR) textarea form with success animation, collapsible contact card
+  - `feedback/components/BetaBanner.tsx` — amber banner visible on all authenticated pages; opens FeedbackForm in a Dialog
 - **friends/** — Friend search, invite flows, invite acceptance page
   - `friends/services/friendService.ts` — all friend and invite Firestore operations
   - `friends/hooks/usePendingInvites.ts` — real-time snapshot of incoming active invites, exposes `{ invites, count }`
@@ -94,6 +98,7 @@ Conflict policy for v1: last-write-wins (Firestore default). Concurrent edit det
 | travels/{travelId} | Travel metadata, member list |
 | travels/{travelId}/transactions/{txId} | Individual transaction documents |
 | travels/{travelId}/drafts/{draftId} | Draft transactions pending user review (v2) |
+| feedback/{feedbackId} | User-submitted beta feedback. Writable by any user including unauthenticated. Fields: userId, displayName, text, source, userAgent, createdAt, imageUrl?. |
 | travels/{travelId}/settlements/{sId} | Computed settlement suggestions (v2) |
 
 ## 4.2 Core Data Models
@@ -141,6 +146,8 @@ TypeScript interface defined in `src/auth/services/userService.ts`. Mirrors the 
 | createdBy | string | UID of travel creator |
 | createdAt | Timestamp | Creation timestamp |
 | currencies | string[] | All currencies used in this travel (ISO 4217 codes) |
+| mainCurrency | string? | Reference currency for exchange rate conversions. All transactions compute `exchangeRate` and `totalAmountMain` relative to this. Set at creation (defaults to user's `mainCurrency`); locked afterwards (editable + batch recompute is v2). Absent on legacy docs — resolved via `getTravelMainCurrency()`. |
+| defaultRates | Record<string, number>? | Per-travel exchange rates: `{ "USD": 0.92 }` means 1 USD = 0.92 mainCurrency. Seeded from hardcoded table at creation via `buildDefaultRates()`. User-editable in ParametersTab. `getExchangeRate()` checks these before the hardcoded fallback. Absent on legacy docs. |
 | categories | LabeledItem[] | Per-travel category list. Empty array on new travels — falls back to userProfile.categories in forms if empty. |
 | paymentMethods | LabeledItem[] | Per-travel payment method list. Same fallback behaviour. |
 | countries | LabeledItem[] | Countries visited on this travel. Seeded automatically via syncTransactionLocation(); editable in Parameters tab via CountryPicker. |
@@ -180,11 +187,15 @@ TypeScript interface defined in `src/auth/services/userService.ts`. Mirrors the 
 | lastModifiedAt | Timestamp | Last write timestamp (for conflict detection) |
 | lastModifiedBy | string | UID of last writer |
 | draftId | string? | ID of the originating draft if created via bank import (v2) |
-| country | string? | Country where the expense occurred (optional) |
+| country | string? | Country where the expense occurred. Stored with flag emoji prefix (e.g. "🇯🇵 Japan"). |
 | city | string? | City where the expense occurred (optional) |
 | notes | string? | Optional free-text notes |
+| amountFormula | string? | Raw formula string entered by the user (e.g. "2*2.5 + 1.5"). `totalAmount` is always the computed result. Display-only — never used in any calculation. |
+| type | TransactionType? | `'expense' \| 'withdrawal' \| 'adjustment' \| 'transfer'`. Undefined on legacy documents → treated as `'expense'`. |
+| fees | number? | Withdrawal fees in transaction currency. Deducted from wallet balance: user received `totalAmount - fees`. Only meaningful when `type === 'withdrawal'`. |
+| adjustmentMode | AdjustmentMode? | `'expense'` (counts in spending analytics) or `'balance_only'` (wallet-only, invisible to analytics). Only meaningful when `type === 'adjustment'`. |
 
-**Split**: `{ travelMemberId: string, amount: number }` — amounts must sum to totalAmount. `travelMemberId` is the stable nanoid from `TravelMember`, never a Firebase Auth UID. Legacy documents stored `{ uid, amount }`; `normalizeTransactionSplits()` in `dashboardHelpers.ts` remaps these at read time.
+**Split**: `{ travelMemberId: string, amount: number }` — amounts must sum to totalAmount. `travelMemberId` is the stable nanoid from `TravelMember`, never a Firebase Auth UID. Legacy documents stored `{ uid, amount }`; `normalizeTransactionSplits()` in `dashboardHelpers.ts` remaps these at read time (applied in both `DashboardTab` and `TransactionsTab`).
 
 **CreatedByRef**: `{ type: 'user', uid: string } | { type: 'agent', name: string }`
 
@@ -249,7 +260,13 @@ A positive net means the member is owed money. A negative net means the member o
 
 Optimal settlement suggestions are derived using a greedy debt-simplification algorithm (minimize number of transfers): sort creditors descending and debtors ascending by magnitude, repeatedly match the largest pair and transfer `min(creditor.net, |debtor.net|)`, stop when all nets are within 0.01 of zero.
 
-Implementation: `computeBalances()` and `computeSettlements()` in `src/travels/utils/balanceUtils.ts` — pure functions, no React or Firebase dependencies. The member identity key is `travelMemberId` (not Firebase Auth UID). This computation runs client-side in v1 and may move to Cloud Functions in v2.
+Implementation: `computeBalances()`, `computeBalancesRaw()`, and `computeSettlements()` in `src/travels/utils/balanceUtils.ts` — pure functions, no React or Firebase dependencies. The member identity key is `travelMemberId` (not Firebase Auth UID). This computation runs client-side in v1 and may move to Cloud Functions in v2.
+
+**Same-currency optimization**: `getSingleCurrency(transactions)` detects when all balance-affecting transactions share one currency. When that currency equals the selected settlement currency, `BalanceTab` uses `computeBalancesRaw()` (sums raw `split.amount` without multiplying by `exchangeRate`). This eliminates the lossy round-trip distortion of currency→mainCurrency→currency conversions (e.g. an all-MYR trip settling in MYR).
+
+**Transaction type predicates** (in `walletHelpers.ts`):
+- `countsAsSpending(tx)` — true for `expense` and spending-mode `adjustment`. Controls what appears in analytics and the Dashboard.
+- `affectsBalance(tx)` — true for `expense`, `adjustment`, and `transfer`. Controls what enters the balance/settlement computation. `BalanceTab` uses this predicate, not `countsAsSpending`, so transfers correctly shift inter-member balances without appearing in spending analytics.
 
 # 5. Key Flows
 

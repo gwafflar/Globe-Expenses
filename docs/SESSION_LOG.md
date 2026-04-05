@@ -1630,11 +1630,11 @@ WithdrawalForm.tsx deleted. All withdrawal behavior (fees field, auto-name, requ
 ### Carry-forward items (open)
 
 - [ ] **Per-travel field customization** — hideable/showable fields via Parameters; `FIELD_TYPES` config ready for extension
-- [ ] **`onNavigateToParameters` prop** — not yet wired in TravelDetailPage (solo CTA saves but doesn't redirect)
+- [x] **`onNavigateToParameters` prop** — wired: `TravelDetailPage.tsx:585` passes `() => setRequestTab('parameters')`
 - [ ] Cloud Function `onTravelDeleted` (v2)
-- [ ] PWA icons
-- [ ] Display Mode in Transactions tab
-- [ ] Move composite indexes to `firestore.indexes.json`
+- [x] PWA icons — real branded icons in `public/images/` (globe + "GlobeExpense" logo)
+- [ ] Display Mode in Transactions tab — dropped from v1 (see Status Board)
+- [x] Move composite indexes to `firestore.indexes.json` — 3 indexes in place covering all composite queries
 
 ---
 
@@ -1716,12 +1716,12 @@ All downstream consumers (TransactionForm, ReconciliationDialog, DashboardTab, B
 ### Carry-forward items (open)
 
 - [ ] **Editable mainCurrency (v2)** — batch recompute all transactions when changed
-- [ ] **ProfilePage currency picker** — wire the "coming soon" placeholder to `updateUserProfile`
+- [x] **ProfilePage currency picker** — implemented: full ISO 4217 dropdown wired to `updateUserProfile(uid, { mainCurrency })` with save/loading/success states
 - [ ] **Live exchange rates (v2)** — replace hardcoded rates, store historical rate per transaction
 - [ ] Per-travel field customization
 - [ ] Cloud Function `onTravelDeleted` (v2)
-- [ ] PWA icons
-- [ ] Display Mode in Transactions tab
+- [x] PWA icons — real branded icons in `public/images/`
+- [ ] Display Mode in Transactions tab — dropped from v1 (see Status Board)
 
 ---
 
@@ -1839,14 +1839,14 @@ BalanceTab: raw-amount path when singleCurrency === settlementCurrency
 ### Carry-forward items (open)
 
 - [ ] **Editable mainCurrency (v2)** — batch recompute all transactions when changed
-- [ ] **ProfilePage currency picker** — wire the "coming soon" placeholder
+- [x] **ProfilePage currency picker** — implemented (full ISO 4217 dropdown wired to `updateUserProfile`)
 - [ ] **Live exchange rates (v2)** — global `config/exchangeRates` doc + Cloud Function + auto-sync toggle
 - [ ] **Per-currency balance tracking (v2)** — full multi-currency balance map
 - [ ] **Payment-method-specific rates (v2)** — cash/card rate rules
 - [ ] Per-travel field customization
 - [ ] Cloud Function `onTravelDeleted` (v2)
-- [ ] PWA icons
-- [ ] Display Mode in Transactions tab
+- [x] PWA icons — real branded icons in `public/images/`
+- [ ] Display Mode in Transactions tab — dropped from v1 (see Status Board)
 
 
 ---
@@ -1954,11 +1954,145 @@ match /feedback/{feedbackId} {
 - [ ] Firebase Storage security rules (authenticated, size limit, content type)
 
 
-Session 18.4
-UI/UX quick improvements
-Session 18.4.1
-- Bad connexion -> Banner turn off wifi to go offline
-Session 18.4.2
-- Balance settlement
-Session 18.4.3
-Travel header is now clickable and redirects to parameters
+---
+
+## 📝 Working Session 018.4 — 31 March 2026
+
+**Type**: Feature implementation + UX improvements
+**Tools used**: Claude Code (claude-code CLI)
+**Commits**: `e340cbe`
+
+### What was built
+
+**Settlement buttons in BalanceTab**
+- "Mark as paid" button on each suggested settlement opens `TransactionForm` in transfer mode, pre-filled with amount, currency, sender, and receiver.
+- General "Add a settlement" button at the bottom opens a blank transfer form.
+
+**UX improvements**
+- **Loading screen**: 2-second delayed amber banner with `WifiOff` icon — advises users on flaky connections to try airplane mode to load cached data.
+- **Travel header**: emoji + name area is now tappable (navigates to Parameters tab) with a subtle opacity hover effect.
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `src/transactions/components/TransactionForm.tsx` | Accept pre-filled `initialValues` for transfer mode |
+| `src/travels/components/tabs/BalanceTab.tsx` | Settlement buttons with pre-fill, "Add settlement" CTA |
+| `src/travels/pages/TravelDetailPage.tsx` | Loading banner (delayed 2s), tappable header |
+| `src/travels/components/TravelTabs.tsx` | Minor tab wiring updates |
+
+---
+
+## 📝 Working Session 019 — 1 April 2026
+
+**Type**: Feature implementation + UX improvements
+**Tools used**: Claude Code (claude-code CLI)
+**Commits**: `4066c26`, `da8ab86`
+
+### What was built
+
+#### Google OAuth UX improvements (`4066c26`)
+
+- **`GoogleLogo.tsx`** (new): shared Google "G" SVG component used across all 3 auth pages.
+- **RegisterPage**: added "Continue with Google" button (now consistent across Welcome, Login, Register).
+- **Post-login redirect fix**: removed immediate `navigate()` call; redirect is now handled by `useEffect` watching auth state, preventing a bounce.
+- **`GooglePwaHint.tsx`** (new): sessionStorage-persisted help box for users experiencing Google sign-in issues in PWA mode. Shows copy-link button + inline feedback form. Survives the OAuth redirect round-trip via sessionStorage flag.
+
+#### Welcome page onboarding steps + PWA installation guide (`da8ab86`)
+
+- **"Empower your travel in just 5 steps"** section with color-coded step cards:
+  - Steps 1–3 required (account → travel → transactions)
+  - Step 4 (add friends) visually marked as optional
+  - Step 5 shows two outcomes: track spending + see friends' debt
+  - Discrete gradient separators between sections
+- **PWA installation banner**: multi-platform support (Android, iOS, Windows, macOS, Linux). Collapsible "Know More" tutorial with detailed per-platform installation instructions.
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `src/auth/components/GoogleLogo.tsx` | **New** — shared Google "G" SVG |
+| `src/auth/components/GooglePwaHint.tsx` | **New** — sessionStorage-persisted PWA hint box |
+| `src/auth/pages/LoginPage.tsx` | Use `GoogleLogo`, fix redirect bounce |
+| `src/auth/pages/RegisterPage.tsx` | Add Google button, use `GoogleLogo` |
+| `src/auth/pages/WelcomePage.tsx` | Onboarding steps section, PWA install banner |
+| `src/travels/components/tabs/ParametersTab.tsx` | Minor fixes |
+| `src/travels/components/tabs/TransactionsTab.tsx` | Minor fixes |
+| `src/travels/pages/TravelDetailPage.tsx` | Minor fixes |
+| `src/travels/pages/TravelsPage.tsx` | Minor fix |
+| `src/feedback/components/FeedbackForm.tsx` | Minor fix |
+
+---
+
+## 📋 Carry-Forward Status Board — 5 April 2026
+
+> Consolidated verification of all carry-forward items across sessions 003–019.
+> Each item code-verified. Items resolved but never explicitly marked done are noted.
+
+### ✅ Resolved — implicitly or never explicitly closed
+
+| Item | First raised | Resolution |
+|------|-------------|------------|
+| Balance tab settlement computation | Session 007 | Session 011.2 — `balanceUtils.ts`, full BalanceTab rewrite |
+| Delete transaction | Session 007 | Session 012.1 + commit `f14f7f4` — `deleteTransaction()` fire-and-forget + AlertDialog confirmation |
+| Transaction filter (7 dimensions + search) | Session 007 | Session 012.5 — `useTransactionFilters.ts` + `FilterPanel.tsx` |
+| Unified TransactionForm + type selector | Session 014 | Session 016 — full-screen overlay, 4-type selector, `FIELD_TYPES` config, `WithdrawalForm.tsx` deleted |
+| PWA icons | Session 003 | Done at some point (no explicit session note). `public/images/icon-192.png`, `icon-512.png`, `apple-touch-icon.png` are real branded icons (globe + "GlobeExpense" logo). |
+| `onNavigateToParameters` prop | Session 016 | Done without session note. `TravelDetailPage.tsx:585` passes `onNavigateToParameters={() => setRequestTab('parameters')}`. Solo-travel CTA correctly redirects. |
+| ProfilePage currency picker | Session 017.1 | Done without session note. `ProfilePage.tsx` has a full currency dropdown (lines 118–513) wired to `updateUserProfile(uid, { mainCurrency })` with save/loading state. |
+| Composite indexes in `firestore.indexes.json` | Session 007 | Done without session note. File contains 3 composite indexes covering all composite queries: `transactions (date↓, createdAt↓)`, `travels (memberUids contains, createdAt↓)`, `invites (toUid, status, createdAt↓)`. |
+
+### 🔴 Still open — v1
+
+#### 1. Display Mode in Transactions tab — dropped from v1, moved to v2
+**Location:** `TransactionsTab.tsx:800` — `<PlaceholderButton label="⊞ Display" />` (placeholder kept as visual affordance)  
+**Status:** The day-grouped accordion layout introduced in Session 011 (with inline expanded detail, split summary, edit/delete actions) satisfies the core need that Display Mode was meant to address. No additional layout toggle is desired for v1.  
+**v2 scope (if ever):** Could allow grouping by category, by person, or a compact/dense list mode for power users. Would need a UX spec before implementation. Not a priority.
+
+#### ~~2. Travel list sync debug log~~ ✅ Fixed
+`console.log('[ImportXlsxDialog] syncing travel lists:', ...)` removed from `ImportXlsxDialog.tsx`. Error log (`console.error`) retained.
+
+### 🟡 Still open — v2
+
+#### 3. Cloud Function `onTravelDeleted`
+**What:** Firestore `onDelete` trigger on `travels/{travelId}` that cascade-deletes the `transactions/` subcollection server-side.  
+**Why needed:** The current client-side approach (`getDocs` + `writeBatch` in `deleteTravel()`) has two known failure modes: (a) if the client crashes between the transaction batch delete and `deleteDoc` on the travel, orphaned transaction documents remain in Firestore consuming storage (invisible since security rules check `memberUids` on the now-deleted parent); (b) travels with 500+ transactions exceed Firestore batch limit and the delete fails silently.  
+**Scope:** Cloud Functions, requires `firebase-functions` package + deploy.
+
+#### 4. Editable `mainCurrency` + batch recompute
+**What:** Allow changing `travel.mainCurrency` after creation. When changed, recompute `exchangeRate` and `totalAmountMain` for every transaction in the travel using the new rate.  
+**Why locked:** A batch recompute touching every transaction is a destructive operation. Needs a confirmation dialog, a loading state, and `writeBatch` calls chunked at 500 ops (same pattern as `deleteTravel`). With hardcoded rates, the recompute is deterministic and idempotent — so the operation is safe.  
+**Impact:** `ParametersTab` shows mainCurrency as read-only with "set at creation" badge. `getTravelMainCurrency()` is already the canonical reader.
+
+#### 5. Live exchange rates
+**What:** Replace the hardcoded `EXCHANGE_RATES` table with daily rates fetched from a free API (e.g. `frankfurter.app`). Stored in a shared Firestore document `config/exchangeRates` updated by a Cloud Function on a daily schedule.  
+**Rate priority chain (designed):** `tx.exchangeRate` (locked per-transaction) → `travel.defaultRates` (user edits) → global live rates → hardcoded fallback.  
+**Optional toggle:** per-travel auto-sync of `defaultRates` from the global table.  
+**`getExchangeRate()` signature** would gain a 4th param: `getExchangeRate(from, to, travelRates?, globalRates?)`.
+
+#### 6. Per-currency balance tracking
+**What:** Replace the current single-mainCurrency balance computation with a full `Map<travelMemberId, Map<currency, amount>>`. Would allow precise settlement in any currency for mixed-currency travels (e.g. a trip that mixes EUR, MYR, and THB transactions).  
+**Current state:** The same-currency optimization (`getSingleCurrency` + `computeBalancesRaw`) partially addresses this for the common case where all transactions share one currency. The full multi-currency map is needed for the general case.  
+**Replaces:** The same-currency optimization becomes a special case of the general solution.
+
+#### 7. Payment-method-specific exchange rates
+**What:** Allow per-payment-method rate overrides. Rules: cash wallet = last withdrawal's exchange rate; card = card-specific configured rate.  
+**Motivation:** Cash transactions and card transactions often use different rates. A cash EUR→MYR withdrawal at the airport exchange desk has a worse rate than a card payment. Tracking them separately gives more accurate analytics.
+
+#### 8. Per-member transaction privacy (wallet data)
+**What:** Add `private: boolean` field to transactions. Firestore security rules enforce that only the owner can read private transactions. Wallet events (withdrawals, adjustments) are the primary use case.  
+**Current state (v1):** All travel members can technically read each other's wallet events via Firestore. UI only renders each user's own wallet balances. A disclaimer is shown.  
+**Requires:** Restructuring the transactions subcollection or adding a per-member filtered subcollection. Significant security rule change.
+
+#### 9. Per-travel field customization
+**What:** Allow hiding/showing fields in the transaction form on a per-travel basis (e.g. disable country/city for a city trip, hide payment method if not relevant). Potentially also user-defined custom data fields.  
+**Current state:** `FIELD_TYPES` config in `TransactionForm.tsx` already maps each field to which transaction types show it — it's designed to accept per-travel overrides as a third condition. The `travel.settings.trackLocation: boolean` field already controls country/city visibility.  
+**What remains:** Expose the controls in ParametersTab UI. Define which fields are customizable. Decide on data model for custom fields.
+
+### 🔵 Deferred — external dependency
+
+#### 10. Image upload in Feedback form
+**What:** Allow users to attach a screenshot to their feedback submission.  
+**Blocked by:** Firebase Storage bucket setup. The project's Firestore is in the EU region; Firebase Storage free tier (Spark plan) requires the US region. Creating a Storage bucket fails.  
+**Current state:** All code is written and commented out in `feedbackService.ts` and `FeedbackForm.tsx`. Ready to uncomment once a Storage bucket is available (paid plan or region change).  
+**Required when unblocked:** Firebase Storage security rules (authenticated, 5 MB limit, `image/*` MIME type).

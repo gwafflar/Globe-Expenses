@@ -51,6 +51,8 @@ The product is distributed as a Progressive Web App (PWA), installable directly 
 - All members have equal access to read and write transactions within a travel.
 - A user can view only travels in which they are a member.
 - Each travel carries per-travel editable lists: categories, paymentMethods, countries, cities (all `LabeledItem[]`). Managed from the Parameters tab of the travel detail view.
+- Each travel has a **main currency** (`mainCurrency`: ISO 4217) set at creation (defaults to user's `mainCurrency`). All transactions in the travel compute `exchangeRate` and `totalAmountMain` relative to this currency. Locked after creation in v1 (editable + batch recompute is v2). Canonical reader: `getTravelMainCurrency(travel)` with fallback chain `mainCurrency → currencies[0] → 'EUR'`.
+- Each travel has **default exchange rates** (`defaultRates: Record<string, number>`) seeded from the hardcoded table at creation. User-editable in the Parameters tab (both directions). Per-transaction override is available in the form. `getExchangeRate(from, to, travelRates?)` checks travel rates first.
 - A member can **leave** a multi-user travel (removed from `memberUids`, slot unclaimed but preserved for split integrity). If the leaving member was the creator, `createdBy` is reassigned to a random remaining member from `memberUids`.
 - A member can **delete** a solo travel (or a travel where they are the last user in `memberUids`). This hard-deletes all transactions and the travel document.
 - A member can **archive** a travel for themselves only (per-user `archivedByUids` array). Archived travels appear in a separate collapsible section on the travels list and show an unarchive banner when opened.
@@ -77,6 +79,10 @@ The product is distributed as a Progressive Web App (PWA), installable directly 
 | Beneficiaries (splits) | Yes | Split[] | Who benefits and how much each. Must sum to total amount. |
 | Draft ID | No | String | ID of the originating draft if created via bank import (v2). Enables retrieval of raw bank data on demand. |
 | Notes | No | String | Free text additional notes |
+| Type | No | `'expense' \| 'withdrawal' \| 'adjustment' \| 'transfer'` | Transaction purpose. Absent on legacy documents → treated as `'expense'`. Withdrawal = wallet top-up; Adjustment = reconciliation entry; Transfer = person-to-person money movement (settlement, loan). |
+| Fees | No | Decimal | Withdrawal fees in transaction currency. User received `totalAmount - fees`. Only set when `type === 'withdrawal'`. |
+| Adjustment Mode | No | `'expense' \| 'balance_only'` | For adjustment transactions: whether the amount counts in spending analytics. Only set when `type === 'adjustment'`. |
+| Amount Formula | No | String | Raw formula entered by user (e.g. `"2*2.5 + 1.5"`). `totalAmount` is always the evaluated result. Display-only. |
 
 ### 3.3.2 Transaction Attribution
 
@@ -87,7 +93,7 @@ The `createdBy` field uses a union type to distinguish between manual user entry
 
 ### 3.3.3 Split Model
 
-A Split is defined as: `{ uid: string, amount: number }`. Both `paidBy` and `beneficiaries` are arrays of Splits.
+A Split is defined as: `{ travelMemberId: string, amount: number }`. `travelMemberId` is the stable nanoid from `TravelMember` — never a Firebase Auth UID. Both `paidBy` and `beneficiaries` are arrays of Splits.
 
 Invariants enforced by the UI:
 - `sum(paidBy[].amount) == totalAmount` (validated to 2dp rounding tolerance)
@@ -123,7 +129,23 @@ When a transaction is saved with a country or city not yet in the travel's lists
 - **Create**: any travel member can create. Fire-and-forget write.
 - **Edit**: tap any transaction row to open the form pre-filled with existing values. On save, `updateTransaction()` uses `deleteField()` for any cleared optional fields (category, paymentMethod, country, city, notes) to actually remove the Firestore field.
 - **Delete**: any travel member can delete (v1, no access control beyond membership)
-- **View list**: filterable by date range, category, payment method, currency, member (filter UI is a placeholder in current implementation)
+- **View list**: client-side filter & search — 8 dimensions (type, category, currency, country, city, paymentMethod, paidBy, beneficiaries) + text search on name/amount. OR within dimension, AND across dimensions. Cross-filtering greys out values with no remaining matches. "Undefined" sentinel for optional fields. Filter state managed by `useTransactionFilters` hook. Display Mode is still deferred.
+
+### 3.3.6 Wallet Tracker (Cash Simulator)
+
+Per-travel tracking of remaining balances for any payment method (typically cash wallets). Uses the existing transaction subcollection — no new Firestore collections.
+
+**Withdrawal** (`type: 'withdrawal'`): money deposited into a payment method (ATM withdrawal, top-up). `paidBy` = owner, `beneficiaries` = owner, `fees` = optional bank/ATM fee deducted from the deposited amount. Does not count as spending.
+
+**Adjustment** (`type: 'adjustment'`): reconciliation entry to correct a wallet balance. `adjustmentMode` controls whether it counts in spending analytics (`'expense'`) or is invisible to analytics (`'balance_only'`).
+
+**Transfer** (`type: 'transfer'`): person-to-person money movement (settlement, loan, reimbursement). `paidBy` = sender, `beneficiaries` = receiver(s). Does not count as spending, but shifts inter-member balance. No wallet impact.
+
+**Wallet balance computation**: `computeWalletBalances()` in `walletHelpers.ts` — pure function, takes full tx list + travelMemberId + pmLabelMap → `WalletBalance[]` per (paymentMethod, currency) pair. Only PM/currency pairs with at least one withdrawal become wallets.
+
+**Privacy note (v1)**: wallet events are stored in the shared transactions subcollection — all travel members can technically read each other's wallet data. The UI only renders each user's own wallet balances. Per-member structural privacy is a v2 feature.
+
+**UI**: Wallet card in Dashboard tab — scrollable carousel of wallet sub-cards, drill-down detail with deposited/spent/adjustments summary, top-up list, "Reconcile" button → `ReconciliationDialog`.
 
 ## 3.4 Travel Detail View — Tabs
 
@@ -140,7 +162,15 @@ The travel detail view is organised into four tabs accessible by tapping the tab
 
 ### Balance tab
 
-Placeholder. Will display net balance per member and optimal settlement suggestions (greedy debt-simplification algorithm).
+Displays net balance per member and optimal settlement suggestions.
+
+- **Net balances**: per-member row with coloured avatar, name, "paid X · share Y" subtitle, net amount (green = owed, orange = owes), proportional bar
+- **Settlements**: greedy debt-simplification algorithm (sort creditors desc / debtors asc, match largest pairs, 0.01 tolerance). One card per settlement with from/to avatars, names, arrow, amount.
+- **"Mark as paid"** button: opens `TransactionForm` in transfer mode, pre-filled with amount, currency, sender, and receiver — creates a transfer transaction that shifts the balance.
+- **Settlement currency selector**: user can pick any currency + exchange rate to display settlements in. Conversion is display-only; core computation always in mainCurrency. Same-currency optimization: when all balance-affecting transactions share one currency and it matches the settlement currency, raw amounts are used (no lossy round-trip conversion).
+- **Copy button**: plain-text settlement summary to clipboard.
+- **Solo view**: upsell card when `isSolo`.
+- Implementation: `computeBalances()` / `computeBalancesRaw()` / `computeSettlements()` in `src/travels/utils/balanceUtils.ts`.
 
 ### Dashboard tab
 
@@ -328,7 +358,7 @@ The Activity Feed is a pull-model notification center surfacing collaborative ev
 - Activity feed for collaborative transaction events (v2)
 - Manual fetch-new-transactions trigger (v4)
 - Recurring / template transactions (v4)
-- Filter and Display Mode in Transactions tab (placeholders exist, implementation deferred)
+- Display Mode in Transactions tab (placeholder exists, implementation deferred)
 
 # 7. Development Approach
 
@@ -377,7 +407,7 @@ The Activity Feed is a pull-model notification center surfacing collaborative ev
 | 31 | Smart currency/country dropdowns in TransactionForm | Travel lists ordered by recent use; `+ Add…` permanently adds to travel | Reduces friction for recurring currencies/countries |
 | 32 | syncTransactionLocation | After transaction save, new country/city written to travel via arrayUnion (fire-and-forget); parent updates local state optimistically via onLocationAdded | Ensures dropdowns and Parameters tab stay current without manual entry |
 | 33 | Shared picker data | src/shared/data/pickerData.ts — single source of truth for currency and country static data | Avoids duplication between ParametersTab and TransactionForm |
-| 34 | Three-tab travel detail | Transactions / Balance / Parameters tabs with swipe gesture | Separates concerns cleanly; Parameters replaces a separate settings screen |
+| 34 | Four-tab travel detail | Transactions / Balance / Dashboard / Parameters tabs with swipe gesture | Separates concerns cleanly; Parameters replaces a separate settings screen |
 | 35 | SplitEditor mode as controlled prop | mode (equal/custom) lifted to TransactionForm; persists across drawer open/close | Prevents accidental mode reset when user re-opens the form |
 | 36 | Decimal precision rule | UI displays amounts at 2dp. Internal calculations use 3dp to avoid floating-point drift. Validity checks round to 2dp. Applies globally. | 3dp internally prevents false "invalid" states (e.g. 100/3 = 33.333 × 3 = 99.999, rounds to 100 at 2dp). Users never see sub-cent values. |
 | 37 | Nametag: atomic sentinel batch write | Delete old nametags/{tag} + create new + update user doc — all in one batch. Fails atomically if tag is taken. | Uniqueness guaranteed without a Cloud Function |
@@ -394,3 +424,11 @@ The Activity Feed is a pull-model notification center surfacing collaborative ev
 | 68 | "Only user" check uses `memberUids.length` | Not `members.filter(userId !== null).length`. | A user in `memberUids` who hasn't claimed a slot still has access and counts as a real user |
 | 69 | Creator reassignment on leave | If leaving user is `createdBy`, reassign to random remaining UID from `memberUids`. | Ensures `createdBy` always points to an active member |
 | 70 | Removed `startDate` / `endDate` from Travel | No use case in v1. Existing Firestore docs unaffected. | Fields simply ignored on read; no migration needed |
+| 71 | `amountFormula` stored on Transaction | Raw formula string (e.g. `"2*2.5 + 1.5"`). `totalAmount` is always the evaluated result. Display-only — never used in any computation. | Enables showing the formula in the transaction detail without complicating the data model |
+| 72 | Wallet tracker uses shared transactions subcollection | Withdrawals, adjustments, transfers stored alongside expenses. `type` field discriminates. | No new Firestore collections or security rules needed; wallet balance computed client-side from existing snapshot |
+| 73 | Transfer type (`type: 'transfer'`) | Person-to-person money movement. `countsAsSpending: false`, `affectsBalance: true`. No wallet impact. | Needed to record settlements and inter-member transfers without distorting spending analytics |
+| 74 | `affectsBalance()` predicate for BalanceTab | Replaces `countsAsSpending()` in settlement computation. Includes transfers + expenses + adjustments. | Transfers must shift balances without appearing in spending totals |
+| 75 | mainCurrency is per-travel | `Travel.mainCurrency` set at creation. Locked in v1. `UserProfile.mainCurrency` retained as default for new travels. | Ensures consistent exchange rates across all members in a shared travel |
+| 76 | defaultRates per-travel | `Travel.defaultRates?: Record<string, number>`. Seeded from hardcoded table. User-editable. Per-transaction override available. | Lets users correct rates to match actual travel rates without affecting past transactions |
+| 77 | Same-currency balance optimization | `getSingleCurrency()` + `computeBalancesRaw()` — skips exchangeRate multiplication when all txs share one currency. | Eliminates lossy round-trip distortion (e.g. all-MYR trip settling in MYR) |
+| 78 | Feedback collection (`/feedback/{id}`) | Written with `await` (not fire-and-forget). `allow create: if true` security rule (anonymous allowed). | Feedback needs success/failure feedback; unauthenticated users should still be able to report issues |
