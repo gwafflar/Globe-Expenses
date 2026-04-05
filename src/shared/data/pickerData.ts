@@ -243,7 +243,7 @@ export const ALL_COUNTRIES: [string, string, string][] = [
   ['IR', '🇮🇷', 'Iran'],
   ['IQ', '🇮🇶', 'Iraq'],
   ['IE', '🇮🇪', 'Ireland'],
-  ['PS', '🇵🇸', 'Palestine'],
+  //['PS', '🇵🇸', 'Palestine'],
   ['IT', '🇮🇹', 'Italy'],
   ['JM', '🇯🇲', 'Jamaica'],
   ['JP', '🇯🇵', 'Japan'],

@@ -288,7 +288,7 @@ export function BalanceTab({
                 <p className="truncate text-sm font-medium">{b.displayName}</p>
                 {totals && (
                   <p className="text-xs text-muted-foreground">
-                    paid {fmt(totals.paid, balanceDisplayCurrency)} · share {fmt(totals.share, balanceDisplayCurrency)}
+                    Total spent: {fmt(totals.share, balanceDisplayCurrency)} · Total paid: {fmt(totals.paid, balanceDisplayCurrency)}
                   </p>
                 )}
               </div>

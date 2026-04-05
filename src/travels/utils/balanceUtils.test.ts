@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeBalances, computeSettlements } from './balanceUtils'
+import { computeBalances, computeBalancesRaw, computeSettlements, getSingleCurrency } from './balanceUtils'
 import type { Transaction } from '@/transactions/types'
 import type { TravelMember } from '@/travels/types'
 import { Timestamp } from 'firebase/firestore'
@@ -214,6 +214,126 @@ describe('computeBalances with exchange rates', () => {
     expect(bob.net).toBe(-46)
   })
 })
+
+// ---------------------------------------------------------------------------
+// computeBalancesRaw — same logic as computeBalances but ignores exchangeRate
+// ---------------------------------------------------------------------------
+
+describe('computeBalancesRaw', () => {
+  it('produces the same result as computeBalances when exchangeRate = 1', () => {
+    // With rate=1, both functions should agree exactly
+    const members = [member('a', 'Alice'), member('b', 'Bob')]
+    const transactions = [
+      tx({
+        totalAmount: 100,
+        paidBy: [{ travelMemberId: 'a', amount: 100 }],
+        beneficiaries: [
+          { travelMemberId: 'a', amount: 60 },
+          { travelMemberId: 'b', amount: 40 },
+        ],
+      }),
+    ]
+
+    const withRate  = computeBalances(transactions, members)
+    const withoutRate = computeBalancesRaw(transactions, members)
+
+    expect(withoutRate.find(b => b.memberId === 'a')!.net)
+      .toBe(withRate.find(b => b.memberId === 'a')!.net)
+    expect(withoutRate.find(b => b.memberId === 'b')!.net)
+      .toBe(withRate.find(b => b.memberId === 'b')!.net)
+  })
+
+  it('ignores exchangeRate — amounts are used as-is without conversion', () => {
+    const members = [member('a', 'Alice'), member('b', 'Bob')]
+    // rate=2 would double amounts in computeBalances but raw ignores it
+    const transactions = [
+      tx({
+        totalAmount: 100,
+        exchangeRate: 2,  // this will be ignored by computeBalancesRaw
+        paidBy: [{ travelMemberId: 'a', amount: 100 }],
+        beneficiaries: [
+          { travelMemberId: 'a', amount: 50 },
+          { travelMemberId: 'b', amount: 50 },
+        ],
+      }),
+    ]
+
+    const raw     = computeBalancesRaw(transactions, members)
+    const withRate = computeBalances(transactions, members)
+
+    // Raw: Alice paid 100, consumed 50 → net +50 (no rate applied)
+    expect(raw.find(b => b.memberId === 'a')!.net).toBe(50)
+    expect(raw.find(b => b.memberId === 'b')!.net).toBe(-50)
+
+    // With rate=2: Alice paid 200 in main, consumed 100 → net +100
+    expect(withRate.find(b => b.memberId === 'a')!.net).toBe(100)
+    expect(withRate.find(b => b.memberId === 'b')!.net).toBe(-100)
+  })
+
+  it('initialises all members at zero — members with no transactions appear with net=0', () => {
+    const members = [member('a', 'Alice'), member('b', 'Bob'), member('c', 'Carol')]
+    const transactions = [
+      tx({
+        totalAmount: 30,
+        paidBy: [{ travelMemberId: 'a', amount: 30 }],
+        beneficiaries: [
+          { travelMemberId: 'a', amount: 15 },
+          { travelMemberId: 'b', amount: 15 },
+        ],
+        // Carol not involved
+      }),
+    ]
+
+    const raw = computeBalancesRaw(transactions, members)
+    expect(raw).toHaveLength(3)
+    expect(raw.find(b => b.memberId === 'c')!.net).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// getSingleCurrency
+// ---------------------------------------------------------------------------
+
+describe('getSingleCurrency', () => {
+  it('returns null for an empty transaction list', () => {
+    expect(getSingleCurrency([])).toBeNull()
+  })
+
+  it('returns the currency when all transactions share the same currency', () => {
+    const transactions = [
+      tx({ totalAmount: 10, paidBy: [], beneficiaries: [], currency: 'EUR' }),
+      tx({ totalAmount: 20, paidBy: [], beneficiaries: [], currency: 'EUR' }),
+      tx({ totalAmount: 30, paidBy: [], beneficiaries: [], currency: 'EUR' }),
+    ]
+    expect(getSingleCurrency(transactions)).toBe('EUR')
+  })
+
+  it('returns null when transactions have mixed currencies', () => {
+    const transactions = [
+      tx({ totalAmount: 10, paidBy: [], beneficiaries: [], currency: 'EUR' }),
+      tx({ totalAmount: 20, paidBy: [], beneficiaries: [], currency: 'USD' }),
+    ]
+    expect(getSingleCurrency(transactions)).toBeNull()
+  })
+
+  it('returns the currency for a single transaction', () => {
+    const transactions = [
+      tx({ totalAmount: 50, paidBy: [], beneficiaries: [], currency: 'THB' }),
+    ]
+    expect(getSingleCurrency(transactions)).toBe('THB')
+  })
+
+  it('returns null as soon as the second currency differs', () => {
+    const transactions = [
+      tx({ totalAmount: 10, paidBy: [], beneficiaries: [], currency: 'EUR' }),
+      tx({ totalAmount: 20, paidBy: [], beneficiaries: [], currency: 'EUR' }),
+      tx({ totalAmount: 30, paidBy: [], beneficiaries: [], currency: 'GBP' }),  // breaks uniformity
+    ]
+    expect(getSingleCurrency(transactions)).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
 
 describe('computeSettlements', () => {
   it('two members, one paid everything → one settlement', () => {

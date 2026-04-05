@@ -152,6 +152,8 @@ export function TravelDetailPage() {
   const [bannerState, setBannerState] = useState<BannerState>(null)
   // Holds the txId the user wants to delete — non-null opens the confirmation dialog
   const [deletingTxId, setDeletingTxId] = useState<string | null>(null)
+  // Dialog shown when user tries to create a transaction without claiming a member slot
+  const [showNoSlotDialog, setShowNoSlotDialog] = useState(false)
 
   // mainCurrency is now per-travel, not per-user.
   // getTravelMainCurrency handles legacy docs that lack the field.
@@ -229,7 +231,15 @@ export function TravelDetailPage() {
   }
 
   // Opens the new-expense form and forces TransactionForm to remount (fresh state).
+  // First checks: user must have claimed a member slot to create transactions.
   function openForm(initialType?: TransactionType, prefill?: TransferPrefill) {
+    // Check if current user has a claimed member slot
+    const myMember = travel?.members.find((m) => m.userId === currentUser?.uid)
+    if (!myMember) {
+      // User has no claimed slot — show guidance dialog instead of opening form
+      setShowNoSlotDialog(true)
+      return
+    }
     setFormKey((k) => k + 1)
     setEditingTx(null)
     setFormInitialType(initialType)
@@ -328,7 +338,7 @@ export function TravelDetailPage() {
 
   useEffect(() => {
     if (loadingTravel) {
-      slowHintTimer.current = setTimeout(() => setShowSlowHint(true), 2000)
+      slowHintTimer.current = setTimeout(() => setShowSlowHint(true), 5000)
     } else {
       setShowSlowHint(false)
     }
@@ -387,7 +397,7 @@ export function TravelDetailPage() {
   // ---------------------------------------------------------------------------
 
   return (
-    <div className="relative flex min-h-screen flex-col bg-background pb-20">
+    <div className="relative flex h-screen flex-col bg-background">
       <SaveBanner state={bannerState} onDismiss={() => setBannerState(null)} />
 
       {/* Header */}
@@ -442,8 +452,8 @@ export function TravelDetailPage() {
         onTravelChange={handleTravelChange}
       />
 
-      {/* Tab content */}
-      <main className="mx-auto w-full max-w-2xl flex-1 px-4">
+      {/* Tab content — flex-1 + overflow-hidden so TravelTabs fills remaining height */}
+      <main className="mx-auto w-full max-w-2xl flex-1 overflow-hidden px-4">
         <TravelTabs
           travel={travel}
           transactions={transactions}
@@ -494,6 +504,29 @@ export function TravelDetailPage() {
           +
         </button>
       </div>
+
+      {/* "No claimed slot" dialog — shown when user tries to create transaction without claiming a member */}
+      <AlertDialog open={showNoSlotDialog} onOpenChange={(open) => { if (!open) setShowNoSlotDialog(false) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Claim your member slot first</AlertDialogTitle>
+            <AlertDialogDescription>
+              You haven't claimed a member slot yet. Choose who you are in this travel so we know who paid for transactions you record.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setShowNoSlotDialog(false)
+                setRequestTab('parameters')
+              }}
+            >
+              Go to Members
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Delete confirmation dialog */}
       <AlertDialog open={deletingTxId !== null} onOpenChange={(open) => { if (!open) setDeletingTxId(null) }}>

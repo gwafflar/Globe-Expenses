@@ -299,7 +299,7 @@ function SmartCountrySelect({ value, onChange, orderedCountries, onCountryAdded 
     if (pickerOpen && searchRef.current) searchRef.current.focus()
   }, [pickerOpen])
 
-  const filtered = ALL_COUNTRIES.filter(([, name]) =>
+  const filtered = ALL_COUNTRIES.filter(([, , name]) =>
     name.toLowerCase().includes(search.toLowerCase())
   )
 
@@ -324,7 +324,7 @@ function SmartCountrySelect({ value, onChange, orderedCountries, onCountryAdded 
             className="rounded border px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
           />
           <div className="max-h-40 overflow-y-auto">
-            {filtered.map(([flag, name]) => (
+            {filtered.map(([, flag, name]) => (
               <button
                 key={name}
                 type="button"

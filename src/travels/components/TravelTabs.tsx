@@ -128,7 +128,7 @@ export function TravelTabs({
   }
 
   return (
-    <div className="flex flex-col">
+    <div className="flex h-full flex-col">
       {/* ── Tab bar ── */}
       <div className="flex border-b">
         {TABS.map((tab) => {
@@ -150,21 +150,23 @@ export function TravelTabs({
         })}
       </div>
 
-      {/* ── Swipeable content area ── */}
+      {/* ── Swipeable content area ── fills remaining height, clips horizontal overflow ── */}
       <div
-        className="overflow-hidden"
+        className="flex-1 overflow-hidden"
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       >
-        {/* Sliding track — 3 panels side by side, shifted by activeIndex */}
+        {/* Sliding track — panels side by side, shifted by activeIndex.
+            h-full ensures each panel matches the viewport height so panels
+            scroll independently and there is no blank space below short tabs. */}
         <div
-          className="flex transition-transform duration-300 ease-in-out"
+          className="flex h-full transition-transform duration-300 ease-in-out"
           style={{ transform: `translateX(-${activeIndex * 100}%)` }}
         >
           {TABS.map((tab) => (
             <div
               key={tab.id}
-              className="w-full shrink-0 pt-4"
+              className="h-full w-full shrink-0 overflow-y-auto pt-4 pb-24"
               // aria-hidden for non-active panels for a11y
               aria-hidden={tab.id !== activeTab}
             >
