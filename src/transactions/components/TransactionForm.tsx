@@ -762,6 +762,21 @@ export function TransactionForm({
   // Controls whether the rate editing row is expanded
   const [rateExpanded, setRateExpanded] = useState(false)
 
+  // Track whether this is the first render — we skip the currency-change reset
+  // on mount so that editing an existing transaction preserves its stored rate.
+  const isMountedRef = useRef(false)
+
+  useEffect(() => {
+    if (!isMountedRef.current) {
+      isMountedRef.current = true
+      return
+    }
+    // User changed the currency — reset the override so effectiveRate
+    // derives from the travel's defaultRates for the new currency.
+    setRateOverride(null)
+    setRateExpanded(false)
+  }, [currency])
+
   // The effective exchange rate for this transaction
   const effectiveRate = useMemo(() => {
     if (currency === mainCurrency) return 1.0
