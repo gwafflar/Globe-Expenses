@@ -46,8 +46,9 @@ export function useTransactions(travelId: string | undefined): UseTransactionsRe
 
     // Order by date descending, then createdAt descending for same-day entries.
     // This requires a composite Firestore index on (date DESC, createdAt DESC).
-    const q = query(transactionsRef, orderBy('date', 'desc'), orderBy('createdAt', 'desc'))
-
+    //const q = query(transactionsRef, orderBy('date', 'desc'), orderBy('createdAt', 'desc'))
+    const q = query(transactionsRef, orderBy('createdAt', 'desc'))
+    
     setLoading(true)
 
     const unsubscribe = onSnapshot(

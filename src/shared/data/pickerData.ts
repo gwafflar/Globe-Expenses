@@ -357,6 +357,9 @@ export const ALL_COUNTRIES: [string, string, string][] = [
   ['YE', '🇾🇪', 'Yemen'],
   ['ZM', '🇿🇲', 'Zambia'],
   ['ZW', '🇿🇼', 'Zimbabwe'],
+  ['TW', '🇹🇼', 'Taiwan'],
+  ['HK', '🇭🇰', 'Hong Kong'],
+  ['MO', '🇲🇴', 'Macau'],
 ]
 
 // Lookup flag for a country name (case-insensitive, partial match) 

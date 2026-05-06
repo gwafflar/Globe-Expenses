@@ -676,10 +676,9 @@ export function TransactionForm({
       ? travelPaymentMethods.map((p) => p.emoji ? `${p.emoji} ${p.label}` : p.label)
       : userProfile.paymentMethods
 
-  // --- Currency list ---
-  // Default currency for new transactions — most recent transaction's currency, or the travel's main.
-  const lastUsedCurrency = existingTransactions[0]?.currency ?? mainCurrency
 
+  // --- Currency list ---
+ 
   const orderedCurrencies = useMemo(() => {
     const travelSet = new Set(travelCurrencies ?? [])
     const recentlyUsed = [...new Set(existingTransactions.map((tx) => tx.currency))].filter(
@@ -688,6 +687,9 @@ export function TransactionForm({
     const rest = (travelCurrencies ?? []).filter((c) => !recentlyUsed.includes(c))
     return [...recentlyUsed, ...rest]
   }, [travelCurrencies, existingTransactions])
+
+  // Default currency for new transactions — most recent transaction's currency, or the travel's main.
+  const lastUsedCurrency = orderedCurrencies[0] ?? mainCurrency
 
   // --- Country list ---
   const orderedCountries = useMemo(() => {
@@ -709,7 +711,7 @@ export function TransactionForm({
     () => getPreviousValues(existingTransactions, 'city'),
     [existingTransactions],
   )
-  const lastCity = existingTransactions[0]?.city ?? ''
+  const lastCity = previousCities[0] ?? ''
   const lastCountry = existingTransactions[0]?.country ?? ''
 
   // --- Field state ---
