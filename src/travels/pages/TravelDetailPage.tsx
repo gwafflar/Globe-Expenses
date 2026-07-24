@@ -15,6 +15,7 @@ import { useAuthStore } from '@/auth/store/useAuthStore'
 import { usePendingInvites } from '@/friends/hooks/usePendingInvites'
 import { ChevronLeft, WifiOff } from 'lucide-react'
 
+// why the f*ck did claude put this here ?? to clean later
 function avatarHue(uid: string): number {
   let hash = 0
   for (const ch of uid) hash = (hash * 31 + ch.charCodeAt(0)) & 0xffffffff
@@ -38,6 +39,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+
 
 // ---------------------------------------------------------------------------
 // Helpers

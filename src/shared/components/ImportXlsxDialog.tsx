@@ -552,7 +552,6 @@ export function ImportXlsxDialog({
     if (newCurrencies.length > 0) listUpdates.currencies = arrayUnion(...newCurrencies)
 
     if (Object.keys(listUpdates).length > 0) {
-      console.log('[ImportXlsxDialog] syncing travel lists:', Object.keys(listUpdates))
       try {
         await updateDoc(travelRef, listUpdates)
       } catch (err) {

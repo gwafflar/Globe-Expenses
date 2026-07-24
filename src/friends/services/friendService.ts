@@ -267,20 +267,32 @@ export async function sendTravelInvite(
 export interface TravelInviteResult {
   /** The travelId so InvitePage can redirect and read the travel after joining. */
   travelId: string
+  /**
+   * True when the accepter was already in `memberUids` before this call — no new
+   * TravelMember slot was created. InvitePage uses this to skip the identity-pick
+   * screen (there is nothing new to claim).
+   */
+  alreadyMember: boolean
 }
 
 /**
  * Accepts a travel_member invite.
  *
- * Goes straight to the batch write — no pre-read of the travel document.
- * A pre-read would fail with "Missing or insufficient permissions" because the
- * user is not yet in memberUids at that point. arrayUnion on memberUids is
- * idempotent, so accepting the same invite twice is handled safely.
+ * First attempts a pre-read of the travel document to detect "already a member"
+ * (e.g. a targeted invite sent to someone who already joined this travel some
+ * other way, or the link being reused). The Firestore rule only allows this
+ * read once auth.uid is already in memberUids, so a genuine new member gets a
+ * permission-denied error here — expected, not a bug — and we fall through to
+ * the normal join path. arrayUnion on memberUids is also idempotent on its own,
+ * so double-accepting the same invite was always safe; this pre-read closes the
+ * separate case of ending up with two TravelMember slots for the same person.
  *
  * Core batch (atomic — must succeed together):
  *   1. Marks the invite as used (usedBy or status)
- *   2. Adds the accepter as a new TravelMember slot and appends their UID to memberUids.
- *      The Firestore rule verifies the invite via get() using pendingInviteId.
+ *   2. If not already a member: adds the accepter as a new TravelMember slot and
+ *      appends their UID to memberUids. The Firestore rule verifies the invite
+ *      via get() using pendingInviteId. If already a member, this step is skipped
+ *      — only the invite is marked used.
  *
  * After the batch, the caller (InvitePage) reads the travel to fetch unclaimed slots —
  * that read is now permitted because the user is in memberUids.
@@ -301,6 +313,22 @@ export async function acceptTravelInvite(
 
   const travelRef = doc(db, 'travels', invite.travelId)
 
+  // Detect "already a member" up front.
+  // The Firestore rule only allows reading a travel doc once auth.uid is in
+  // memberUids, so this read succeeds ONLY if the user already joined before
+  // (e.g. re-clicking a link, or a targeted invite sent after they'd already
+  // joined some other way). A genuinely new member gets a permission-denied
+  // error here — that's the expected, non-error path, so we swallow it and
+  // fall through to the normal join batch below.
+  let alreadyMember = false
+  try {
+    const existingSnap = await getDoc(travelRef)
+    const existingUids: string[] = existingSnap.data()?.memberUids ?? []
+    alreadyMember = existingUids.includes(currentUser.uid)
+  } catch {
+    alreadyMember = false
+  }
+
   // ── Core batch ─────────────────────────────────────────────────────────────
   const now = Timestamp.now()
   const batch = writeBatch(db)
@@ -312,30 +340,34 @@ export async function acceptTravelInvite(
     usedBy: arrayUnion(currentUser.uid),
   })
 
-  // 2. Add the accepter as a new TravelMember slot.
-  //    travelMemberId is a fresh nanoid — stable key for future Split[] references.
-  //    arrayUnion on members: Firestore will merge this object into the array.
-  //    pendingInviteId: read by the security rule to authorise the non-member write.
-  const newMember: TravelMember = {
-    travelMemberId: nanoid(),
-    displayName: currentUser.displayName,
-    userId: currentUser.uid,
-    allowRename: true,
-    joinedAt: now,
-  }
-
-  batch.update(travelRef, {
-    members: arrayUnion({
-      travelMemberId: newMember.travelMemberId,
-      displayName: newMember.displayName,
-      userId: newMember.userId,
-      allowRename: newMember.allowRename,
+  if (!alreadyMember) {
+    // 2. Add the accepter as a new TravelMember slot.
+    //    travelMemberId is a fresh nanoid — stable key for future Split[] references.
+    //    arrayUnion on members: Firestore will merge this object into the array.
+    //    pendingInviteId: read by the security rule to authorise the non-member write.
+    const newMember: TravelMember = {
+      travelMemberId: nanoid(),
+      displayName: currentUser.displayName,
+      userId: currentUser.uid,
+      allowRename: true,
       joinedAt: now,
-    }),
-    memberUids: arrayUnion(currentUser.uid),
-    // pendingInviteId is read by the security rule to authorise the non-member write
-    pendingInviteId: invite.inviteId,
-  })
+    }
+
+    batch.update(travelRef, {
+      members: arrayUnion({
+        travelMemberId: newMember.travelMemberId,
+        displayName: newMember.displayName,
+        userId: newMember.userId,
+        allowRename: newMember.allowRename,
+        joinedAt: now,
+      }),
+      memberUids: arrayUnion(currentUser.uid),
+      // pendingInviteId is read by the security rule to authorise the non-member write
+      pendingInviteId: invite.inviteId,
+    })
+  }
+  // else: user is already in memberUids/members — only the invite is marked used,
+  // no duplicate TravelMember slot is created.
 
   // Core join must be atomic — await the batch.
   await batch.commit()
@@ -362,7 +394,7 @@ export async function acceptTravelInvite(
     console.warn('[friendService] acceptTravelInvite: myFriend write failed', err),
   )
 
-  return { travelId: invite.travelId }
+  return { travelId: invite.travelId, alreadyMember }
 }
 
 // ---------------------------------------------------------------------------

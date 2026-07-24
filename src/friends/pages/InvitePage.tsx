@@ -24,7 +24,7 @@ import {
   acceptFriendRequest,
   acceptTravelInvite,
 } from '@/friends/services/friendService'
-import { claimTravelMember } from '@/travels/services/travelService'
+import { claimTravelMember, addUnclaimedMember } from '@/travels/services/travelService'
 import { normaliseMember, type TravelMember } from '@/travels/types'
 import type { Invite } from '@/friends/types'
 import { Button } from '@/components/ui/button'
@@ -79,6 +79,9 @@ export function InvitePage() {
   const { currentUser, userProfile } = useAuthStore()
 
   const [pageState, setPageState] = useState<PageState>({ status: 'loading' })
+  // "Create new member" inline input on the identity pick screen
+  const [newSlotName, setNewSlotName] = useState('')
+  const [creatingSlot, setCreatingSlot] = useState(false)
 
   // ---------------------------------------------------------------------------
   // Load and validate the invite on mount
@@ -143,6 +146,13 @@ export function InvitePage() {
         // because the user is not in memberUids until the batch commits.
         const result = await acceptTravelInvite(invite, userProfile)
 
+        // Already a member — no new slot was created, so there's nothing to
+        // claim. Skip straight to the accepted screen.
+        if (result.alreadyMember) {
+          setPageState({ status: 'accepted', invite, travelId: result.travelId })
+          return
+        }
+
         // User is now in memberUids — safe to read the travel document.
         const travelSnap = await getDoc(doc(db, 'travels', result.travelId))
         const members: TravelMember[] = (travelSnap.data()?.members ?? []).map(
@@ -191,6 +201,23 @@ export function InvitePage() {
   }
 
   function handleSkipClaim(travelId: string, invite: Invite) {
+    setPageState({ status: 'accepted', invite, travelId })
+  }
+
+  // Creates a new unclaimed member slot with the given name, then immediately claims it.
+  // Used when the user says "I'm someone new" on the identity pick screen.
+  async function handleCreateAndClaim(travelId: string, invite: Invite, allMembers: TravelMember[]) {
+    const trimmed = newSlotName.trim()
+    if (!trimmed || !currentUser) return
+    setCreatingSlot(true)
+    try {
+      const newMember = await addUnclaimedMember(travelId, trimmed, allMembers)
+      await claimTravelMember(travelId, newMember.travelMemberId, currentUser.uid, [...allMembers, newMember])
+    } catch (err) {
+      console.error('[InvitePage] handleCreateAndClaim failed:', err)
+      // Non-fatal: user is still in the travel, just proceed without a slot
+    }
+    setCreatingSlot(false)
     setPageState({ status: 'accepted', invite, travelId })
   }
 
@@ -322,13 +349,38 @@ export function InvitePage() {
                 </button>
               ))}
 
-              {/* Option to skip claiming */}
+              {/* Create new member + auto-claim */}
+              <div className="mt-1 flex flex-col gap-2 rounded-lg border border-dashed border-input px-4 py-3">
+                <p className="text-sm text-muted-foreground">I'm someone new — add me with a name:</p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newSlotName}
+                    onChange={(e) => setNewSlotName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !creatingSlot) handleCreateAndClaim(travelId, invite, allMembers)
+                    }}
+                    placeholder="Your name…"
+                    disabled={creatingSlot}
+                    className="min-w-0 flex-1 rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+                  />
+                  <Button
+                    size="sm"
+                    onClick={() => handleCreateAndClaim(travelId, invite, allMembers)}
+                    disabled={!newSlotName.trim() || creatingSlot}
+                  >
+                    {creatingSlot ? '…' : 'Join'}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Skip entirely — user can claim later from Parameters tab */}
               <button
                 type="button"
-                className="mt-1 w-full rounded-lg border border-dashed border-input px-4 py-3 text-sm text-muted-foreground transition-colors hover:bg-accent"
+                className="text-center w-full py-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
                 onClick={() => handleSkipClaim(travelId, invite)}
               >
-                None of these — I'm a new person
+                Skip for now
               </button>
             </div>
           </div>

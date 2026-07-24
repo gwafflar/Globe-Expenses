@@ -1,6 +1,7 @@
 // src/travels/components/tabs/ParametersTab.tsx
 
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { nanoid } from 'nanoid'
 import type { LabeledItem, Travel, TravelMember } from '@/travels/types'
 import { getTravelMainCurrency } from '@/travels/types'
@@ -12,12 +13,12 @@ import {
   addUnclaimedMember,
   renameTravelMember,
   claimTravelMember,
-  unclaimTravelMember,
   setMemberAllowRename,
   archiveTravel,
   unarchiveTravel,
   leaveTravel,
   deleteTravel,
+  mergeMembers,
 } from '@/travels/services/travelService'
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
 import { useAuthStore } from '@/auth/store/useAuthStore'
@@ -25,8 +26,9 @@ import {
   fetchFriends,
   sendTravelInvite,
   createShareableInvite,
+  searchByNametag,
 } from '@/friends/services/friendService'
-import type { Friend } from '@/friends/types'
+import type { Friend, SearchUser } from '@/friends/types'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import {
@@ -41,7 +43,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { ALL_CURRENCIES, ALL_COUNTRIES } from '@/shared/data/pickerData'
 import { getExchangeRate } from '@/shared/utils/exchangeRates'
-import { Share2, UserPlus, Check } from 'lucide-react'
+import { Share2, Check } from 'lucide-react'
 import { FeedbackForm } from '@/feedback/components/FeedbackForm'
 
 // ---------------------------------------------------------------------------
@@ -275,13 +277,30 @@ function CountryPicker({
   travelId: string
   onSelectedChange: (items: LabeledItem[]) => void
 }) {
+  // Own open/search state — avoids delegating to CollapsiblePicker so both
+  // states live in the same component instance and are never reset by re-renders
+  const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
+  const listRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   const selectedNames = new Set(selected.map((i) => i.label.toLowerCase()))
 
-  const filtered = ALL_COUNTRIES.filter(([, name]) => {
-    return name.toLowerCase().includes(search.toLowerCase())
-  })
+  const filtered = ALL_COUNTRIES.filter(([, , name]) =>
+    name.toLowerCase().includes(search.toLowerCase())
+  )
+
+  function handleToggle() {
+    const next = !open
+    setOpen(next)
+    // Auto-focus the search input when opening
+    if (next) setTimeout(() => inputRef.current?.focus(), 0)
+  }
+
+  function handleSearch(value: string) {
+    setSearch(value)
+    if (listRef.current) listRef.current.scrollTop = 0
+  }
 
   async function toggle(flag: string, name: string) {
     const lower = name.toLowerCase()
@@ -301,39 +320,53 @@ function CountryPicker({
       : selected.map((i) => `${i.emoji ?? '🌍'} ${i.label}`).join(', ')
 
   return (
-    <CollapsiblePicker summary={<span><span className="font-medium">Countries: </span>{summary}</span>}>
-      <div className="flex flex-col gap-2 rounded-lg border p-2">
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search country…"
-          className="w-full rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-        />
-        <div className="flex max-h-56 flex-col gap-0.5 overflow-y-auto">
-          {filtered.length === 0 && (
-            <p className="px-3 py-2 text-xs text-muted-foreground">No countries match.</p>
-          )}
-          {filtered.map(([flag, name]) => {
-            const checked = selectedNames.has(name.toLowerCase())
-            return (
-              <button
-                key={name}
-                type="button"
-                onClick={() => toggle(flag, name)}
-                className={`flex items-center gap-3 rounded px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent/40 ${checked ? 'bg-accent/20' : ''}`}
-              >
-                <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px] ${checked ? 'border-primary bg-primary text-primary-foreground' : 'border-input'}`}>
-                  {checked && '✓'}
-                </span>
-                <span className="text-base">{flag}</span>
-                <span className="text-sm">{name}</span>
-              </button>
-            )
-          })}
+    <div className="flex flex-col gap-2">
+      {/* Summary / toggle button — same style as CollapsiblePicker */}
+      <button
+        type="button"
+        onClick={handleToggle}
+        className="flex items-center justify-between rounded-lg border bg-card px-3 py-2.5 text-sm transition-colors hover:bg-accent/30"
+      >
+        <span><span className="font-medium">Countries: </span>{summary}</span>
+        <span className="text-muted-foreground text-xs">{open ? '▲' : '▼'}</span>
+      </button>
+
+      {/* Expanded content — always in the same component, never unmounted separately */}
+      {open && (
+        <div className="flex flex-col gap-2 rounded-lg border p-2">
+          <input
+            ref={inputRef}
+            type="text"
+            value={search}
+            onChange={(e) => handleSearch(e.target.value)}
+            placeholder="Search country…"
+            className="w-full rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+          <div ref={listRef} className="flex max-h-56 flex-col gap-0.5 overflow-y-auto">
+            {filtered.length === 0 && (
+              <p className="px-3 py-2 text-xs text-muted-foreground">No countries match.</p>
+            )}
+            {filtered.map(([, flag, name]) => {
+              const checked = selectedNames.has(name.toLowerCase())
+              return (
+                <button
+                  key={name}
+                  type="button"
+                  onClick={() => toggle(flag, name)}
+                  className={`flex items-center gap-3 rounded px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent/40 ${checked ? 'bg-accent/20' : ''}`}
+                >
+                  <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px] ${checked ? 'border-primary bg-primary text-primary-foreground' : 'border-input'}`}>
+                    {checked && '✓'}
+                  </span>
+                  <span className="text-base">{flag}</span>
+                  <span className="text-sm">{name}</span>
+                </button>
+              )
+            })}
+          </div>
         </div>
-      </div>
-    </CollapsiblePicker>
+      )}
+    </div>
   )
 }
 
@@ -507,6 +540,321 @@ function MemberAvatar({ member }: { member: TravelMember }) {
 }
 
 // ---------------------------------------------------------------------------
+// AddMemberModal — unified 4-tab portal modal for all "add member" methods
+// ---------------------------------------------------------------------------
+
+interface AddMemberModalProps {
+  tab: 'name' | 'friend' | 'username' | 'link'
+  onTabChange: (tab: 'name' | 'friend' | 'username' | 'link') => void
+  onClose: () => void
+  // Tab: Name
+  onAddUnclaimed: (name: string) => Promise<void>
+  // Tab: Friend
+  friends: Friend[]
+  friendsLoading: boolean
+  invitableFriends: Friend[]
+  invitedUids: Set<string>
+  onInviteFriend: (uid: string) => Promise<void>
+  // Tab: Username
+  usernameQuery: string
+  onUsernameQueryChange: (q: string) => void
+  usernameResults: SearchUser[]
+  usernameSearching: boolean
+  invitedByUsername: Set<string>
+  onInviteByUsername: (uid: string) => Promise<void>
+  existingMemberUids: Set<string>
+  // Tab: Link
+  shareLoading: boolean
+  generatedInviteUrl: string | null
+  copyFeedback: boolean
+  onShareLink: () => Promise<void>
+  onCopyInviteUrl: () => Promise<void>
+}
+
+function AddMemberModal({
+  tab,
+  onTabChange,
+  onClose,
+  onAddUnclaimed,
+  friends,
+  friendsLoading,
+  invitableFriends,
+  invitedUids,
+  onInviteFriend,
+  usernameQuery,
+  onUsernameQueryChange,
+  usernameResults,
+  usernameSearching,
+  invitedByUsername,
+  onInviteByUsername,
+  existingMemberUids,
+  shareLoading,
+  generatedInviteUrl,
+  copyFeedback,
+  onShareLink,
+  onCopyInviteUrl,
+}: AddMemberModalProps) {
+  const [nameInput, setNameInput] = useState('')
+  const [addingName, setAddingName] = useState(false)
+  const nameInputRef = useRef<HTMLInputElement>(null)
+
+  // Auto-focus name input when tab is "name"
+  useEffect(() => {
+    if (tab === 'name') nameInputRef.current?.focus()
+  }, [tab])
+
+  async function handleAddByName() {
+    if (!nameInput.trim()) return
+    setAddingName(true)
+    try {
+      await onAddUnclaimed(nameInput.trim())
+      setNameInput('')
+    } finally {
+      setAddingName(false)
+    }
+  }
+
+  const TABS = [
+    { id: 'name' as const, label: 'By Name' },
+    { id: 'friend' as const, label: 'Friend' },
+    { id: 'username' as const, label: '@Username' },
+    { id: 'link' as const, label: 'Link' },
+  ]
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-md rounded-lg bg-background border shadow-lg flex flex-col"
+        style={{ maxHeight: '85vh' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between border-b px-4 py-3">
+          <h2 className="font-semibold">Add a member</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Tab bar */}
+        <div className="flex border-b">
+          {TABS.map(({ id, label }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => onTabChange(id)}
+              className={`flex-1 px-2 py-2 text-xs font-medium transition-colors ${
+                tab === id
+                  ? 'border-b-2 border-primary text-primary'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* Tab content */}
+        <div className="flex-1 overflow-y-auto px-4 py-4">
+
+          {/* ── Tab: By Name ── */}
+          {tab === 'name' && (
+            <div className="flex flex-col gap-3">
+              <p className="text-xs text-muted-foreground">
+                Add someone who doesn&apos;t have an account. They won&apos;t be able to log in, but you can track their share of expenses.
+              </p>
+              <div className="flex gap-2">
+                <input
+                  ref={nameInputRef}
+                  type="text"
+                  value={nameInput}
+                  onChange={(e) => setNameInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !addingName) handleAddByName()
+                  }}
+                  placeholder="Their name…"
+                  disabled={addingName}
+                  className="min-w-0 flex-1 rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+                />
+                <button
+                  type="button"
+                  onClick={handleAddByName}
+                  disabled={!nameInput.trim() || addingName}
+                  className="shrink-0 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {addingName ? '…' : 'Add'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── Tab: Friend ── */}
+          {tab === 'friend' && (
+            <div className="flex flex-col gap-2">
+              {friendsLoading && (
+                <p className="py-4 text-center text-xs text-muted-foreground">Loading friends…</p>
+              )}
+              {!friendsLoading && invitableFriends.length === 0 && (
+                <p className="py-4 text-center text-xs text-muted-foreground">
+                  {friends.length === 0
+                    ? 'No friends yet. Use the @Username tab to find people, or share the invite link.'
+                    : 'All your friends are already in this travel.'}
+                </p>
+              )}
+              {!friendsLoading && invitableFriends.map(friend => {
+                const alreadyInvited = invitedUids.has(friend.uid)
+                return (
+                  <div key={friend.uid} className="flex items-center gap-3 rounded-lg border px-3 py-2">
+                    {/* Avatar */}
+                    <div
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+                      style={{ backgroundColor: `hsl(${avatarHue(friend.uid)}, 55%, 50%)` }}
+                    >
+                      {(friend.displayName || '?').charAt(0).toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{friend.displayName}</p>
+                      {friend.nametag && (
+                        <p className="text-xs text-muted-foreground">@{friend.nametag}</p>
+                      )}
+                    </div>
+                    {alreadyInvited ? (
+                      <span className="flex items-center gap-1 text-xs text-green-600 shrink-0">
+                        <Check className="h-3 w-3" /> Invited
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => onInviteFriend(friend.uid)}
+                        className="shrink-0 rounded-md border px-2 py-1 text-xs text-primary transition-colors hover:bg-primary/10"
+                      >
+                        Invite
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {/* ── Tab: @Username ── */}
+          {tab === 'username' && (
+            <div className="flex flex-col gap-3">
+              <p className="text-xs text-muted-foreground">
+                Search by @username. An invite will be sent — they must accept to join.
+              </p>
+              {/* Input only — results update as you type (debounced 300ms in parent) */}
+              <div className="relative">
+                <input
+                  type="text"
+                  value={usernameQuery}
+                  onChange={(e) => onUsernameQueryChange(e.target.value)}
+                  placeholder="@username…"
+                  className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring pr-8"
+                />
+                {usernameSearching && (
+                  <div className="absolute right-2.5 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                )}
+              </div>
+
+              {/* Results */}
+              {usernameResults.length > 0 && (
+                <div className="flex flex-col gap-2">
+                  {usernameResults.map(user => {
+                    const alreadyInvited = invitedByUsername.has(user.uid)
+                    const alreadyInTravel = existingMemberUids.has(user.uid)
+                    return (
+                      <div key={user.uid} className="flex items-center gap-3 rounded-lg border px-3 py-2">
+                        <div
+                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
+                          style={{ backgroundColor: `hsl(${avatarHue(user.uid)}, 55%, 50%)` }}
+                        >
+                          {(user.displayName || '?').charAt(0).toUpperCase()}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate">{user.displayName}</p>
+                          <p className="text-xs text-muted-foreground">@{user.nametag}</p>
+                        </div>
+                        {alreadyInTravel ? (
+                          <span className="shrink-0 text-xs text-muted-foreground">In travel</span>
+                        ) : alreadyInvited ? (
+                          <span className="flex items-center gap-1 text-xs text-green-600 shrink-0">
+                            <Check className="h-3 w-3" /> Invited
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => onInviteByUsername(user.uid)}
+                            className="shrink-0 rounded-md border px-2 py-1 text-xs text-primary transition-colors hover:bg-primary/10"
+                          >
+                            Invite
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* Empty state after search */}
+              {!usernameSearching && usernameResults.length === 0 && usernameQuery && (
+                <p className="text-center text-xs text-muted-foreground">No users found.</p>
+              )}
+            </div>
+          )}
+
+          {/* ── Tab: Link ── */}
+          {tab === 'link' && (
+            <div className="flex flex-col gap-3">
+              <p className="text-xs text-muted-foreground">
+                Share this link with anyone. They can join the travel and become your friend.
+              </p>
+              {!generatedInviteUrl ? (
+                <button
+                  type="button"
+                  onClick={onShareLink}
+                  disabled={shareLoading}
+                  className="flex items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Share2 className="h-4 w-4" />
+                  {shareLoading ? 'Creating link…' : 'Generate invite link'}
+                </button>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2">
+                    <span className="flex-1 min-w-0 truncate text-xs text-muted-foreground font-mono">
+                      {generatedInviteUrl}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={onCopyInviteUrl}
+                      className="shrink-0 text-xs text-primary hover:underline"
+                    >
+                      {copyFeedback ? '✓ Copied!' : 'Copy'}
+                    </button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Anyone with this link can join this travel.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // MembersSection — member list with claim/unclaim/rename, invite picker, share link
 // ---------------------------------------------------------------------------
 
@@ -526,11 +874,23 @@ function MembersSection({
   // "No slot" nudge: user is in memberUids (has access) but has no slot with their userId
   const hasNoSlot = !!currentUser && travel.memberUids.includes(currentUser.uid) && !myMember
 
+  // Solo travel check: only one member slot total, and no unclaimed slots (truly just the user)
+  // Used for simplified UI in MembersSection (show "Members: You" instead of full management)
+  const isSoloTravel = travel.members.length === 1 && !travel.members.some((m) => m.userId === null)
+
   // --- Inline rename state ---
   // renamingId: travelMemberId of the slot being renamed
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const renameInputRef = useRef<HTMLInputElement>(null)
+
+  // --- "This is not me" unlink flow state ---
+  // unlinkingMemberId: which member the user is trying to unlink from
+  const [unlinkingMemberId, setUnlinkingMemberId] = useState<string | null>(null)
+  const [unlinkNewMemberName, setUnlinkNewMemberName] = useState('')
+  const [unlinkLoading, setUnlinkLoading] = useState(false)
+  const unlinkNewMemberInputRef = useRef<HTMLInputElement>(null)
+
 
   useEffect(() => {
     if (renamingId && renameInputRef.current) {
@@ -539,40 +899,137 @@ function MembersSection({
     }
   }, [renamingId])
 
-  // --- Add unclaimed member state ---
-  const [addingUnclaimed, setAddingUnclaimed] = useState(false)
-  const [newMemberName, setNewMemberName] = useState('')
-  const newMemberInputRef = useRef<HTMLInputElement>(null)
+  // --- Unified "Add member" modal state ---
+  // Single modal replaces the old inline add + collapsible friend picker + share link
+  const [addMemberOpen, setAddMemberOpen] = useState(false)
+  const [addMemberTab, setAddMemberTab] = useState<'name' | 'friend' | 'username' | 'link'>('name')
 
-  useEffect(() => {
-    if (addingUnclaimed && newMemberInputRef.current) newMemberInputRef.current.focus()
-  }, [addingUnclaimed])
-
-  // --- Friend picker state (for "Invite a friend") ---
-  const [pickerOpen, setPickerOpen] = useState(false)
+  // --- Friend invite state (used in "Friend" tab of modal) ---
   const [friends, setFriends] = useState<Friend[]>([])
   const [friendsLoading, setFriendsLoading] = useState(false)
   const [invitedUids, setInvitedUids] = useState<Set<string>>(new Set())
 
-  // --- Share invite link state ---
+  // --- Share invite link state (used in "Link" tab of modal) ---
   const [shareLoading, setShareLoading] = useState(false)
   const [generatedInviteUrl, setGeneratedInviteUrl] = useState<string | null>(null)
   const [copyFeedback, setCopyFeedback] = useState(false)
 
-  // Load friends when the picker opens (lazy — not on mount)
+  // --- Username search state (used in "@Username" tab of modal) ---
+  const [usernameQuery, setUsernameQuery] = useState('')
+  const [usernameResults, setUsernameResults] = useState<SearchUser[]>([])
+  const [usernameSearching, setUsernameSearching] = useState(false)
+  const [invitedByUsername, setInvitedByUsername] = useState<Set<string>>(new Set())
+  const usernameSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Debounced username search — fires 300ms after each keystroke, same as ProfilePage
   useEffect(() => {
-    if (!pickerOpen || !userProfile) return
+    if (usernameSearchTimer.current) clearTimeout(usernameSearchTimer.current)
+    if (!currentUser || usernameQuery.trim() === '') {
+      setUsernameResults([])
+      setUsernameSearching(false)
+      return
+    }
+    setUsernameSearching(true)
+    usernameSearchTimer.current = setTimeout(async () => {
+      const results = await searchByNametag(usernameQuery.trim(), currentUser.uid)
+      setUsernameResults(results)
+      setUsernameSearching(false)
+    }, 300)
+    return () => {
+      if (usernameSearchTimer.current) clearTimeout(usernameSearchTimer.current)
+    }
+  }, [usernameQuery, currentUser]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load friends lazily when the modal is open on the "friend" tab
+  useEffect(() => {
+    if (!addMemberOpen || addMemberTab !== 'friend' || !userProfile) return
     if (friends.length > 0) return  // already loaded
     setFriendsLoading(true)
     fetchFriends(userProfile.uid).then(list => {
       setFriends(list)
       setFriendsLoading(false)
     })
-  }, [pickerOpen, userProfile]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [addMemberOpen, addMemberTab, userProfile]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Friends already in this travel (filter them out of the picker)
   const existingMemberUids = new Set(travel.memberUids)
   const invitableFriends = friends.filter(f => !existingMemberUids.has(f.uid))
+
+  // --- Merge members modal state ---
+  const [mergeModalOpen, setMergeModalOpen] = useState(false)
+  // Step 1: select two members; Step 2: choose which to keep and confirm
+  const [mergeStep, setMergeStep] = useState<'select' | 'confirm'>('select')
+  const [mergeSelected, setMergeSelected] = useState<Set<string>>(new Set())
+  const [mergeKeepId, setMergeKeepId] = useState<string | null>(null)
+  const [mergeLoading, setMergeLoading] = useState(false)
+  const [mergeDone, setMergeDone] = useState<{ keptName: string; deletedName: string } | null>(null)
+
+  function openMergeModal() {
+    setMergeStep('select')
+    setMergeSelected(new Set())
+    setMergeKeepId(null)
+    setMergeLoading(false)
+    setMergeDone(null)
+    setMergeModalOpen(true)
+  }
+
+  function toggleMergeSelect(travelMemberId: string) {
+    setMergeSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(travelMemberId)) {
+        next.delete(travelMemberId)
+      } else if (next.size < 2) {
+        next.add(travelMemberId)
+      }
+      return next
+    })
+  }
+
+  function proceedToConfirm() {
+    const [a, b] = Array.from(mergeSelected)
+    // Default: keep the claimed one if one is claimed; otherwise keep the first selected
+    const memberA = travel.members.find(m => m.travelMemberId === a)
+    const memberB = travel.members.find(m => m.travelMemberId === b)
+    const defaultKeep = (memberA?.userId !== null ? a : memberB?.userId !== null ? b : a)
+    setMergeKeepId(defaultKeep)
+    setMergeStep('confirm')
+  }
+
+  async function handleMerge() {
+    if (!mergeKeepId) return
+    const [a, b] = Array.from(mergeSelected)
+    const deleteId = mergeKeepId === a ? b : a
+    const keptMember = travel.members.find(m => m.travelMemberId === mergeKeepId)
+    const deletedMember = travel.members.find(m => m.travelMemberId === deleteId)
+    if (!keptMember || !deletedMember) return
+
+    setMergeLoading(true)
+    try {
+      await mergeMembers(travel.travelId, mergeKeepId, deleteId, travel.members, travel.createdBy)
+      onTravelChange({ members: travel.members.filter(m => m.travelMemberId !== deleteId) })
+      setMergeDone({ keptName: keptMember.displayName, deletedName: deletedMember.displayName })
+    } finally {
+      setMergeLoading(false)
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helper: format member display name
+  // ---------------------------------------------------------------------------
+
+  // Returns member name in format "Marc (Marcus)" where Marc is current displayName
+  // and Marcus is their account's original displayName. For now, shows account
+  // name only for current user (who we have displayName for). Future: store
+  // originalDisplayName in TravelMember schema when claiming.
+  function getMemberDisplayLabel(member: TravelMember): string {
+    if (member.userId === null) return member.displayName  // unclaimed: no account
+    if (member.userId === currentUser?.uid && userProfile) {
+      return `${member.displayName} (${userProfile.displayName})`  // we have current user's display name
+    }
+    // For other claimed members, we don't have their account displayName yet
+    // (future: store originalDisplayName in TravelMember when claiming)
+    return member.displayName
+  }
 
   // ---------------------------------------------------------------------------
   // Permission checks
@@ -581,9 +1038,11 @@ function MembersSection({
   function canRename(member: TravelMember): boolean {
     if (!currentUser) return false
     if (member.userId === null) return true  // unclaimed: anyone can rename
-    if (member.userId === currentUser.uid) return true  // linked user always can
-    if (isCreator && member.allowRename) return true  // creator can if flag permits
-    return false
+    if (member.userId === currentUser.uid) return true  // linked user always can rename themselves
+    // If member locked rename, no one else can rename (including creator)
+    if (!member.allowRename) return false
+    // Otherwise: anyone can rename if the member didn't lock it
+    return true
   }
 
   function canUnclaim(member: TravelMember): boolean {
@@ -615,6 +1074,16 @@ function MembersSection({
 
   async function handleClaim(member: TravelMember) {
     if (!currentUser) return
+
+    // If user already has a claimed slot, they must use the unlink flow first
+    // (click "This is not me" on their current slot to choose a different one)
+    if (myMember && myMember.travelMemberId !== member.travelMemberId) {
+      setUnlinkingMemberId(myMember.travelMemberId)
+      setUnlinkNewMemberName('')
+      return
+    }
+
+    // User has no claimed slot, or is claiming the same slot — proceed with claim
     await claimTravelMember(travel.travelId, member.travelMemberId, currentUser.uid, travel.members)
     // Transfer semantics: null any slot the user previously owned, then set this one
     onTravelChange({
@@ -626,14 +1095,64 @@ function MembersSection({
     })
   }
 
-  async function handleUnclaim(member: TravelMember) {
-    await unclaimTravelMember(travel.travelId, member.travelMemberId, travel.members)
-    // memberUids is NOT modified — access is retained
-    onTravelChange({
-      members: travel.members.map((m) =>
-        m.travelMemberId === member.travelMemberId ? { ...m, userId: null } : m,
-      ),
-    })
+  // Opens the "This is not me" modal — forces user to choose another member or create new
+  function handleThisIsNotMe(member: TravelMember) {
+    setUnlinkingMemberId(member.travelMemberId)
+    setUnlinkNewMemberName('')
+  }
+
+  // User claims an unclaimed member from the unlink modal
+  async function handleUnlinkAndClaim(unclaimedMemberId: string) {
+    if (!currentUser || !unlinkingMemberId) return
+
+    // If user clicked on themselves (same member), just cancel the modal
+    if (myMember?.travelMemberId === unclaimedMemberId) {
+      setUnlinkingMemberId(null)
+      setUnlinkNewMemberName('')
+      return
+    }
+
+    setUnlinkLoading(true)
+    try {
+      // Claim the unclaimed member (old slot auto-unlinks via transfer semantics)
+      await claimTravelMember(travel.travelId, unclaimedMemberId, currentUser.uid, travel.members)
+      onTravelChange({
+        members: travel.members.map((m) => {
+          if (m.travelMemberId === unclaimedMemberId) return { ...m, userId: currentUser.uid }
+          if (m.userId === currentUser.uid) return { ...m, userId: null }
+          return m
+        }),
+      })
+      setUnlinkingMemberId(null)
+      setUnlinkNewMemberName('')
+    } finally {
+      setUnlinkLoading(false)
+    }
+  }
+
+  // User creates new unclaimed member and claims it from the unlink modal
+  async function handleUnlinkAndCreateNew() {
+    if (!currentUser || !unlinkingMemberId) return
+    const trimmed = unlinkNewMemberName.trim()
+    if (!trimmed) return
+
+    setUnlinkLoading(true)
+    try {
+      const newMember = await addUnclaimedMember(travel.travelId, trimmed, travel.members)
+      // Claim the newly created member (old slot auto-unlinks via transfer semantics)
+      await claimTravelMember(travel.travelId, newMember.travelMemberId, currentUser.uid, travel.members)
+      onTravelChange({
+        members: travel.members.map((m) => {
+          if (m.travelMemberId === newMember.travelMemberId) return { ...m, userId: currentUser.uid }
+          if (m.userId === currentUser.uid) return { ...m, userId: null }
+          return m
+        }),
+      })
+      setUnlinkingMemberId(null)
+      setUnlinkNewMemberName('')
+    } finally {
+      setUnlinkLoading(false)
+    }
   }
 
   async function handleAllowRenameToggle(member: TravelMember) {
@@ -645,21 +1164,30 @@ function MembersSection({
     })
   }
 
-  async function handleAddUnclaimed() {
-    const trimmed = newMemberName.trim()
+  // Add unclaimed member (instant — no invite needed, just creates a slot)
+  async function handleAddUnclaimed(name: string) {
+    const trimmed = name.trim()
     if (!trimmed) return
     const newMember = await addUnclaimedMember(travel.travelId, trimmed, travel.members)
     onTravelChange({ members: [...travel.members, newMember] })
-    setNewMemberName('')
-    setAddingUnclaimed(false)
+    setAddMemberOpen(false)
   }
 
+  // Send a travel invite to a friend (friend tab)
   async function handleSendTravelInvite(toUid: string) {
     if (!userProfile) return
     setInvitedUids(prev => new Set(prev).add(toUid))
     await sendTravelInvite(userProfile, toUid, travel.travelId, travel.name)
   }
 
+  // Send a travel invite via username search result (username tab)
+  async function handleSendTravelInviteByUsername(toUid: string) {
+    if (!userProfile) return
+    setInvitedByUsername(prev => new Set(prev).add(toUid))
+    await sendTravelInvite(userProfile, toUid, travel.travelId, travel.name)
+  }
+
+  // Generate shareable invite link (link tab) — also auto-copies to clipboard
   async function handleShareLink() {
     if (!userProfile) return
     setShareLoading(true)
@@ -674,7 +1202,7 @@ function MembersSection({
         setCopyFeedback(true)
         setTimeout(() => setCopyFeedback(false), 2500)
       } catch {
-        // clipboard may be unavailable; user can copy manually from the displayed URL
+        // clipboard may be unavailable; user can copy manually
       }
     } catch {
       // invite creation failed — ignore silently
@@ -694,6 +1222,68 @@ function MembersSection({
   // Render
   // ---------------------------------------------------------------------------
 
+  // Solo travel: simplified UI (just "you" + educational message + add button)
+  if (isSoloTravel) {
+    return (
+      <div className="flex flex-col gap-3">
+        {/* Simplified solo display */}
+        <div className="rounded-lg border bg-muted/30 px-3 py-2">
+          <p className="text-sm font-medium">Members: You</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            You're the only member in this travel.
+          </p>
+        </div>
+
+        {/* Educational message */}
+        <div className="rounded-lg border border-dashed border-primary/30 bg-primary/5 px-3 py-2.5">
+          <p className="text-xs font-medium text-primary mb-1">ℹ️ Did you know?</p>
+          <p className="text-xs text-muted-foreground">
+            You can add other people in this travel, and share your transactions with them.
+          </p>
+        </div>
+
+        {/* Add member button — opens unified modal */}
+        <button
+          type="button"
+          onClick={() => { setAddMemberTab('name'); setAddMemberOpen(true) }}
+          className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3.5 text-sm font-semibold text-primary-foreground shadow-sm transition-opacity hover:opacity-90 active:opacity-80"
+        >
+          <span className="text-base leading-none">+</span>
+          Add member
+        </button>
+
+        {/* Unified Add Member modal — portal to escape overflow:hidden */}
+        {addMemberOpen && createPortal(
+          <AddMemberModal
+            tab={addMemberTab}
+            onTabChange={setAddMemberTab}
+            onClose={() => setAddMemberOpen(false)}
+            onAddUnclaimed={handleAddUnclaimed}
+            friends={friends}
+            friendsLoading={friendsLoading}
+            invitableFriends={invitableFriends}
+            invitedUids={invitedUids}
+            onInviteFriend={handleSendTravelInvite}
+            usernameQuery={usernameQuery}
+            onUsernameQueryChange={setUsernameQuery}
+            usernameResults={usernameResults}
+            usernameSearching={usernameSearching}
+            invitedByUsername={invitedByUsername}
+            onInviteByUsername={handleSendTravelInviteByUsername}
+            existingMemberUids={existingMemberUids}
+            shareLoading={shareLoading}
+            generatedInviteUrl={generatedInviteUrl}
+            copyFeedback={copyFeedback}
+            onShareLink={handleShareLink}
+            onCopyInviteUrl={handleCopyInviteUrl}
+          />,
+          document.body
+        )}
+      </div>
+    )
+  }
+
+  // Multi-member travel: full UI
   return (
     <div className="flex flex-col gap-3">
 
@@ -736,7 +1326,7 @@ function MembersSection({
                       className="w-full rounded-md border bg-background px-2 py-0.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                     />
                   ) : (
-                    <p className="text-sm font-medium truncate">{member.displayName}</p>
+                    <p className="text-sm font-medium truncate">{getMemberDisplayLabel(member)}</p>
                   )}
 
                   {/* Sub-label: "You", "Linked account", or "Unclaimed" */}
@@ -764,25 +1354,25 @@ function MembersSection({
               {/* Action buttons row — only shown when relevant */}
               {(isUnclaimed || canUnclaim(member) || showAllowRenameToggle(member)) && (
                 <div className="flex flex-wrap gap-1.5 pl-10">
-                  {/* Claim button — only on unclaimed slots */}
+                  {/* "This is me" button — only on unclaimed slots */}
                   {isUnclaimed && (
                     <button
                       type="button"
                       onClick={() => handleClaim(member)}
                       className="rounded-md border border-primary px-2 py-0.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
                     >
-                      Claim — this is me
+                      🎯 This is me
                     </button>
                   )}
 
-                  {/* Unclaim button — only shown to the linked user or creator */}
-                  {!isUnclaimed && canUnclaim(member) && (
+                  {/* "This is not me" button — only shown to the user themselves */}
+                  {isMine && !isUnclaimed && (
                     <button
                       type="button"
-                      onClick={() => handleUnclaim(member)}
+                      onClick={() => handleThisIsNotMe(member)}
                       className="rounded-md border border-muted-foreground/40 px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:border-destructive hover:text-destructive"
                     >
-                      {isMine ? 'Unlink my account' : 'Unlink'}
+                      ❌ This is not me
                     </button>
                   )}
 
@@ -803,133 +1393,333 @@ function MembersSection({
         })}
       </ul>
 
-      {/* Add person without account — dashed button + inline input */}
-      {!addingUnclaimed ? (
+      {/* Add member button — opens unified 4-tab modal */}
+      <button
+        type="button"
+        onClick={() => { setAddMemberTab('name'); setAddMemberOpen(true) }}
+        className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3.5 text-sm font-semibold text-primary-foreground shadow-sm transition-opacity hover:opacity-90 active:opacity-80"
+      >
+        <span className="text-base leading-none">+</span>
+        Add member
+      </button>
+
+      {/* Merge members — only shown when 2+ members exist */}
+      {travel.members.length >= 2 && (
         <button
           type="button"
-          onClick={() => setAddingUnclaimed(true)}
-          className="flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent/20"
+          onClick={openMergeModal}
+          className="text-xs text-muted-foreground hover:text-foreground transition-colors text-center w-full py-1"
         >
-          <span>+</span>
-          Add person without account
+          Merge duplicate members
         </button>
-      ) : (
-        <div className="flex items-center gap-2 rounded-lg border border-dashed px-3 py-2">
-          <input
-            ref={newMemberInputRef}
-            type="text"
-            value={newMemberName}
-            onChange={(e) => setNewMemberName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleAddUnclaimed()
-              if (e.key === 'Escape') { setAddingUnclaimed(false); setNewMemberName('') }
-            }}
-            placeholder="Their name…"
-            className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-          />
-          <Button type="button" size="sm" onClick={handleAddUnclaimed} disabled={!newMemberName.trim()}>
-            Add
-          </Button>
-          <Button type="button" size="sm" variant="outline" onClick={() => { setAddingUnclaimed(false); setNewMemberName('') }}>
-            ✕
-          </Button>
-        </div>
       )}
 
-      {/* Invite a friend (collapsible friend picker) */}
-      <div className="flex flex-col gap-2">
-        <button
-          type="button"
-          onClick={() => setPickerOpen(o => !o)}
-          className="flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent/20"
+      {/* Unified Add Member modal — portal to escape parent overflow:hidden */}
+      {addMemberOpen && createPortal(
+        <AddMemberModal
+          tab={addMemberTab}
+          onTabChange={setAddMemberTab}
+          onClose={() => setAddMemberOpen(false)}
+          onAddUnclaimed={handleAddUnclaimed}
+          friends={friends}
+          friendsLoading={friendsLoading}
+          invitableFriends={invitableFriends}
+          invitedUids={invitedUids}
+          onInviteFriend={handleSendTravelInvite}
+          usernameQuery={usernameQuery}
+          onUsernameQueryChange={setUsernameQuery}
+          usernameResults={usernameResults}
+          usernameSearching={usernameSearching}
+          invitedByUsername={invitedByUsername}
+          onInviteByUsername={handleSendTravelInviteByUsername}
+          existingMemberUids={existingMemberUids}
+          shareLoading={shareLoading}
+          generatedInviteUrl={generatedInviteUrl}
+          copyFeedback={copyFeedback}
+          onShareLink={handleShareLink}
+          onCopyInviteUrl={handleCopyInviteUrl}
+        />,
+        document.body
+      )}
+
+      {/* Merge members modal — portal to escape parent overflow:hidden */}
+      {mergeModalOpen && createPortal(
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => !mergeLoading && setMergeModalOpen(false)}
         >
-          <UserPlus className="h-4 w-4" />
-          Invite a friend
-          <span className="ml-auto text-xs">{pickerOpen ? '▲' : '▼'}</span>
-        </button>
-
-        {pickerOpen && (
-          <div className="rounded-lg border p-2">
-            {friendsLoading && (
-              <p className="py-2 text-center text-xs text-muted-foreground">Loading friends…</p>
-            )}
-            {!friendsLoading && invitableFriends.length === 0 && (
-              <p className="py-2 text-center text-xs text-muted-foreground">
-                {friends.length === 0
-                  ? "No friends yet. Add friends from your profile page. Your friends don't have the app yet? Share the invite link with the button below 'Generate invite link' so they can join! You can also add their name without an account using the button above 'Add a friend without an account'."
-                  : 'All your friends are already in this travel.'}
-              </p>
-            )}
-            {!friendsLoading && invitableFriends.map(friend => {
-              const alreadyInvited = invitedUids.has(friend.uid)
-              return (
-                <div key={friend.uid} className="flex items-center gap-2 rounded px-2 py-1.5">
-                  <div
-                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white"
-                    style={{ backgroundColor: `hsl(${avatarHue(friend.uid)}, 55%, 50%)` }}
-                  >
-                    {(friend.displayName || '?').charAt(0).toUpperCase()}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{friend.displayName}</p>
-                    {friend.nametag && (
-                      <p className="text-xs text-muted-foreground">@{friend.nametag}</p>
-                    )}
-                  </div>
-                  {alreadyInvited ? (
-                    <span className="flex items-center gap-1 text-xs text-green-600">
-                      <Check className="h-3 w-3" /> Invited
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => handleSendTravelInvite(friend.uid)}
-                      className="flex items-center gap-1 text-xs text-primary hover:underline"
-                    >
-                      <UserPlus className="h-3 w-3" />
-                      Invite
-                    </button>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Share invite link */}
-      <div className="flex flex-col gap-2">
-        <button
-          type="button"
-          onClick={handleShareLink}
-          disabled={shareLoading}
-          className="flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent/20 disabled:opacity-50"
-        >
-          <Share2 className="h-4 w-4" />
-          {shareLoading ? 'Creating link…' : 'Generate invite link'}
-        </button>
-
-        {/* Show the generated URL with a copy button — only visible after link is created */}
-        {generatedInviteUrl && (
-          <div className="flex flex-col gap-1">
-            <div className="flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2">
-              <span className="flex-1 min-w-0 truncate text-xs text-muted-foreground font-mono">
-                {generatedInviteUrl}
-              </span>
+          <div
+            className="w-full max-w-md rounded-lg bg-background border shadow-lg flex flex-col"
+            style={{ maxHeight: '85vh' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between border-b px-4 py-3">
+              <h2 className="font-semibold">
+                {mergeDone ? '✅ Members merged' : mergeStep === 'select' ? 'Merge duplicate members' : 'Confirm merge'}
+              </h2>
               <button
                 type="button"
-                onClick={handleCopyInviteUrl}
-                className="shrink-0 text-xs text-primary hover:underline"
+                onClick={() => setMergeModalOpen(false)}
+                disabled={mergeLoading}
+                className="flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted disabled:opacity-50"
               >
-                {copyFeedback ? 'Copied!' : 'Copy'}
+                ✕
               </button>
             </div>
-            <p className="text-xs text-muted-foreground pl-1">
-              Anyone with this link can join this travel.
-            </p>
+
+            <div className="flex-1 overflow-y-auto px-4 py-4">
+
+              {/* ── Done state ── */}
+              {mergeDone && (
+                <div className="flex flex-col gap-3 text-center">
+                  <p className="text-sm">
+                    <span className="font-medium">"{mergeDone.deletedName}"</span> deleted.
+                    All transactions updated.
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    Expenses are now under <span className="font-medium">"{mergeDone.keptName}"</span>.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setMergeModalOpen(false)}
+                    className="mt-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+                  >
+                    Done
+                  </button>
+                </div>
+              )}
+
+              {/* ── Step 1: select two members ── */}
+              {!mergeDone && mergeStep === 'select' && (
+                <div className="flex flex-col gap-3">
+                  <p className="text-xs text-muted-foreground">
+                    Select two member slots that represent the same person. Their expenses will be combined.
+                  </p>
+                  <div className="flex flex-col gap-2">
+                    {travel.members.map((member) => {
+                      const isSelected = mergeSelected.has(member.travelMemberId)
+                      const isDisabled = !isSelected && mergeSelected.size >= 2
+                      return (
+                        <button
+                          key={member.travelMemberId}
+                          type="button"
+                          onClick={() => toggleMergeSelect(member.travelMemberId)}
+                          disabled={isDisabled}
+                          className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors disabled:opacity-40 ${
+                            isSelected ? 'border-primary bg-primary/5' : 'hover:bg-accent'
+                          }`}
+                        >
+                          {/* Checkbox indicator */}
+                          <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border text-xs ${
+                            isSelected ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground'
+                          }`}>
+                            {isSelected && '✓'}
+                          </div>
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">
+                            {(member.displayName || '?').charAt(0).toUpperCase()}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">{member.displayName}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {member.userId === null ? 'Unclaimed' : member.userId === currentUser?.uid ? 'You' : 'Linked account'}
+                            </p>
+                          </div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={proceedToConfirm}
+                    disabled={mergeSelected.size !== 2}
+                    className="mt-1 w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Continue
+                  </button>
+                </div>
+              )}
+
+              {/* ── Step 2: choose which to keep + confirm ── */}
+              {!mergeDone && mergeStep === 'confirm' && (() => {
+                const [a, b] = Array.from(mergeSelected)
+                const memberA = travel.members.find(m => m.travelMemberId === a)!
+                const memberB = travel.members.find(m => m.travelMemberId === b)!
+                const deleteId = mergeKeepId === a ? b : a
+                const deletedMember = travel.members.find(m => m.travelMemberId === deleteId)!
+                return (
+                  <div className="flex flex-col gap-4">
+                    <p className="text-xs text-muted-foreground">
+                      Choose which member slot to keep. The other will be deleted and all their expenses will move to the kept slot.
+                    </p>
+
+                    {/* Keep/delete radio choice */}
+                    <div className="flex flex-col gap-2">
+                      {[memberA, memberB].map((member) => {
+                        const isKeep = mergeKeepId === member.travelMemberId
+                        return (
+                          <button
+                            key={member.travelMemberId}
+                            type="button"
+                            onClick={() => setMergeKeepId(member.travelMemberId)}
+                            className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors ${
+                              isKeep ? 'border-primary bg-primary/5' : 'hover:bg-accent'
+                            }`}
+                          >
+                            <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border text-xs ${
+                              isKeep ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground'
+                            }`}>
+                              {isKeep && '●'}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium">{member.displayName}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {member.userId === null ? 'Unclaimed' : member.userId === currentUser?.uid ? 'You' : 'Linked account'}
+                                {isKeep && <span className="ml-1 font-medium text-primary">← Keep</span>}
+                                {!isKeep && <span className="ml-1 text-destructive">← Delete</span>}
+                              </p>
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
+
+                    {/* Warning */}
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+                      <p className="font-medium">⚠️ This cannot be undone.</p>
+                      <p className="mt-0.5">
+                        "{deletedMember.displayName}" will be permanently deleted. All their transactions will move to "{travel.members.find(m => m.travelMemberId === mergeKeepId)?.displayName}".
+                      </p>
+                    </div>
+
+                    {/* Action buttons */}
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setMergeStep('select')}
+                        disabled={mergeLoading}
+                        className="flex-1 rounded-md border px-4 py-2 text-sm transition-colors hover:bg-muted disabled:opacity-50"
+                      >
+                        Back
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleMerge}
+                        disabled={mergeLoading}
+                        className="flex-1 rounded-md bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground disabled:opacity-50"
+                      >
+                        {mergeLoading ? 'Merging…' : 'Merge & delete'}
+                      </button>
+                    </div>
+                  </div>
+                )
+              })()}
+
+            </div>
           </div>
-        )}
-      </div>
+        </div>,
+        document.body
+      )}
+
+      {/* "This is not me" modal — rendered via Portal to escape parent overflow:hidden */}
+      {unlinkingMemberId !== null && createPortal(
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => !unlinkLoading && setUnlinkingMemberId(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-lg bg-background border shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="border-b px-4 py-3">
+              <h2 className="font-semibold">Who are you in this trip?</h2>
+              <p className="text-xs text-muted-foreground mt-1">
+                Choose a member to continue. You can pick yourself or a new person.
+              </p>
+            </div>
+
+            <div className="max-h-96 overflow-y-auto px-4 py-3 flex flex-col gap-2">
+              {/* List all members (claimed + unclaimed) — user can claim any of them */}
+              {travel.members.map((member) => {
+                const isCurrent = member.travelMemberId === myMember?.travelMemberId
+                return (
+                  <button
+                    key={member.travelMemberId}
+                    type="button"
+                    onClick={() => handleUnlinkAndClaim(member.travelMemberId)}
+                    disabled={unlinkLoading}
+                    className="flex items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors hover:bg-accent disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">
+                      {(member.displayName || '?').charAt(0).toUpperCase()}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm font-medium">{member.displayName}</span>
+                      {isCurrent && <span className="text-xs text-muted-foreground ml-1">(currently you)</span>}
+                    </div>
+                    {unlinkLoading ? (
+                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                    ) : (
+                      <span className="text-xs text-primary font-medium">This is me</span>
+                    )}
+                  </button>
+                )
+              })}
+
+              {/* Create new member option */}
+              <div className="border-t pt-2 mt-2">
+                {!unlinkNewMemberName ? (
+                  <button
+                    type="button"
+                    onClick={() => unlinkNewMemberInputRef.current?.focus()}
+                    disabled={unlinkLoading}
+                    className="w-full rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    + Create new member
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <input
+                      ref={unlinkNewMemberInputRef}
+                      type="text"
+                      value={unlinkNewMemberName}
+                      onChange={(e) => setUnlinkNewMemberName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !unlinkLoading) handleUnlinkAndCreateNew()
+                        if (e.key === 'Escape') setUnlinkNewMemberName('')
+                      }}
+                      disabled={unlinkLoading}
+                      placeholder="Name…"
+                      className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      onClick={handleUnlinkAndCreateNew}
+                      disabled={!unlinkNewMemberName.trim() || unlinkLoading}
+                      className="shrink-0 rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {unlinkLoading ? '...' : 'Add'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="border-t px-4 py-3 flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => setUnlinkingMemberId(null)}
+                disabled={unlinkLoading}
+                className="rounded-md border px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   )
 }
@@ -1001,7 +1791,8 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
   // Solo check based on memberUids (access-control array).
   // A user in memberUids may not have claimed a slot yet, but they still count
   // as a real user with access to the travel.
-  const isOnlyUser = travel.memberUids.length <= 1
+  // For leave/delete decisions only — use isOnlyClaimedUser, not isSoloTravel (see MembersSection).
+  const isOnlyClaimedUser = travel.memberUids.length <= 1
 
   // State for the leave/delete confirmation dialog
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -1033,7 +1824,7 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
   async function handleLeaveOrDelete() {
     setActionInProgress(true)
     try {
-      if (isOnlyUser) {
+      if (isOnlyClaimedUser) {
         // Solo or last user — hard-delete the entire travel + transactions
         await deleteTravel(travel.travelId)
       } else {
@@ -1211,7 +2002,7 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
           {/* Explanation label — different wording for solo vs multi-user travels */}
           {!isArchived && !archiveDone && (
             <p className="text-xs text-muted-foreground">
-              {isOnlyUser
+              {isOnlyClaimedUser
                 ? 'Move this travel to an archive directory. You will still be able to open it and add or edit transactions.'
                 : 'Move this travel to an archive directory. You will remain a member of this travel, and still be able to open it and add or edit transactions. This will have no impact on other participants.'}
             </p>
@@ -1237,13 +2028,13 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
             className="w-full justify-start"
             onClick={() => setConfirmOpen(true)}
           >
-            {isOnlyUser ? 'Delete this travel' : 'Leave this travel'}
+            {isOnlyClaimedUser ? 'Delete this travel' : 'Leave this travel'}
           </Button>
         </div>
 
         {/* Explanation text */}
         <p className="text-xs text-muted-foreground">
-          {isOnlyUser
+          {isOnlyClaimedUser
             ? 'You are the only user. Deleting will permanently remove this travel and all its transactions.'
             : 'Leaving will remove you from the travel. Other members will still have access. Your past transactions will be preserved.'}
         </p>
@@ -1254,10 +2045,10 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {isOnlyUser ? 'Delete this travel?' : 'Leave this travel?'}
+              {isOnlyClaimedUser ? 'Delete this travel?' : 'Leave this travel?'}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {isOnlyUser
+              {isOnlyClaimedUser
                 ? 'This will permanently delete the travel and all its transactions. This action cannot be undone.'
                 : 'You will lose access to this travel. Your expense history will be preserved for other members.'}
             </AlertDialogDescription>
@@ -1270,8 +2061,8 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
               className="bg-destructive text-white hover:bg-destructive/90"
             >
               {actionInProgress
-                ? (isOnlyUser ? 'Deleting…' : 'Leaving…')
-                : (isOnlyUser ? 'Delete' : 'Leave')}
+                ? (isOnlyClaimedUser ? 'Deleting…' : 'Leaving…')
+                : (isOnlyClaimedUser ? 'Delete' : 'Leave')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

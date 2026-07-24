@@ -411,3 +411,87 @@ export async function unarchiveTravel(travelId: string, uid: string): Promise<vo
   const ref = doc(db, 'travels', travelId)
   await updateDoc(ref, { archivedByUids: arrayRemove(uid) })
 }
+
+// ---------------------------------------------------------------------------
+// mergeMembers
+//
+// Merges two member slots (keepId + deleteId) into one.
+// All references to `deleteId` in every transaction's paidBy / beneficiaries
+// are rewritten to `keepId`. If both members appear in the same Split array,
+// their amounts are summed (no duplicate travelMemberIds after merge).
+// The `deleteId` slot is then removed from travel.members.
+//
+// Everything runs in a single Firestore batch.
+// Firestore batch limit: 500 writes. Fine for v1 (travels rarely have 490+ transactions).
+// ---------------------------------------------------------------------------
+
+export async function mergeMembers(
+  travelId: string,
+  keepId: string,
+  deleteId: string,
+  currentMembers: TravelMember[],
+  currentCreatedBy: string,
+): Promise<void> {
+  const batch = writeBatch(db)
+
+  // --- 1. Read all transactions -----------------------------------------
+  const txCol = collection(db, 'travels', travelId, 'transactions')
+  const txSnapshot = await getDocs(txCol)
+
+  // Helper: rewrite a Split[] replacing deleteId → keepId, merging amounts if both present
+  function rewriteSplits(splits: { travelMemberId: string; amount: number }[]) {
+    const hasKeep = splits.some((s) => s.travelMemberId === keepId)
+    const hasDelete = splits.some((s) => s.travelMemberId === deleteId)
+    if (!hasDelete) return null  // no change needed
+
+    if (hasKeep) {
+      // Both exist — sum amounts onto keepId, remove deleteId
+      const result: { travelMemberId: string; amount: number }[] = []
+      let keepAmount = 0
+      for (const s of splits) {
+        if (s.travelMemberId === keepId || s.travelMemberId === deleteId) {
+          keepAmount += s.amount
+        } else {
+          result.push(s)
+        }
+      }
+      result.push({ travelMemberId: keepId, amount: keepAmount })
+      return result
+    } else {
+      // Only deleteId exists — rename to keepId
+      return splits.map((s) =>
+        s.travelMemberId === deleteId ? { ...s, travelMemberId: keepId } : s,
+      )
+    }
+  }
+
+  // --- 2. Batch-update each affected transaction ------------------------
+  txSnapshot.docs.forEach((txDoc) => {
+    const data = txDoc.data()
+    const paidBy: { travelMemberId: string; amount: number }[] = data.paidBy ?? []
+    const beneficiaries: { travelMemberId: string; amount: number }[] = data.beneficiaries ?? []
+
+    const newPaidBy = rewriteSplits(paidBy)
+    const newBeneficiaries = rewriteSplits(beneficiaries)
+
+    if (newPaidBy || newBeneficiaries) {
+      batch.update(txDoc.ref, {
+        ...(newPaidBy ? { paidBy: newPaidBy } : {}),
+        ...(newBeneficiaries ? { beneficiaries: newBeneficiaries } : {}),
+      })
+    }
+  })
+
+  // --- 3. Update travel: remove deleteId slot, reassign createdBy if needed
+  const travelRef = doc(db, 'travels', travelId)
+  const updatedMembers = currentMembers.filter((m) => m.travelMemberId !== deleteId)
+  const travelUpdate: Record<string, unknown> = {
+    members: updatedMembers.map(serialiseMember),
+  }
+  if (currentCreatedBy === deleteId) {
+    travelUpdate.createdBy = keepId
+  }
+  batch.update(travelRef, travelUpdate)
+
+  await batch.commit()
+}
