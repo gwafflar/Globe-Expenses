@@ -13,7 +13,7 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { useAuthStore } from '@/auth/store/useAuthStore'
 import { createTransaction, updateTransaction } from '@/transactions/services/transactionService'
-import { getExchangeRate } from '@/shared/utils/exchangeRates'
+import { getExchangeRate, hasExchangeRate } from '@/shared/utils/exchangeRates'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -786,6 +786,11 @@ export function TransactionForm({
     return getExchangeRate(currency, mainCurrency, defaultRates)
   }, [currency, mainCurrency, rateOverride, defaultRates])
 
+  // True when neither a per-transaction override, a travel default, nor the
+  // hardcoded table has a real rate for this pair — effectiveRate is a blind
+  // 1.0 fallback and totalAmountMain will be wrong unless the user notices.
+  const rateIsUnknown = rateOverride === null && !hasExchangeRate(currency, mainCurrency, defaultRates)
+
   // --- Split state ---
   const totalAmount = parseFloat(amountStr) || 0
 
@@ -1210,6 +1215,14 @@ export function TransactionForm({
               {currency !== mainCurrency && totalAmount > 0 && (
                 <p className="mt-1 text-xs text-muted-foreground">
                   = {(totalAmount * effectiveRate).toFixed(2)} {mainCurrency}
+                </p>
+              )}
+
+              {/* Unknown-rate warning — no travel default or hardcoded rate exists for
+                  this pair, so the amount below is not actually converted (1:1 fallback). */}
+              {currency !== mainCurrency && rateIsUnknown && (
+                <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                  ⚠️ No exchange rate known for {currency} → {mainCurrency}. Amount shown unconverted — enter a rate below.
                 </p>
               )}
 

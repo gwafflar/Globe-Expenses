@@ -2096,3 +2096,128 @@ match /feedback/{feedbackId} {
 **Blocked by:** Firebase Storage bucket setup. The project's Firestore is in the EU region; Firebase Storage free tier (Spark plan) requires the US region. Creating a Storage bucket fails.  
 **Current state:** All code is written and commented out in `feedbackService.ts` and `FeedbackForm.tsx`. Ready to uncomment once a Storage bucket is available (paid plan or region change).  
 **Required when unblocked:** Firebase Storage security rules (authenticated, 5 MB limit, `image/*` MIME type).
+
+---
+
+## 📝 Working Session 020 — 24 July 2026
+
+**Type**: Review + bug fix + tests (retroactively closes out unlogged prior work)
+**Tools used**: Claude Code (claude-code CLI)
+**Commit**: `9a26868`
+
+### Context
+
+At session start, the working tree had a substantial, uncommitted members/invites overhaul sitting on top of commit `85aead1` (5 April 2026) — `MEMBERS_SYSTEM_ANALYSIS.md` and `MEMBERS_UX_SPEC.md` (self-labeled "Session 019" inside the spec, but distinct from the logged Session 019 above, which only covered Google OAuth + the welcome page). That members session was never committed or logged. This session reviewed it, found and fixed one remaining gap, added tests, and committed everything together.
+
+### What was reviewed (built in the prior, unlogged session)
+
+**`ParametersTab.tsx` — Members section overhaul**, per `MEMBERS_UX_SPEC.md`:
+- "🎯 This is me" / "❌ This is not me" claim/unlink language, replacing ambiguous claim/unclaim buttons
+- Rename lock (`canRename()`): a member can lock their own name against edits by others; creator cannot override another member's lock (closes Analysis Issue #5)
+- Solo-travel simplified UI: "Members: You" + an educational callout, no claim/rename clutter until a second member exists
+- Unified 4-tab "Add member" modal (`AddMemberModal`): add by name, invite a friend, invite by @username (new), generate shareable link
+- **Member merge/reconciliation tool**: select two duplicate slots → confirm which to keep → `mergeMembers()` rewrites `paidBy`/`beneficiaries` across every transaction and reassigns `createdBy` if needed, in one Firestore batch
+- "This is not me" modal: forces a choice (claim another unclaimed slot, or create + claim a new one) — no zero-slot state possible
+
+**`InvitePage.tsx`**: the post-accept identity-pick screen gained an inline "I'm someone new — add me with a name" option (`handleCreateAndClaim`), creating and auto-claiming a new slot without leaving the page.
+
+**`travelService.ts`**: new `mergeMembers(travelId, keepId, deleteId, currentMembers, currentCreatedBy)` — see above.
+
+**Minor cleanups bundled in the same working tree**: stray `console.log` removed from `ImportXlsxDialog.tsx`; a flagged inline comment left on `avatarHue()` in `TravelDetailPage.tsx` (`// why the f*ck did claude put this here?? to clean later`) — noted but not addressed this session.
+
+### What was found missing and fixed this session
+
+**Duplicate member slot on re-accepted invites** (Analysis Issues #1 and #6, `MEMBERS_SYSTEM_ANALYSIS.md`): `acceptTravelInvite()` in `friendService.ts` always `arrayUnion`'d a brand-new `TravelMember` into `members[]`, with no check for whether the accepter was already in `memberUids`. Re-clicking an invite link, or receiving a targeted invite after already being a member some other way, silently created a second, duplicate slot for the same person — the exact bug the new merge tool exists to clean up after the fact, but the root cause was still live.
+
+**Fix**: `acceptTravelInvite()` now pre-reads the travel document before building the batch.
+- Read **denied** (permission error) → the Firestore rule only allows travel reads once `auth.uid` is in `memberUids`, so denial means a genuinely new member → unchanged behavior, creates a new slot.
+- Read **succeeds** and `memberUids` already contains the uid → skip the `members`/`memberUids` arrayUnion entirely; only mark the invite as used.
+- `TravelInviteResult` gained `alreadyMember: boolean`; `InvitePage.handleAccept()` uses it to skip straight to the "accepted" screen instead of re-reading the travel and showing identity-pick (nothing new was created to claim).
+
+### Tests added
+
+- `src/travels/services/travelService.test.ts` (9 tests) — `mergeMembers()` split-rewriting logic: rename-only case, sum-both-present case, untouched-third-member case, no-op when neither id present, only rewriting the affected side (`paidBy` vs `beneficiaries`), multiple transactions in one batch, `members[]` filtering, `createdBy` reassignment (both branches), single batch commit.
+- `src/friends/services/friendService.test.ts` (8 tests) — `acceptTravelInvite()` dedup branch: new-member path, already-member path, invite still marked used either way, friendship writes still fire either way, defensive edge case (read succeeds but uid not actually in `memberUids`), missing `travelId` throws, single batch commit.
+- Both suites mock `firebase/firestore` (via `vi.hoisted()`, required because `vi.mock()` factories are hoisted above normal `const` declarations) rather than hitting live Firestore.
+- Full suite: 180/180 passing. `tsc --noEmit` and `eslint` clean.
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `src/travels/components/tabs/ParametersTab.tsx` | Members section overhaul (see above) — from the prior unlogged session |
+| `src/friends/pages/InvitePage.tsx` | Inline create-and-claim on identity pick (prior session) + `alreadyMember` handling (this session) |
+| `src/travels/services/travelService.ts` | New `mergeMembers()` (prior session) |
+| `src/friends/services/friendService.ts` | `acceptTravelInvite()` dedup fix (this session) |
+| `src/shared/components/ImportXlsxDialog.tsx` | Removed stray `console.log` (prior session) |
+| `src/travels/pages/TravelDetailPage.tsx` | Flagged but unresolved comment on `avatarHue()` (prior session) |
+| `src/travels/services/travelService.test.ts` | **New** — `mergeMembers()` tests (this session) |
+| `src/friends/services/friendService.test.ts` | **New** — `acceptTravelInvite()` dedup tests (this session) |
+| `docs/MEMBERS_SYSTEM_ANALYSIS.md` | **New** — moved from repo root to `docs/` before commit |
+| `docs/MEMBERS_UX_SPEC.md` | **New** — moved from repo root to `docs/` before commit |
+| `.gitignore` | Added `docs/Audit report.md` and `docs/scale-up cost analysis.md` — unrelated local working docs, not meant for the repo |
+
+### Not done / still open
+
+- **Friend-vs-travel-invite visual distinction** (Analysis Issue #3): no changes made — still no special UI treatment when a travel invite arrives from someone already a friend.
+- **`avatarHue()` comment in `TravelDetailPage.tsx`** flagged but not investigated — the function itself looks fine (deterministic hue from a UID for avatar coloring); the comment just questions why it's placed where it is.
+- Component-level tests for `ParametersTab.tsx` / `InvitePage.tsx` UI flows (merge modal steps, claim/unclaim buttons) were not written — no existing React Testing Library harness in this repo to build on; flagged for a future session if wanted.
+- `.gitignore` change and the two newly-ignored docs were not yet committed as of this log entry (pending user confirmation) — commit separately, and do not add those files to git even if `git add -A` is used elsewhere.
+- Local branch is 5 commits ahead of `origin/main`, not yet pushed.
+
+## 🐛 Working Session 021 — 24 July 2026
+
+**Type**: Currency/exchange-rate audit + critical bug fix + tests
+**Tools used**: Claude Code (claude-code CLI)
+
+### Context
+
+User asked for a full analysis of how currencies/exchange rates are managed (docs vs. actual code, every UI touchpoint), followed by a proposal for improvements — analysis only, no code changes yet. Doc coverage of the layered rate system (hardcoded table → travel `defaultRates` → per-transaction override) turned out to be accurate. Four smaller gaps were found and approved for immediate fixing ("Tier 1", items 1–3; item 4 — defaulting new users to a locale-derived currency instead of hardcoded `'EUR'` — explicitly declined, keep as-is).
+
+### Critical finding (surfaced mid-implementation, not part of the original Tier 1 list)
+
+While fixing Tier 1 item 1 (a `pickerData.ts` currency missing from `exchangeRates.ts`), re-deriving the correct value exposed that **`getExchangeRate()`'s hardcoded-table fallback and `buildDefaultRates()` were computing the reciprocal of the correct cross-rate** — i.e. backwards.
+
+`EXCHANGE_RATES[code]` stores "units of `code` per 1 EUR" (standard EUR-base forex quote convention), but the file's own doc comment and the cross-rate formula (`fromRate / toRate`) assumed the opposite ("1 unit of `code` = X EUR"). Correct formula is `toRate / fromRate`.
+
+Verified against the AED/USD peg, fixed at exactly 3.6725 AED = 1 USD since 1997 (a hard real-world constant, immune to any staleness in the hardcoded table): the old formula gave `getExchangeRate('AED', 'USD') ≈ 3.673` (should be `1/3.6725 ≈ 0.2723`) — a ~13.5× error in the wrong direction. For currency pairs far from EUR/USD in magnitude (e.g. JPY, VND) the old formula's error was orders of magnitude larger.
+
+**Why this likely went unnoticed in real use**: the bug only lives in the *hardcoded fallback* and the *seeding* of `Travel.defaultRates` at travel creation — not in any rate a user typed in by hand. A freshly seeded default that "looks wrong" (e.g. "1 JPY = 130 EUR") is exactly the kind of number a careful user would manually correct in ParametersTab before real use, which fixes it locally per-travel without the systemic direction bug ever being identified. Already-stored `Transaction.exchangeRate` / `totalAmountMain` values are unaffected (frozen at creation time) regardless of source.
+
+### Fixes applied
+
+1. **`src/shared/utils/exchangeRates.ts`**:
+   - Fixed `getExchangeRate()` and `buildDefaultRates()` to use `toRate / fromRate` (previously `fromRate / toRate`).
+   - Corrected the file's doc comments to state the real convention ("units of currency per 1 EUR"), with the AED/USD peg cited as the verification method.
+   - Refreshed `EXCHANGE_RATES` from live data (`https://open.er-api.com/v6/latest/EUR`, fetched 2026-07-24) — replaces the old, undated hardcoded snapshot. `KPW` (North Korea, no real forex market) kept as a manually-flagged placeholder since it's absent from the live source.
+   - Added `SSP` and `UZS` — both were selectable in `pickerData.ts`'s `ALL_CURRENCIES` but missing from `EXCHANGE_RATES`, silently forcing a 1:1 fallback rate for any travel/transaction using them (Tier 1 item 1).
+   - Removed the unused `SUPPORTED_CURRENCIES` export (Tier 1 item 3 — dead code, zero references anywhere in `src`).
+   - Added `hasExchangeRate(currency, mainCurrency, travelRates?)` — lets callers detect the "about to silently fall back to 1:1" case instead of only a `console.warn` nobody sees in production (Tier 1 item 2).
+2. **`src/transactions/components/TransactionForm.tsx`**: surfaced `hasExchangeRate()` as a visible amber warning next to the rate hint when a transaction's currency has no known rate against the travel's mainCurrency, so a bad conversion is caught before saving rather than silently stored.
+3. **`src/shared/utils/exchangeRates.test.ts`**: updated all tests that had baked in the old (backwards) formula as "expected" behavior; added an AED/USD peg regression test (both on `getExchangeRate` and `buildDefaultRates`) to lock the correct direction in going forward; added a sync test asserting every `pickerData.ts` currency has a matching `EXCHANGE_RATES` entry, to catch future drift between the two files automatically.
+
+Full suite: 183/183 passing. `tsc -b` clean.
+
+### Stale-data follow-up: existing travels still had backwards rates
+
+The formula fix only changes the hardcoded fallback and future `buildDefaultRates()` seeding — it does not touch already-persisted `Travel.defaultRates` in Firestore, and `getExchangeRate()` always checks `travelRates[currency]` before the hardcoded table. So any currency added to a travel before this fix kept its old (backwards) stored rate, which the user confirmed while sanity-checking a VND-denominated travel (rate looked flipped because it was still reading the pre-fix seeded value).
+
+Considered and rejected: a firebase-admin migration script (would need the user's own credentials — out of scope for this session/tooling) and manual per-travel correction in the UI (tedious, error-prone). Went with a **one-time client-side repair on travel load** instead:
+
+- **`findStaleDefaultRates(defaultRates, mainCurrency)`** (`exchangeRates.ts`) — pure function. For each stored rate, computes the currently-correct hardcoded-table rate and compares the stored value's log-distance to that correct value vs. to its reciprocal (±30% tolerance band). Only flags entries that sit close to the reciprocal and clearly not close to correct — this avoids "fixing" a rate the user has since hand-corrected (which would sit close to the correct value, not its reciprocal) or one that's merely stale from normal market movement (stays in the same order of magnitude, not inverted). 6 new tests covering: reciprocal detection, already-correct (untouched), manually-customized-but-plausible (untouched), mainCurrency itself (skipped), unknown codes (skipped, can't verify), multiple entries in one travel (mixed flag/no-flag).
+- **`TravelDetailPage.tsx`**: new effect (guarded by a `rateRepairDone` ref so it runs once per travel load, not on every re-render) runs `findStaleDefaultRates()` against the freshly-loaded travel, persists any corrections via the existing `updateTravelDefaultRate()`, updates local state, and shows a new dismissible `RateRepairBanner` (auto-hides after 12s) naming the corrected currency codes. Already-stored `Transaction.exchangeRate`/`totalAmountMain` values are untouched — this only repairs the *default* rate used for future transactions.
+
+Full suite: 189/189 passing. `tsc -b` and `eslint` clean on all touched files.
+
+### Tier 2 discussion (not yet implemented)
+
+Discussed and deferred to a future session:
+- **Live exchange rates**: approved direction — a Cloud-Function-refreshed `config/exchangeRates` Firestore doc (daily), inserted into the existing fallback chain as `tx override → travel defaultRates → global live rates → hardcoded table`. Already on the v2 roadmap; this session just confirmed the priority order.
+- **`mainCurrency` editability**: staying locked in v1 per existing decision. Future v2 design note, if picked up: editing `mainCurrency` should be an explicit **batch-recompute action** (re-run `exchangeRate`/`totalAmountMain` for every existing transaction against the new mainCurrency, behind a preview/confirmation step) — not a quiet field edit, since every stored `totalAmountMain` silently becomes wrong the moment `mainCurrency` changes underneath it. High blast-radius, do not treat as a simple settings toggle.
+- **Persisting settlement currency/rate per travel** (currently local-only React state in `BalanceTab`, so each member picks their own display currency independently): flagged as low-effort (two more `Travel` fields, same fire-and-forget `updateDoc` pattern used everywhere else) but low-priority — cosmetic only, doesn't affect underlying balance math. No decision made on whether to build it.
+
+### Not done / still open
+
+- Tier 1 item 4 (locale-derived default currency for new users) — explicitly declined by user, `UserProfile.mainCurrency` stays hardcoded to `'EUR'` at first sign-in.
+- Tier 2 items not yet implemented (see above) — this session was analysis + critical-fix only.
+- Changes not yet committed as of this log entry.

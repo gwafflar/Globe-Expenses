@@ -1,168 +1,175 @@
 // exchangeRates.ts — hardcoded currency exchange rates for v1.
-// In v2, this will be replaced with dynamic rates fetched from an API.
-// All rates are expressed as "1 unit of currency = X EUR".
-// This means EUR itself has a rate of 1.0 (it's the reference).
-// Example: USD = 0.92 means 1 USD = 0.92 EUR.
+// In v2, this will be replaced with dynamic rates fetched from an API (see
+// SESSION_LOG / spec Tier 2 roadmap: Cloud-Function-refreshed config/exchangeRates doc).
+//
+// Refreshed 2026-07-24 from https://open.er-api.com (ECB-derived, EUR base).
+//
+// Convention: each value is "how many units of this currency equal 1 EUR"
+// (the standard EUR-base forex quote — e.g. AED: 4.18 means 1 EUR = 4.18 AED).
+// EUR itself is the reference, rate 1.0.
+//
+// IMPORTANT: this is the OPPOSITE of "1 unit of currency = X EUR". To get the
+// value of 1 unit of `currency` in EUR, divide: 1 / EXCHANGE_RATES[currency].
+// (A previous version of this file/comment had this backwards, which inverted
+// every cross-currency conversion in getExchangeRate() below — verified via
+// the fixed AED/USD peg of 3.6725, fixed 2026-07-24.)
 
 export const EXCHANGE_RATES: Record<string, number> = {
+  AED: 4.18194,
+  AFN: 75.2944,
+  ALL: 93.8408,
+  AMD: 418.041,
+  ANG: 2.0383,
+  AOA: 1074.39,
+  ARS: 1696.42,
+  AUD: 1.63179,
+  AWG: 2.0383,
+  AZN: 1.94075,
+  BAM: 1.95583,
+  BBD: 2.27743,
+  BDT: 140.543,
+  BGN: 1.95583,
+  BHD: 0.428157,
+  BIF: 3422.5,
+  BMD: 1.13872,
+  BND: 1.47115,
+  BOB: 12.5966,
+  BRL: 5.78017,
+  BSD: 1.13872,
+  BTN: 109.934,
+  BWP: 16.1729,
+  BYN: 3.29223,
+  BZD: 2.27743,
+  CAD: 1.60295,
+  CDF: 2646.38,
+  CHF: 0.929484,
+  CLP: 1069.01,
+  CNY: 7.7213,
+  COP: 3662.7,
+  CRC: 518.287,
+  CUP: 27.3292,
+  CVE: 110.265,
+  CZK: 24.1878,
+  DJF: 202.374,
+  DKK: 7.46382,
+  DOP: 66.3654,
+  DZD: 152.13,
+  EGP: 58.4981,
+  ERN: 17.0807,
+  ETB: 186.666,
   EUR: 1.0,
-  AED: 4.359,
-  AFN: 94.72,
-  ALL: 121.57,
-  AMD: 467.10,
-  ANG: 2.136,
-  AOA: 757.85,
-  ARS: 114.78,
-  AUD: 1.62,
-  AWG: 2.136,
-  AZN: 2.02,
-  BAM: 1.95,
-  BBD: 2.396,
-  BDT: 100.74,
-  BGN: 1.957,
-  BHD: 0.4475,
-  BIF: 2351.88,
-  BMD: 1.1867,
-  BND: 1.6056,
-  BOB: 8.1936,
-  BRL: 6.1814,
-  BSD: 1.1866,
-  BTN: 88.18,
-  BWP: 13.0686,
-  BYN: 2.9606,
-  BZD: 2.3918,
-  CAD: 1.4807,
-  CDF: 2374.59,
-  CHF: 1.0745,
-  CLP: 897.92,
-  CNY: 7.6679,
-  COP: 4602.02,
-  CRC: 735.44,
-  CUP: 31.4476,
-  CVE: 109.94,
-  CZK: 25.4949,
-  DJF: 210.90,
-  DKK: 7.4379,
-  DOP: 67.6609,
-  DZD: 159.84,
-  EGP: 18.643,
-  ERN: 17.8055,
-  ETB: 52.5718,
-  FJD: 2.4734,
-  FKP: 0.8577,
-  GBP: 0.8534,
-  GEL: 3.6610,
-  GHS: 7.0960,
-  GIP: 0.8577,
-  GMD: 60.7002,
-  GNF: 11587.33,
-  GTQ: 9.1963,
-  GYD: 247.82,
-  HKD: 9.2232,
-  HNL: 28.1527,
-  HTG: 113.8662,
-  HUF: 358.28,
-  IDR: 17135.59,
-  ILS: 3.8293,
-  INR: 88.2659,
-  IQD: 1731.28,
-  IRR: 49966.00,
-  ISK: 146.80,
-  JMD: 184.02,
-  JOD: 0.8414,
-  JPY: 130.16,
-  KES: 128.88,
-  KGS: 100.58,
-  KHR: 4830.71,
-  KMF: 493.67,
-  KPW: 1068.03,
-  KRW: 1366.99,
-  KWD: 0.3565,
-  KYD: 0.9889,
-  KZT: 504.96,
-  LAK: 11328.69,
-  LBP: 1794.19,
-  LKR: 236.73,
-  LRD: 203.70,
-  LSL: 17.6111,
-  LYD: 5.3499,
-  MAD: 10.5562,
-  MDL: 21.2405,
-  MGA: 4528.16,
-  MKD: 61.3485,
-  MMK: 1953.18,
-  MNT: 3379.86,
-  MOP: 9.5014,
-  MRU: 130.68,
-  MUR: 50.39,
-  MVR: 18.3349,
-  MWK: 964.14,
-  MXN: 23.5936,
-  MYR: 5.0083,
-  MZN: 75.5102,
-  NAD: 17.6111,
-  NGN: 488.29,
-  NIO: 41.6678,
-  NOK: 10.4632,
-  NPR: 141.09,
-  NZD: 1.7018,
-  OMR: 0.4570,
-  PAB: 1.1867,
-  PEN: 4.6570,
-  PGK: 4.1665,
-  PHP: 59.331,
-  PKR: 192.9444,
-  PLN: 4.5673,
-  PYG: 8195.36,
-  QAR: 4.3208,
-  RON: 4.9150,
-  RSD: 117.2283,
-  RUB: 86.8064,
-  RWF: 1195.4043,
-  SAR: 4.4505,
-  SBD: 9.5664,
-  SCR: 17.0604,
-  SDG: 529.8659,
-  SEK: 10.1996,
-  SGD: 1.6072,
-  SHP: 0.8577,
-  SLE: 12169.61,
-  SOS: 694.2199,
-  SRD: 25.4014,
-  STN: 24445.81,
-  SYP: 1492.1159,
-  SZL: 17.2837,
-  THB: 39.2608,
-  TJS: 13.5334,
-  TMT: 4.1653,
-  TND: 3.3115,
-  TOP: 2.6774,
-  TRY: 10.0324,
-  TTD: 8.0617,
-  TWD: 33.1568,
-  TZS: 2751.7710,
-  UAH: 31.8392,
-  UGX: 4216.0299,
-  USD: 1.1867,
-  UYU: 51.9803,
-  UZS: 12628.5275,
-  VES: 0.001,       // Placeholder (practically hyperinflated; use local source)
-  VND: 27240.6984,
-  VUV: 130.6779,
-  WST: 3.0281,
-  XAF: 654.0225,
-  XCD: 3.2071,
-  XOF: 654.0225,
-  XPF: 120.3911,
-  YER: 296.7979,
-  ZAR: 17.3306,
-  ZMW: 22.8247,
-  ZWL: 382.1177,
+  FJD: 2.54888,
+  FKP: 0.854057,
+  GBP: 0.854061,
+  GEL: 2.99859,
+  GHS: 13.2765,
+  GIP: 0.854057,
+  GMD: 84.8568,
+  GNF: 10014.2,
+  GTQ: 8.71435,
+  GYD: 239.109,
+  HKD: 8.92318,
+  HNL: 30.5942,
+  HTG: 149.52,
+  HUF: 364.257,
+  IDR: 20364,
+  ILS: 3.4978,
+  INR: 109.92,
+  IQD: 1497.74,
+  IRR: 1568630,
+  ISK: 143.395,
+  JMD: 181.04,
+  JOD: 0.80735,
+  JPY: 186.346,
+  KES: 147.784,
+  KGS: 99.7977,
+  KHR: 4631.17,
+  KMF: 491.968,
+  KPW: 900,       // No real forex market (N. Korea) — rough placeholder, verify before use
+  KRW: 1678.39,
+  KWD: 0.352256,
+  KYD: 0.94893,
+  KZT: 533.53,
+  LAK: 25584.9,
+  LBP: 101915,
+  LKR: 382.883,
+  LRD: 206.956,
+  LSL: 19.0429,
+  LYD: 7.32247,
+  MAD: 10.6789,
+  MDL: 20.0017,
+  MGA: 4873.1,
+  MKD: 61.489,
+  MMK: 2396.25,
+  MNT: 4093.77,
+  MOP: 9.19378,
+  MRU: 45.8771,
+  MUR: 53.7655,
+  MVR: 17.6593,
+  MWK: 1990.35,
+  MXN: 19.9191,
+  MYR: 4.65639,
+  MZN: 72.7292,
+  NAD: 19.0429,
+  NGN: 1555.6,
+  NIO: 42.0329,
+  NOK: 10.941,
+  NPR: 175.895,
+  NZD: 1.97023,
+  OMR: 0.437833,
+  PAB: 1.13872,
+  PEN: 3.87031,
+  PGK: 5.06529,
+  PHP: 70.3121,
+  PKR: 316.426,
+  PLN: 4.33001,
+  PYG: 6911.29,
+  QAR: 4.14493,
+  RON: 5.23484,
+  RSD: 117.425,
+  RUB: 89.6605,
+  RWF: 1677.74,
+  SAR: 4.27019,
+  SBD: 9.17883,
+  SCR: 16.0978,
+  SDG: 510.84,
+  SEK: 11.0994,
+  SGD: 1.47114,
+  SHP: 0.854057,
+  SLE: 27.7439,
+  SOS: 653.004,
+  SRD: 43.2288,
+  SSP: 5575.24,
+  STN: 24.5,
+  SYP: 139.066,
+  SZL: 19.0429,
+  THB: 38.5037,
+  TJS: 10.5413,
+  TMT: 3.99221,
+  TND: 3.36118,
+  TOP: 2.69223,
+  TRY: 53.8299,
+  TTD: 8.23699,
+  TWD: 36.7979,
+  TZS: 2988.55,
+  UAH: 51.1637,
+  UGX: 4218.32,
+  USD: 1.1387,
+  UYU: 45.8605,
+  UZS: 13841.1,
+  VES: 844.219,
+  VND: 29897.9,
+  VUV: 135.013,
+  WST: 3.09209,
+  XAF: 655.957,
+  XCD: 3.07454,
+  XOF: 655.957,
+  XPF: 119.332,
+  YER: 271.96,
+  ZAR: 19.0436,
+  ZMW: 21.0571,
+  ZWL: 30.489,
 }
-
-// Sorted list of all supported currency codes, derived from the keys above.
-// Array.from + Object.keys gives us a plain string[], then sort() alphabetises it.
-export const SUPPORTED_CURRENCIES: string[] = Array.from(Object.keys(EXCHANGE_RATES)).sort()
 
 /**
  * Returns the exchange rate to convert 1 unit of `currency` into `mainCurrency`.
@@ -176,8 +183,10 @@ export const SUPPORTED_CURRENCIES: string[] = Array.from(Object.keys(EXCHANGE_RA
  * EXCHANGE_RATES table via cross-rate through EUR.
  *
  *   Cross-rate derivation (hardcoded fallback):
- *   Both rates are stored as "X EUR per 1 unit".
- *   currency → mainCurrency  =  EXCHANGE_RATES[currency] / EXCHANGE_RATES[mainCurrency]
+ *   EXCHANGE_RATES stores "units of X per 1 EUR" (standard EUR-base quote).
+ *   So 1 unit of `currency` = (1 / EXCHANGE_RATES[currency]) EUR, and converting
+ *   that to `mainCurrency` gives:
+ *     currency → mainCurrency  =  EXCHANGE_RATES[mainCurrency] / EXCHANGE_RATES[currency]
  */
 export function getExchangeRate(
   currency: string,
@@ -205,7 +214,61 @@ export function getExchangeRate(
     return 1.0
   }
 
-  return fromRate / toRate
+  return toRate / fromRate
+}
+
+/**
+ * Returns false when getExchangeRate() would have to fall back to the 1.0
+ * "unknown currency" default — i.e. neither travelRates nor the hardcoded
+ * table has a real rate for this pair. Used to surface a warning in the UI
+ * instead of only logging to the console (which nobody sees in production).
+ */
+export function hasExchangeRate(
+  currency: string,
+  mainCurrency: string,
+  travelRates?: Record<string, number>,
+): boolean {
+  if (currency === mainCurrency) return true
+  if (travelRates?.[currency] !== undefined) return true
+  return EXCHANGE_RATES[currency] !== undefined && EXCHANGE_RATES[mainCurrency] !== undefined
+}
+
+/**
+ * One-time client-side repair: detects Travel.defaultRates entries that were
+ * seeded (or saved) while getExchangeRate()/buildDefaultRates() computed the
+ * reciprocal of the correct rate (fixed 2026-07-24 — see comments above).
+ *
+ * A stored value is flagged only when it sits close to the RECIPROCAL of the
+ * currently-correct hardcoded rate, and clearly NOT close to the correct rate
+ * itself — this avoids "fixing" a rate the user has since manually corrected,
+ * or one that's merely stale due to normal market movement (which stays in
+ * the same order of magnitude as the correct rate, not its reciprocal).
+ *
+ * Returns only the entries that should change: { code: correctedRate }.
+ */
+export function findStaleDefaultRates(
+  defaultRates: Record<string, number>,
+  mainCurrency: string,
+): Record<string, number> {
+  const corrections: Record<string, number> = {}
+  // A currency pair is close enough to "correct" or "reciprocal" within ±30%.
+  const TOLERANCE = Math.log(1.3)
+
+  for (const [code, stored] of Object.entries(defaultRates)) {
+    if (code === mainCurrency || !(stored > 0)) continue
+
+    const correct = getExchangeRate(code, mainCurrency) // hardcoded-table-only reference
+    // getExchangeRate falls back to exactly 1.0 for an unrecognized code — can't verify those.
+    if (correct === 1.0) continue
+
+    const distToCorrect = Math.abs(Math.log(stored / correct))
+    const distToReciprocal = Math.abs(Math.log(stored * correct))
+
+    if (distToReciprocal < TOLERANCE && distToCorrect > TOLERANCE) {
+      corrections[code] = correct
+    }
+  }
+  return corrections
 }
 
 /**
@@ -221,7 +284,7 @@ export function buildDefaultRates(mainCurrency: string): Record<string, number> 
   for (const [code, fromRate] of Object.entries(EXCHANGE_RATES)) {
     if (code === mainCurrency) continue
     // Round to 6 significant digits to avoid floating-point noise
-    rates[code] = parseFloat((fromRate / toRate).toPrecision(6))
+    rates[code] = parseFloat((toRate / fromRate).toPrecision(6))
   }
   return rates
 }

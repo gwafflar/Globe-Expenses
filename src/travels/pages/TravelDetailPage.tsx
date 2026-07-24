@@ -28,7 +28,8 @@ import type { TransactionType } from '@/transactions/types'
 import { TravelTabs } from '@/travels/components/TravelTabs'
 import { InstallPromptBanner } from '@/shared/components/InstallPromptBanner'
 import { deleteTransaction } from '@/transactions/services/transactionService'
-import { unarchiveTravel } from '@/travels/services/travelService'
+import { unarchiveTravel, updateTravelDefaultRate } from '@/travels/services/travelService'
+import { findStaleDefaultRates } from '@/shared/utils/exchangeRates'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -127,6 +128,34 @@ function ArchiveBanner({
 }
 
 // ---------------------------------------------------------------------------
+// RateRepairBanner — one-time notice when stale (pre-fix) default exchange
+// rates were auto-corrected on load. Dismissible, auto-hides after 12s.
+// ---------------------------------------------------------------------------
+
+function RateRepairBanner({ codes, onDismiss }: { codes: string[]; onDismiss: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onDismiss, 12000)
+    return () => clearTimeout(t)
+  }, [onDismiss])
+
+  return (
+    <div className="mx-4 mt-2 flex items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm dark:border-amber-800 dark:bg-amber-950">
+      <span className="text-amber-800 dark:text-amber-200">
+        ⚠️ Corrected {codes.length} exchange rate{codes.length > 1 ? 's' : ''} ({codes.join(', ')}) that were stored backwards due to a since-fixed bug. Past transactions are unaffected.
+      </span>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="shrink-0 text-amber-700 hover:text-amber-900 dark:text-amber-300 dark:hover:text-amber-100"
+        aria-label="Dismiss"
+      >
+        ✕
+      </button>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
@@ -156,6 +185,8 @@ export function TravelDetailPage() {
   const [deletingTxId, setDeletingTxId] = useState<string | null>(null)
   // Dialog shown when user tries to create a transaction without claiming a member slot
   const [showNoSlotDialog, setShowNoSlotDialog] = useState(false)
+  // Currency codes auto-corrected by the stale-defaultRates repair (null = nothing to show)
+  const [repairedRateCodes, setRepairedRateCodes] = useState<string[] | null>(null)
 
   // mainCurrency is now per-travel, not per-user.
   // getTravelMainCurrency handles legacy docs that lack the field.
@@ -165,6 +196,29 @@ export function TravelDetailPage() {
 
   const { transactions, loading: loadingTransactions, error: transactionsError } =
     useTransactions(travelId)
+
+  // One-time repair: getExchangeRate()/buildDefaultRates() computed the reciprocal
+  // of the correct rate until 2026-07-24. Travels created/edited before that fix
+  // may have defaultRates entries baked in backwards. rateRepairDone guards against
+  // re-running (and re-fetching/re-writing) on every re-render of this effect.
+  const rateRepairDone = useRef(false)
+  useEffect(() => {
+    if (!travel || rateRepairDone.current || !travel.defaultRates) return
+    rateRepairDone.current = true
+    const corrections = findStaleDefaultRates(travel.defaultRates, mainCurrency)
+    const codes = Object.keys(corrections)
+    if (codes.length === 0) return
+    Promise.all(
+      codes.map((code) => updateTravelDefaultRate(travel.travelId, code, corrections[code])),
+    )
+      .then(() => {
+        setTravel((prev) =>
+          prev ? { ...prev, defaultRates: { ...prev.defaultRates, ...corrections } } : prev,
+        )
+        setRepairedRateCodes(codes)
+      })
+      .catch((err) => console.error('[rate repair] failed to persist corrections:', err))
+  }, [travel, mainCurrency])
 
   // Reset settlement currency when mainCurrency changes (e.g. userProfile loads after mount)
   useEffect(() => {
@@ -453,6 +507,11 @@ export function TravelDetailPage() {
         currentUserUid={currentUserUid}
         onTravelChange={handleTravelChange}
       />
+
+      {/* One-time notice when stale (pre-fix) default exchange rates were auto-corrected */}
+      {repairedRateCodes && (
+        <RateRepairBanner codes={repairedRateCodes} onDismiss={() => setRepairedRateCodes(null)} />
+      )}
 
       {/* Tab content — flex-1 + overflow-hidden so TravelTabs fills remaining height */}
       <main className="mx-auto w-full max-w-2xl flex-1 overflow-hidden px-4">

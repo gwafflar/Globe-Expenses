@@ -156,6 +156,8 @@ TypeScript interface defined in `src/auth/services/userService.ts`. Mirrors the 
 | archivedByUids | string[] | UIDs of members who have archived this travel. Per-user archive — each member can archive/unarchive independently. Absent on older documents, read as `[]`. |
 | pendingInviteId | string? | Transient field written by a joining non-member solely to pass the invite token to Firestore security rules for authorization via `get()`. Not semantic after the write; ignored by the UI. |
 
+**Future: `mainCurrency` editability (v2 design note)** — staying locked in v1 by decision. When this is picked up, it must be an explicit **batch-recompute action**, not a quiet field edit: every existing transaction's `exchangeRate` and `totalAmountMain` was computed relative to the *old* `mainCurrency` and becomes silently wrong the instant `mainCurrency` changes underneath it. Proposed flow: user picks a new `mainCurrency` → client computes the new `exchangeRate`/`totalAmountMain` for every transaction in the subcollection (using `defaultRates`/hardcoded fallback resolved against the *new* currency) → show a preview (old vs. new totals, at least aggregate) → user confirms → single batched write (chunked at 500 docs, same pattern as `deleteTravel`/`mergeMembers`). Treat as high blast-radius; do not implement as a simple settings toggle.
+
 **TravelMember**: `{ travelMemberId: string, displayName: string, userId: string | null, allowRename: boolean, joinedAt: Timestamp }`
 - `travelMemberId`: client-generated nanoid — stable key used in `Split[]` objects. Never a Firebase Auth UID.
 - `userId`: links the slot to a Firebase Auth account; `null` means the slot is unclaimed (name-only placeholder).
