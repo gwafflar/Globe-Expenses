@@ -4,7 +4,6 @@
 
 import {
   Timestamp,
-  addDoc,
   arrayRemove,
   arrayUnion,
   collection,
@@ -12,6 +11,7 @@ import {
   doc,
   getDocs,
   serverTimestamp,
+  setDoc,
   updateDoc,
   writeBatch,
 } from 'firebase/firestore'
@@ -81,16 +81,35 @@ interface CreateSpaceInput {
   emoji?: string
   description?: string
   mainCurrency: string  // ISO 4217 — the reference currency for all exchange rate conversions
+  // Extra currencies selected in the "Other currencies" control (travel preset only).
+  // Defaults to [mainCurrency] when absent so it still appears in dropdowns.
+  currencies?: string[]
+  // Optional trip dates (travel preset only) — ISO "YYYY-MM-DD", see Space.startDate/endDate.
+  startDate?: string
+  endDate?: string
   // Defaults to 'travel' so callers not yet updated to the Phase 4 creation
   // flow keep creating spaces with the pre-refactor behaviour.
   presetId?: PresetId
+  // Explicit config from the "Customize fields" accordion (Phase 4). When absent,
+  // falls back to configFromPreset(presetId) — the pre-Phase-4 behaviour.
+  config?: SpaceConfig
 }
 
-export async function createSpace(input: CreateSpaceInput): Promise<string> {
-  const { uid, displayName, name, emoji, description, mainCurrency, presetId = 'travel' } = input
+// Fire-and-forget (decision #25): doc() generates the ID client-side,
+// synchronously — no network round-trip needed. setDoc() is NOT awaited.
+// Firestore writes to the local cache immediately and replays the write when
+// connectivity returns; awaiting it would hang forever offline, because the
+// write promise only settles on server acknowledgment. Same pattern as
+// createTransaction() in transactionService.ts.
+export function createSpace(input: CreateSpaceInput): string {
+  const {
+    uid, displayName, name, emoji, description, mainCurrency,
+    currencies, startDate, endDate, presetId = 'travel', config,
+  } = input
 
   // Collection name stays `travels` — Firestore path frozen as legacy.
-  const spacesRef = collection(db, 'travels')
+  // doc() with no ID argument generates a unique random ID client-side.
+  const spaceRef = doc(collection(db, 'travels'))
 
   // Creator gets a stable travelMemberId (nanoid). Their Firebase Auth UID is stored in
   // both userId (slot link) and memberUids (access control flat array).
@@ -102,13 +121,16 @@ export async function createSpace(input: CreateSpaceInput): Promise<string> {
     joinedAt: Timestamp.now(),
   }
 
+  const resolvedConfig = normaliseSpaceConfig(config ?? configFromPreset(presetId))
+
   const docData: Record<string, unknown> = {
     name,
     members: [serialiseMember(creatorMember)],
     memberUids: [uid],
     createdBy: uid,
     createdAt: serverTimestamp(),
-    currencies: [mainCurrency],  // seed with main currency so it appears in dropdowns
+    // Seed with main currency (+ any extras picked in the accordion) so they appear in dropdowns.
+    currencies: currencies && currencies.length > 0 ? currencies : [mainCurrency],
     mainCurrency,
     // Seed exchange rates from hardcoded defaults, relative to mainCurrency.
     defaultRates: buildDefaultRates(mainCurrency),
@@ -117,15 +139,20 @@ export async function createSpace(input: CreateSpaceInput): Promise<string> {
     paymentMethods: [],
     countries: [],
     cities: [],
-    config: serialiseSpaceConfig(normaliseSpaceConfig(configFromPreset(presetId))),
+    config: serialiseSpaceConfig(resolvedConfig),
     presetOrigin: presetId,
   }
 
   if (emoji?.trim()) docData.emoji = emoji.trim()
   if (description?.trim()) docData.description = description.trim()
+  if (startDate) docData.startDate = startDate
+  if (endDate) docData.endDate = endDate
 
-  const docRef = await addDoc(spacesRef, docData)
-  return docRef.id
+  setDoc(spaceRef, docData).catch((err: unknown) => {
+    console.error('[spaceService] createSpace failed:', err)
+  })
+
+  return spaceRef.id
 }
 
 // ---------------------------------------------------------------------------

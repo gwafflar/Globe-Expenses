@@ -23,27 +23,41 @@ vi.mock('@/services/firebase', () => ({ db: {} }))
 // vi.mock() factories are hoisted above imports/const declarations, so the mock
 // functions referenced inside them must be created via vi.hoisted() to survive
 // that hoist.
-const { mockBatchUpdate, mockBatchCommit, mockGetDocs } = vi.hoisted(() => ({
+const { mockBatchUpdate, mockBatchCommit, mockGetDocs, mockSetDoc } = vi.hoisted(() => ({
   mockBatchUpdate: vi.fn(),
   mockBatchCommit: vi.fn(() => Promise.resolve()),
   mockGetDocs: vi.fn(),
+  mockSetDoc: vi.fn(() => Promise.resolve()),
 }))
 
 vi.mock('firebase/firestore', async () => {
   const actual = await vi.importActual<typeof import('firebase/firestore')>('firebase/firestore')
+  let autoIdCounter = 0
   return {
     ...actual,
     // doc()/collection() just need to return a stable, inspectable reference —
     // the real Firestore SDK would build a path-addressed object here.
-    doc: vi.fn((_db: unknown, ...segments: string[]) => ({ __ref: 'doc', path: segments.join('/') })),
+    // Two call shapes are exercised: doc(db, ...segments) (existing update paths)
+    // and doc(collectionRef) with no segments — the id-generating form used by
+    // createSpace()'s fire-and-forget write, which needs a synchronous .id.
+    doc: vi.fn((first: unknown, ...segments: string[]) => {
+      const firstRef = first as { __ref?: string; path?: string } | undefined
+      if (firstRef?.__ref === 'collection' && segments.length === 0) {
+        const id = `auto-${++autoIdCounter}`
+        return { __ref: 'doc', path: `${firstRef.path}/${id}`, id }
+      }
+      const path = segments.join('/')
+      return { __ref: 'doc', path, id: segments[segments.length - 1] }
+    }),
     collection: vi.fn((_db: unknown, ...segments: string[]) => ({ __ref: 'collection', path: segments.join('/') })),
     getDocs: mockGetDocs,
+    setDoc: mockSetDoc,
     writeBatch: vi.fn(() => ({ update: mockBatchUpdate, commit: mockBatchCommit })),
   }
 })
 
 // Imported AFTER the mocks so spaceService.ts picks up the mocked module.
-const { mergeMembers } = await import('./spaceService')
+const { mergeMembers, createSpace } = await import('./spaceService')
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -73,6 +87,7 @@ beforeEach(() => {
   mockBatchUpdate.mockClear()
   mockBatchCommit.mockClear()
   mockGetDocs.mockReset()
+  mockSetDoc.mockClear()
 })
 
 // ---------------------------------------------------------------------------
@@ -236,5 +251,73 @@ describe('mergeMembers — space document update', () => {
     mockGetDocs.mockResolvedValue(fakeSnapshot([]))
     await mergeMembers('travel1', 'marcus', 'marc-old', [makeMember('marcus'), makeMember('marc-old')], 'marcus')
     expect(mockBatchCommit).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// createSpace — regression tests for two Phase 4.1 bugs:
+//  1. `false` toggles in the preset config were dropped before/around the
+//     Firestore write, so a partial config resolved back to travel-mode
+//     defaults everywhere it mattered (see docs/SPACE_REFACTOR_SPEC.md).
+//  2. createSpace() awaited the write, which never settles offline.
+// ---------------------------------------------------------------------------
+
+describe('createSpace', () => {
+  const baseInput = {
+    uid: 'u1',
+    displayName: 'Alice',
+    name: 'My budget',
+    mainCurrency: 'EUR',
+  }
+
+  it('returns the new id synchronously — not a Promise (fire-and-forget, decision #25)', () => {
+    const result = createSpace({ ...baseInput, presetId: 'solo' })
+    expect(typeof result).toBe('string')
+    expect(result).not.toBeInstanceOf(Promise)
+  })
+
+  it('writes every solo-preset toggle explicitly, including false values', () => {
+    createSpace({ ...baseInput, presetId: 'solo' })
+
+    expect(mockSetDoc).toHaveBeenCalledTimes(1)
+    const [, docData] = mockSetDoc.mock.calls[0] as unknown as [unknown, Record<string, unknown>]
+    const config = docData.config as { builtInFields: Record<string, boolean>; features: Record<string, boolean> }
+
+    // Asserted with toBe(false), not truthiness — a `.filter(([, v]) => v)`
+    // style bug would silently drop these keys instead of writing `false`.
+    expect(config.builtInFields).toHaveProperty('country', false)
+    expect(config.builtInFields).toHaveProperty('city', false)
+    expect(config.builtInFields).toHaveProperty('category', true)
+    expect(config.builtInFields).toHaveProperty('paymentMethod', true)
+    expect(config.builtInFields).toHaveProperty('notes', true)
+    expect(config.features).toHaveProperty('wallets', false)
+    expect(config.features).toHaveProperty('multiCurrency', false)
+  })
+
+  it('preserves a custom field with enabled: false rather than stripping it', () => {
+    createSpace({
+      ...baseInput,
+      presetId: 'custom',
+      config: {
+        builtInFields: { country: false, city: false, category: true, paymentMethod: false, notes: true },
+        features: { wallets: false, multiCurrency: false },
+        customFields: [{ id: 'f1', label: 'Reimbursable', type: 'boolean', enabled: false }],
+      },
+    })
+
+    const [, docData] = mockSetDoc.mock.calls[0] as unknown as [unknown, Record<string, unknown>]
+    const config = docData.config as { customFields: { id: string; enabled: boolean }[] }
+    expect(config.customFields).toHaveLength(1)
+    expect(config.customFields[0]).toHaveProperty('enabled', false)
+  })
+
+  it('does not await the Firestore write — id is available before the write promise resolves', async () => {
+    let resolveWrite: () => void = () => {}
+    mockSetDoc.mockReturnValueOnce(new Promise<void>((resolve) => { resolveWrite = resolve }))
+
+    const id = createSpace({ ...baseInput, presetId: 'travel' })
+    expect(id).toBeTruthy() // available immediately, before the write settles
+
+    resolveWrite()
   })
 })

@@ -6,6 +6,7 @@ import { LoginPage } from '@/auth/pages/LoginPage'
 import { RegisterPage } from '@/auth/pages/RegisterPage'
 import { WelcomePage } from '@/auth/pages/WelcomePage'
 import { SpacesPage } from '@/spaces/pages/SpacesPage'
+import { SpaceCreatePage } from '@/spaces/pages/SpaceCreatePage'
 import { SpaceDetailPage } from '@/spaces/pages/SpaceDetailPage'
 import { ProfilePage } from '@/auth/pages/ProfilePage'
 import { InvitePage } from '@/friends/pages/InvitePage'
@@ -34,6 +35,7 @@ export default function App() {
       <Route element={<ProtectedRoute />}>
         {/* /spaces and nested space detail are behind the auth guard */}
         <Route path="/spaces" element={<SpacesPage />} />
+        <Route path="/spaces/new" element={<SpaceCreatePage />} />
         <Route path="/spaces/:spaceId" element={<SpaceDetailPage />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/invite/:inviteId" element={<InvitePage />} />

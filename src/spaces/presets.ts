@@ -10,6 +10,7 @@ export const PRESETS: Record<PresetId, {
   titleKey: string
   description: string
   chips: string[]
+  namePlaceholder: string
   builtInFields: SpaceConfig['builtInFields']
   features: SpaceConfig['features']
 }> = {
@@ -19,6 +20,7 @@ export const PRESETS: Record<PresetId, {
     titleKey: 'Travel',
     description: 'Trip abroad, solo or with friends',
     chips: ['Countries', 'Cities', 'Multi-currency', 'Cash wallet'],
+    namePlaceholder: 'Japan 2026',
     builtInFields: { country: true, city: true, category: true, paymentMethod: true, notes: true },
     features: { wallets: true, multiCurrency: true },
   },
@@ -28,6 +30,7 @@ export const PRESETS: Record<PresetId, {
     titleKey: 'Solo budget',
     description: 'Track your own spending',
     chips: ['Categories', 'Payment methods'],
+    namePlaceholder: 'My budget',
     builtInFields: { country: false, city: false, category: true, paymentMethod: true, notes: true },
     features: { wallets: false, multiCurrency: false },
   },
@@ -37,6 +40,7 @@ export const PRESETS: Record<PresetId, {
     titleKey: 'Group',
     description: 'Flatmates, colleagues, couple',
     chips: ['Categories', 'Split & balance'],
+    namePlaceholder: 'Colocation',
     builtInFields: { country: false, city: false, category: true, paymentMethod: false, notes: true },
     features: { wallets: false, multiCurrency: false },
   },
@@ -46,6 +50,7 @@ export const PRESETS: Record<PresetId, {
     titleKey: 'Custom',
     description: 'Start from scratch',
     chips: ['Pick your own fields'],
+    namePlaceholder: 'My space',
     builtInFields: { country: false, city: false, category: true, paymentMethod: false, notes: true },
     features: { wallets: false, multiCurrency: false },
   },
