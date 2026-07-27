@@ -18,7 +18,6 @@ import type { Space } from '@/spaces/types'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Archive } from 'lucide-react'
-import { CreateSpaceModal } from '@/spaces/components/CreateSpaceModal'
 
 // Reusable space card grid — renders a list of spaces as clickable cards.
 function SpaceCardGrid({
@@ -80,9 +79,6 @@ export function SpacesPage() {
   // in response to a click (e.g. when a space card is clicked).
   const navigate = useNavigate()
 
-  // Local UI state controlling whether the "Create space" modal is open.
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState<boolean>(false)
-
   // Whether the archived section is expanded
   const [showArchived, setShowArchived] = useState<boolean>(false)
 
@@ -90,7 +86,7 @@ export function SpacesPage() {
   const { activeSpaces, archivedSpaces, isLoading, error } = useSpaces(userId)
 
   const handleOpenCreateSpace = () => {
-    setIsCreateModalOpen(true)
+    navigate('/spaces/new')
   }
 
   // When the user clicks a space card, we navigate to `/spaces/:spaceId`,
@@ -213,24 +209,6 @@ export function SpacesPage() {
           </div>
         )}
       </main>
-
-      {/* Create Space modal, rendered at the end so it can overlay the page.
-          We pass the current user's uid and a displayName fallback.
-       */}
-      {userId && (
-        <CreateSpaceModal
-          isOpen={isCreateModalOpen}
-          onClose={() => setIsCreateModalOpen(false)}
-          uid={userId}
-          defaultMainCurrency={userProfile?.mainCurrency ?? 'EUR'}
-          onCreated={(spaceId) => navigate(`/spaces/${spaceId}`)}
-          displayName={
-            currentUser?.displayName && currentUser.displayName.trim() !== ''
-              ? currentUser.displayName
-              : currentUser?.email ?? 'Unknown'
-          }
-        />
-      )}
     </div>
   )
 }

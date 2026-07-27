@@ -2284,3 +2284,44 @@ No stray `Travel`/`travel` identifiers, UI strings, or import paths remain outsi
 
 - Phase 2 (config foundation: `SpaceConfig`, `getSpaceConfig()`, presets, per-field tiers) — next phase, not started.
 - Changes not yet committed as of this log entry (pending user review).
+
+## 🐛 Working Session 022 — 27 July 2026
+
+**Type**: Bug fix + tests (Space refactor Phase 4.1 and 4.2)
+**Tools used**: Claude Code (claude-code CLI)
+
+### Context
+
+Following the Space refactor's Phase 4 (preset-based creation flow, not logged in this file — see `docs/SPACE_REFACTOR_SPEC.md` for phase status), manual verification surfaced three bugs in quick succession, fixed across two prompts.
+
+### Bug 1 — a space's config did not match the preset chosen at creation (04.1)
+
+Opening Parameters on a freshly created `solo`/`custom` space showed sections the preset should have hidden (Countries, Cities, Exchange rates, Currencies). `travel` looked correct only because its toggles are all `true`, which happens to be `getSpaceConfig()`'s fallback value.
+
+Root cause: `SpaceDetailPage.tsx`'s `fetchSpace()` rebuilt the `Space` object field-by-field from the Firestore doc and never mapped `config`/`presetOrigin`. It type-checked fine since both are optional on `Space`. `space.config` was therefore always `undefined` for every opened space, and the resolver silently fell back to full travel-mode defaults regardless of what preset was actually written. The write path and the `getSpaceConfig()` consumer path were both already correct — only this one reconstruction was missing the fields. Fixed by adding `config`/`presetOrigin`/`startDate`/`endDate` to that mapping (and to `useSpaces.ts`'s snapshot mapping for the two new date fields, for consistency — it already mapped `config` correctly).
+
+### Bug 2 — space creation hung offline (04.1)
+
+`createSpace()` was `async`/awaited since its very first commit (confirmed via `git log -p`) — a long-standing gap, not a Phase 4 regression. Awaiting a Firestore write hangs forever offline because the write promise only resolves on server acknowledgment. Converted `createSpace()` and `createShareableInvite()` to the fire-and-forget pattern (`doc()` generates the id client-side; `setDoc()` is not awaited) — same pattern as `createTransaction()`.
+
+### Bug 3 — permission-denied race on newly created spaces, online (04.2)
+
+Bug 2's fix introduced a new failure mode: navigating to a freshly created space now happens before the parent `travels/{id}` document has synced to the server. The `transactions` subcollection security rule does a `get()` on that parent to check `memberUids`; against a not-yet-existent parent, that `get()` denies the read, and `useTransactions()` surfaced a permission error even though the space and its data were fine (confirmed by reloading). Fixed with a bounded retry in `useTransactions()`: `permission-denied` gets up to 3 retries with ~500ms/1s/2s backoff before surfacing an error; every other error code still surfaces immediately, with no retry. Audited every other `onSnapshot` listener in the app (`useSpaces`, `usePendingInvites`/`subscribeToIncomingRequests`) — neither is exposed to this race, since neither queries a subcollection gated by a `get()` on a possibly-just-created parent document.
+
+### Convention added
+
+`CLAUDE.md`: stripping fields before a Firestore write must test `v !== undefined` explicitly, never filter by truthiness.
+
+### Tests added
+
+- `spaceService.test.ts` — `createSpace` returns a string synchronously (not a `Promise`); solo-preset config toggles are written with explicit `false` (asserted with `toBe(false)`, not truthiness); a custom field with `enabled: false` survives serialization; the write is not awaited.
+- `useSpaces.test.ts` (new) — snapshot mapping produces a `Space.config` deep-equal to the stored document; legacy documents with no `config` map to `undefined`.
+- `useTransactions.test.ts` (new) — permission-denied retries then succeeds with no error surfaced; a different error code surfaces immediately with no retry; permission-denied on every attempt surfaces an error after the 3-attempt budget; unmounting mid-backoff clears the timer, detaches the listener, and updates no state; `spaceId` change resets the attempt counter. Uses fake timers.
+- `SpaceCreatePage.test.tsx` — mocks updated from `mockResolvedValue` to `mockReturnValue` to match the new synchronous contract (the old mock shape would have hidden a Promise-vs-string regression); added a test asserting navigation uses the synchronously-returned id.
+
+Full suite: 230/230 passing. `tsc --noEmit` and `pnpm build` clean.
+
+### Not done / still open
+
+- **Denormalize `memberUids` onto transaction documents** (carry-forward). The real fix for Bug 3 is to stop the `transactions` subcollection rule from doing a per-read `get()` on the parent space document at all — copy `memberUids` onto each transaction at write time and rewrite the rule to check the query constraint directly. This removes the creation race entirely (no parent-existence dependency) and eliminates the per-read `get()` cost already flagged as a scalability concern. It needs a security-rules change plus a backfill of every existing transaction document, so it should be scheduled alongside the `batchUpdateTransactions` work (chunked `writeBatch`, 500 docs/batch) already on the roadmap, rather than done piecemeal. Until then, the bounded retry in `useTransactions()` is the mitigation.
+- Manual browser verification of the online/offline creation flows (§Verification in the 04.2 prompt) was not performed — no Firebase login session available in this environment. Automated coverage (tests above) verifies the logic; a real click-through is still recommended before treating this as fully closed.

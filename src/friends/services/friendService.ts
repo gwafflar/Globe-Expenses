@@ -82,15 +82,22 @@ export async function getInvite(inviteId: string): Promise<Invite | null> {
  * Creates a multi-use invite link for friend or space member invites.
  * Unlike sendFriendRequest(), this invite has no toUid — anyone with the
  * link can accept it. Returns the new inviteId to build the share URL.
+ *
+ * Fire-and-forget (decision #25): doc() generates the opaque inviteId
+ * client-side, synchronously, so the caller can build the share URL
+ * immediately — it never needed the await. setDoc() is NOT awaited: the
+ * link is a capability token, valid for building the URL as soon as it's
+ * generated; it simply can't be *redeemed* by anyone else until the write
+ * syncs. Awaiting here would hang forever offline (see createSpace()).
  */
-export async function createShareableInvite(
+export function createShareableInvite(
   fromUser: UserProfile,
   // ⚠️ 'travel_member' is a frozen stored value — see Invite.type in friends/types.ts
   type: 'friend' | 'travel_member' = 'friend',
   // Parameter names mirror the frozen Invite.travelId / travelName Firestore keys.
   travelId?: string,
   travelName?: string,
-): Promise<string> {
+): string {
   // doc() on a collection reference auto-generates a random opaque ID
   const inviteRef = doc(collection(db, 'invites'))
 
@@ -98,9 +105,7 @@ export async function createShareableInvite(
     new Date(Date.now() + INVITE_EXPIRY_DAYS * 24 * 60 * 60 * 1000),
   )
 
-  // We await here (unlike sendFriendRequest) because the caller needs the
-  // inviteId to build the URL — it can't proceed until the doc is created.
-  await setDoc(inviteRef, {
+  setDoc(inviteRef, {
     inviteId: inviteRef.id,
     type,
     fromUid: fromUser.uid,
@@ -112,6 +117,8 @@ export async function createShareableInvite(
     usedBy: [],
     createdAt: Timestamp.now(),
     expiresAt,
+  }).catch((err: unknown) => {
+    console.error('[friendService] createShareableInvite failed:', err)
   })
 
   return inviteRef.id

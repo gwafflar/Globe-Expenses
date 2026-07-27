@@ -129,6 +129,13 @@ export interface Space {
   defaultRates?: Record<string, number>
   settings?: SpaceSettings
 
+  /** Optional trip dates, ISO "YYYY-MM-DD" (native <input type="date"> format).
+   *  Set only for the `travel` preset's optional "Set trip dates" extra.
+   *  Display only — nothing currently computes off these (getTripDurationDays()
+   *  derives duration from transaction dates instead). Absent on most spaces. */
+  startDate?: string
+  endDate?: string
+
   /** Absent on legacy documents. NEVER read directly — always go through
    *  getSpaceConfig(). */
   config?: SpaceConfig

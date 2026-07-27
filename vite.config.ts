@@ -58,6 +58,6 @@ export default defineConfig({
   test: {
     environment: 'jsdom',   // simulates browser APIs (needed for React component tests)
     globals: true,           // lets you use describe/it/expect without importing them
-    setupFiles: [],          // add test setup files here later if needed
+    setupFiles: ['./src/test/setup.ts'],  // jest-dom matchers (toBeDisabled, toBeInTheDocument, ...)
   },
 })
