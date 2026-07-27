@@ -57,7 +57,7 @@ vi.mock('firebase/firestore', async () => {
 })
 
 // Imported AFTER the mocks so spaceService.ts picks up the mocked module.
-const { mergeMembers, createSpace } = await import('./spaceService')
+const { mergeMembers, createSpace, mapSpaceDoc } = await import('./spaceService')
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -319,5 +319,70 @@ describe('createSpace', () => {
     expect(id).toBeTruthy() // available immediately, before the write settles
 
     resolveWrite()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// mapSpaceDoc — the single snapshot→Space mapping shared by useSpaces.ts and
+// SpaceDetailPage.tsx (Prompt 04.3). Locks in every field, including the two
+// (config, presetOrigin) that were dropped from one of the two hand-rolled
+// mappings this replaced (see Session 022 Bug 1).
+// ---------------------------------------------------------------------------
+
+describe('mapSpaceDoc', () => {
+  const storedConfig = {
+    builtInFields: { country: false, city: false, category: true, paymentMethod: true, notes: true },
+    features: { wallets: false, multiCurrency: false },
+    customFields: [],
+  }
+  const createdAt = Timestamp.now()
+
+  const fullDoc = {
+    name: 'Trip to Japan',
+    emoji: '🗾',
+    description: 'April trip',
+    members: [{ travelMemberId: 'm1', displayName: 'Alice', userId: 'u1', allowRename: true, joinedAt: createdAt }],
+    memberUids: ['u1'],
+    createdBy: 'u1',
+    createdAt,
+    currencies: ['EUR', 'JPY'],
+    mainCurrency: 'EUR',
+    defaultRates: { JPY: 160 },
+    settings: { trackLocation: true },
+    config: storedConfig,
+    presetOrigin: 'travel',
+    startDate: '2026-04-01',
+    endDate: '2026-04-10',
+    categories: [{ id: 'c1', label: 'Food' }],
+    paymentMethods: [{ id: 'p1', label: 'Cash' }],
+    countries: [{ id: 'co1', label: 'Japan' }],
+    cities: [{ id: 'ci1', label: 'Tokyo' }],
+    archivedByUids: ['u2'],
+  }
+
+  it('maps every field of a fully-populated document, including config and presetOrigin', () => {
+    const space = mapSpaceDoc('space1', fullDoc)
+    expect(space).toEqual({ spaceId: 'space1', ...fullDoc })
+  })
+
+  it('maps a legacy document with no config to config: undefined', () => {
+    const legacyDoc = {
+      name: 'Old trip',
+      members: [],
+      memberUids: ['u1'],
+      createdBy: 'u1',
+      createdAt,
+      currencies: ['EUR'],
+    }
+    const space = mapSpaceDoc('space2', legacyDoc)
+    expect(space.config).toBeUndefined()
+    expect(space.presetOrigin).toBeUndefined()
+    expect(space.startDate).toBeUndefined()
+    expect(space.endDate).toBeUndefined()
+    expect(space.categories).toEqual([])
+    expect(space.paymentMethods).toEqual([])
+    expect(space.countries).toEqual([])
+    expect(space.cities).toEqual([])
+    expect(space.archivedByUids).toEqual([])
   })
 })

@@ -17,11 +17,51 @@ import {
 } from 'firebase/firestore'
 import { nanoid } from 'nanoid'
 import { db } from '@/services/firebase'
-import type { CustomFieldDef, LabeledItem, PresetId, SpaceConfig, SpaceMember, SpaceSettings } from '@/spaces/types'
+import type { CustomFieldDef, LabeledItem, PresetId, Space, SpaceConfig, SpaceMember, SpaceSettings } from '@/spaces/types'
+import { normaliseMember } from '@/spaces/types'
 import { getFlagForCountry } from '@/shared/data/pickerData'
 import { buildDefaultRates } from '@/shared/utils/exchangeRates'
 import { configFromPreset } from '@/spaces/presets'
 import { normaliseSpaceConfig } from '@/spaces/config'
+
+// ---------------------------------------------------------------------------
+// mapSpaceDoc — the single source of truth for turning a Firestore `travels/`
+// document into a Space. Used by every listener/read that reconstructs a
+// Space (useSpaces.ts, SpaceDetailPage.tsx) so a field added to one path can
+// never silently go missing from another (see docs/SESSION_LOG.md Session 022
+// Bug 1 — `config`/`presetOrigin` were dropped from one hand-rolled mapping
+// and it still type-checked, since both are optional on Space).
+// ---------------------------------------------------------------------------
+
+export function mapSpaceDoc(id: string, data: Record<string, unknown>): Space {
+  return {
+    // Derived from the doc id — spaceId is never written into the document body.
+    spaceId: id,
+    name: data.name as string,
+    emoji: data.emoji as string | undefined,
+    description: data.description as string | undefined,
+    // Apply normaliseMember to handle legacy MemberRef documents transparently
+    members: ((data.members as Record<string, unknown>[]) ?? []).map((m) => normaliseMember(m)),
+    memberUids: (data.memberUids as string[]) ?? [],
+    createdBy: data.createdBy as string,
+    createdAt: data.createdAt as Space['createdAt'],
+    currencies: (data.currencies as string[]) ?? [],
+    mainCurrency: data.mainCurrency as string | undefined,
+    defaultRates: data.defaultRates as Record<string, number> | undefined,
+    settings: data.settings as SpaceSettings | undefined,
+    // Absent on legacy docs — getSpaceConfig() resolves the fallback.
+    config: data.config as SpaceConfig | undefined,
+    presetOrigin: data.presetOrigin as PresetId | undefined,
+    startDate: data.startDate as string | undefined,
+    endDate: data.endDate as string | undefined,
+    // Per-space lists — default to [] for older documents that pre-date this field
+    categories: (data.categories as LabeledItem[]) ?? [],
+    paymentMethods: (data.paymentMethods as LabeledItem[]) ?? [],
+    countries: (data.countries as LabeledItem[]) ?? [],
+    cities: (data.cities as LabeledItem[]) ?? [],
+    archivedByUids: (data.archivedByUids as string[]) ?? [],
+  }
+}
 
 // ---------------------------------------------------------------------------
 // serialiseMember — strips undefined field values before writing to Firestore.

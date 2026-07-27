@@ -16,7 +16,7 @@ import {
 } from 'firebase/firestore'
 import { db } from '@/services/firebase'
 import type { Space } from '@/spaces/types'
-import { normaliseMember } from '@/spaces/types'
+import { mapSpaceDoc } from '@/spaces/services/spaceService'
 
 interface UseSpacesResult {
   activeSpaces: Space[]
@@ -55,38 +55,11 @@ export function useSpaces(userId: string | undefined): UseSpacesResult {
         const archived: Space[] = []
 
         for (const docSnapshot of snapshot.docs) {
-          const data = docSnapshot.data()
-          const archivedByUids: string[] = data.archivedByUids ?? []
-
-          const space: Space = {
-            // Derived from the doc id — travelId is never written into the document body.
-            spaceId: docSnapshot.id,
-            name: data.name as string,
-            emoji: data.emoji as string | undefined,
-            description: data.description as string | undefined,
-            // Apply normaliseMember to handle legacy MemberRef documents transparently
-            members: (data.members ?? []).map((raw: Record<string, unknown>) => normaliseMember(raw)),
-            memberUids: data.memberUids ?? [],
-            createdBy: data.createdBy as string,
-            createdAt: data.createdAt,
-            currencies: data.currencies ?? [],
-            mainCurrency: data.mainCurrency as string | undefined,
-            defaultRates: data.defaultRates as Record<string, number> | undefined,
-            settings: data.settings,
-            // Absent on legacy docs — getSpaceConfig() resolves the fallback.
-            config: data.config,
-            presetOrigin: data.presetOrigin,
-            // Per-space lists — default to [] for older documents that pre-date this field
-            categories: data.categories ?? [],
-            paymentMethods: data.paymentMethods ?? [],
-            countries: data.countries ?? [],
-            cities: data.cities ?? [],
-            archivedByUids,
-          }
+          const space: Space = mapSpaceDoc(docSnapshot.id, docSnapshot.data())
 
           // Split into active vs archived based on whether the current user
           // has archived this space
-          if (archivedByUids.includes(userId)) {
+          if (space.archivedByUids.includes(userId)) {
             archived.push(space)
           } else {
             active.push(space)

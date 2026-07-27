@@ -1,16 +1,16 @@
 // src/spaces/pages/SpaceDetailPage.tsx
 //
-// Space detail page. Fetches the space document once on mount (getDoc),
+// Space detail page. Subscribes to the space document with onSnapshot,
 // then renders SpaceTabs which owns the four-tab UI.
 // Transaction list is subscribed via useTransactions (onSnapshot).
 
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 
-import { doc, getDoc } from 'firebase/firestore'
+import { doc, onSnapshot } from 'firebase/firestore'
 import { db } from '@/services/firebase'
 import type { LabeledItem, Space } from '@/spaces/types'
-import { normaliseMember, getSpaceMainCurrency } from '@/spaces/types'
+import { getSpaceMainCurrency } from '@/spaces/types'
 import { useAuthStore } from '@/auth/store/useAuthStore'
 import { usePendingInvites } from '@/friends/hooks/usePendingInvites'
 import { ChevronLeft, WifiOff } from 'lucide-react'
@@ -28,7 +28,7 @@ import type { TransactionType } from '@/transactions/types'
 import { SpaceTabs } from '@/spaces/components/SpaceTabs'
 import { InstallPromptBanner } from '@/shared/components/InstallPromptBanner'
 import { deleteTransaction } from '@/transactions/services/transactionService'
-import { unarchiveSpace, updateSpaceDefaultRate } from '@/spaces/services/spaceService'
+import { mapSpaceDoc, unarchiveSpace, updateSpaceDefaultRate } from '@/spaces/services/spaceService'
 import { findStaleDefaultRates } from '@/shared/utils/exchangeRates'
 import {
   AlertDialog,
@@ -47,6 +47,10 @@ import {
 // ---------------------------------------------------------------------------
 
 type BannerState = 'pending' | 'saved' | null
+
+// Why the space document is unavailable, so the render can pick different
+// wording for "genuinely missing" vs "we're offline and can't confirm either way".
+type SpaceUnavailable = { reason: 'not-found' | 'offline' | 'error'; message: string } | null
 
 function SaveBanner({ state, onDismiss }: { state: BannerState; onDismiss: () => void }) {
   useEffect(() => {
@@ -167,7 +171,9 @@ export function SpaceDetailPage() {
 
   const [space, setSpace] = useState<Space | null>(null)
   const [loadingSpace, setLoadingSpace] = useState(true)
-  const [spaceError, setSpaceError] = useState<string | null>(null)
+  // Distinguishes *why* the space is unavailable so the render can word the
+  // offline case differently from a genuine "this space doesn't exist".
+  const [unavailable, setUnavailable] = useState<SpaceUnavailable>(null)
   const [isFormOpen, setIsFormOpen] = useState(false)
   // When non-null, the form opens in edit mode pre-filled from this transaction.
   const [editingTx, setEditingTx] = useState<TransactionWithStatus | null>(null)
@@ -235,50 +241,83 @@ export function SpaceDetailPage() {
     if (!watched.isPending) setWatchedTxId(null)
   }, [transactions, watchedTxId])
 
-  // Fetch space document once on mount
+  // Subscribe to the space document. onSnapshot serves the local cache
+  // immediately (including a doc with hasPendingWrites: true right after a
+  // fire-and-forget createSpace()), then updates when the server confirms —
+  // this removes the "Space not found" / delayed-render race that a one-shot
+  // getDoc() has (getDoc is server-first while online, so it finds nothing
+  // until the just-created doc reaches the server). It also makes the page
+  // reactive to another member's edits without a manual reload.
   useEffect(() => {
     if (!spaceId) {
+      setSpace(null)
       setLoadingSpace(false)
-      setSpaceError('Missing space identifier.')
+      setUnavailable({ reason: 'error', message: 'Missing space identifier.' })
       return
     }
     const id = spaceId
+    let cancelled = false
+    // Flips true once we have a definitive answer (found, or genuinely missing
+    // per the server) — guards the offline timer below from firing after that.
+    let resolved = false
+
+    setSpace(null)
     setLoadingSpace(true)
-    async function fetchSpace() {
-      try {
-        const snapshot = await getDoc(doc(db, 'travels', id))
-        if (!snapshot.exists()) {
-          setSpaceError('This space does not exist or you do not have access to it.')
-        } else {
-          const d = snapshot.data()
-          setSpace({
-            spaceId: snapshot.id,
-            name: d.name as string,
-            emoji: d.emoji as string | undefined,
-            description: d.description as string | undefined,
-            // Apply normaliseMember to handle legacy MemberRef documents transparently
-            members: (d.members ?? []).map((m: Record<string, unknown>) => normaliseMember(m)),
-            memberUids: d.memberUids ?? [],
-            createdBy: d.createdBy as string,
-            createdAt: d.createdAt,
-            currencies: d.currencies ?? [],
-            mainCurrency: d.mainCurrency as string | undefined,
-            defaultRates: d.defaultRates as Record<string, number> | undefined,
-            settings: d.settings,
-            categories: d.categories ?? [],
-            paymentMethods: d.paymentMethods ?? [],
-            countries: d.countries ?? [],
-            cities: d.cities ?? [],
-            archivedByUids: d.archivedByUids ?? [],
+    setUnavailable(null)
+
+    // Offline guard: a snapshot reporting exists()===false is ambiguous while
+    // fromCache is true — it may just not have arrived yet from the server.
+    // Without a bound, a bad URL opened offline would spin forever, since no
+    // server answer is ever coming. After 5s, give up waiting and show a
+    // not-found state that acknowledges the offline case.
+    const offlineTimer = setTimeout(() => {
+      if (cancelled || resolved) return
+      setLoadingSpace(false)
+      setUnavailable({
+        reason: 'offline',
+        message: 'Check your connection and try again — we can\'t tell whether this space exists until we hear back from the server.',
+      })
+    }, 5000)
+
+    const unsubscribe = onSnapshot(
+      doc(db, 'travels', id),
+      (snapshot) => {
+        if (cancelled) return
+        if (snapshot.exists()) {
+          resolved = true
+          clearTimeout(offlineTimer)
+          setSpace(mapSpaceDoc(snapshot.id, snapshot.data()))
+          setUnavailable(null)
+          setLoadingSpace(false)
+        } else if (!snapshot.metadata.fromCache) {
+          // The server has spoken and has nothing — genuinely missing.
+          resolved = true
+          clearTimeout(offlineTimer)
+          setSpace(null)
+          setUnavailable({
+            reason: 'not-found',
+            message: 'It may have been deleted, or you might not have permission to view it.',
           })
+          setLoadingSpace(false)
         }
-      } catch {
-        setSpaceError('Unable to load this space. Please try again later.')
-      } finally {
+        // else: fromCache && !exists() — not yet synced, not necessarily gone.
+        // Keep showing the loading state; the offline timer above bounds the wait.
+      },
+      () => {
+        if (cancelled) return
+        resolved = true
+        clearTimeout(offlineTimer)
+        setSpace(null)
+        setUnavailable({ reason: 'error', message: 'Unable to load this space. Please try again later.' })
         setLoadingSpace(false)
-      }
+      },
+    )
+
+    return () => {
+      cancelled = true
+      clearTimeout(offlineTimer)
+      unsubscribe()
     }
-    fetchSpace()
   }, [spaceId])
 
   // Called by ParametersTab when it saves a field change — keeps local state in sync
@@ -428,19 +467,23 @@ export function SpaceDetailPage() {
     )
   }
 
-  if (!space || spaceError) {
+  if (!space || unavailable) {
+    const isOffline = unavailable?.reason === 'offline'
     return (
       <div className="flex min-h-screen flex-col bg-background">
         <header className="flex items-center gap-3 border-b px-4 py-3">
           <button type="button" onClick={handleBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors">
             <ChevronLeft className="h-4 w-4" />All spaces
           </button>
-          <h1 className="text-base font-semibold">Space not found</h1>
+          <h1 className="text-base font-semibold">{isOffline ? "Can't confirm this space" : 'Space not found'}</h1>
         </header>
         <main className="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-center">
-          <p className="text-lg font-medium">We couldn&apos;t find this space.</p>
+          {isOffline && <WifiOff className="h-8 w-8 text-amber-600" />}
+          <p className="text-lg font-medium">
+            {isOffline ? "You're offline, and this space isn't in your local cache." : "We couldn't find this space."}
+          </p>
           <p className="max-w-sm text-sm text-muted-foreground">
-            It may have been deleted, or you might not have permission to view it.
+            {unavailable?.message ?? 'It may have been deleted, or you might not have permission to view it.'}
           </p>
           <Button type="button" onClick={handleBack}>Back to spaces</Button>
         </main>
