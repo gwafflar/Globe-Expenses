@@ -1,30 +1,30 @@
-// src/travels/components/tabs/ParametersTab.tsx
+// src/spaces/components/tabs/ParametersTab.tsx
 
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { nanoid } from 'nanoid'
-import type { LabeledItem, Travel, TravelMember } from '@/travels/types'
-import { getTravelMainCurrency } from '@/travels/types'
+import type { LabeledItem, Space, SpaceMember } from '@/spaces/types'
+import { getSpaceMainCurrency } from '@/spaces/types'
 import {
-  updateTravelCurrencies,
-  updateTravelList,
-  updateTravelMeta,
-  updateTravelDefaultRate,
+  updateSpaceCurrencies,
+  updateSpaceList,
+  updateSpaceMeta,
+  updateSpaceDefaultRate,
   addUnclaimedMember,
-  renameTravelMember,
-  claimTravelMember,
+  renameSpaceMember,
+  claimSpaceMember,
   setMemberAllowRename,
-  archiveTravel,
-  unarchiveTravel,
-  leaveTravel,
-  deleteTravel,
+  archiveSpace,
+  unarchiveSpace,
+  leaveSpace,
+  deleteSpace,
   mergeMembers,
-} from '@/travels/services/travelService'
+} from '@/spaces/services/spaceService'
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
 import { useAuthStore } from '@/auth/store/useAuthStore'
 import {
   fetchFriends,
-  sendTravelInvite,
+  sendSpaceInvite,
   createShareableInvite,
   searchByNametag,
 } from '@/friends/services/friendService'
@@ -97,7 +97,7 @@ function CurrencyPicker({
 }: {
   selected: string[]
   onChange: (codes: string[]) => void
-  // The travel's mainCurrency — always checked, cannot be unchecked.
+  // The space's mainCurrency — always checked, cannot be unchecked.
   lockedCurrency?: string
 }) {
   const [search, setSearch] = useState('')
@@ -162,9 +162,9 @@ function CurrencyPicker({
 }
 
 // ---------------------------------------------------------------------------
-// ExchangeRateEditor — editable exchange rates for each currency in the travel.
+// ExchangeRateEditor — editable exchange rates for each currency in the space.
 //
-// Shows all currencies in the travel's currencies list (except mainCurrency),
+// Shows all currencies in the space's currencies list (except mainCurrency),
 // each with an editable rate. The rate can be entered in either direction:
 //   - "1 local = X main" (the stored format)
 //   - "1 main = X local" (the inverse, for convenience)
@@ -175,13 +175,13 @@ function ExchangeRateRow({
   code,
   mainCurrency,
   rate,
-  travelId,
+  spaceId,
   onRateChange,
 }: {
   code: string
   mainCurrency: string
   rate: number         // stored rate: 1 local = rate mainCurrency
-  travelId: string
+  spaceId: string
   onRateChange: (code: string, newRate: number) => void
 }) {
   // "1 local = X main" (the stored format)
@@ -191,7 +191,7 @@ function ExchangeRateRow({
     rate > 0 ? parseFloat((1 / rate).toPrecision(6)).toString() : ''
   )
 
-  // Sync from props when travel.defaultRates changes externally
+  // Sync from props when space.defaultRates changes externally
   useEffect(() => {
     setLocalToMain(rate.toString())
     setMainToLocal(rate > 0 ? parseFloat((1 / rate).toPrecision(6)).toString() : '')
@@ -219,7 +219,7 @@ function ExchangeRateRow({
   function handleBlur() {
     const parsed = parseFloat(localToMain)
     if (!isNaN(parsed) && parsed > 0 && parsed !== rate) {
-      updateTravelDefaultRate(travelId, code, parsed).catch(console.error)
+      updateSpaceDefaultRate(spaceId, code, parsed).catch(console.error)
       onRateChange(code, parsed)
     }
   }
@@ -269,12 +269,12 @@ function ExchangeRateRow({
 // ---------------------------------------------------------------------------
 
 function CountryPicker({
-  selected,   // country names currently in the travel's countries list
-  travelId,
+  selected,   // country names currently in the space's countries list
+  spaceId,
   onSelectedChange,
 }: {
   selected: LabeledItem[]
-  travelId: string
+  spaceId: string
   onSelectedChange: (items: LabeledItem[]) => void
 }) {
   // Own open/search state — avoids delegating to CollapsiblePicker so both
@@ -311,7 +311,7 @@ function CountryPicker({
       next = [...selected, { id: nanoid(8), label: name, emoji: flag }]
     }
     onSelectedChange(next)
-    await updateTravelList(travelId, 'countries', next)
+    await updateSpaceList(spaceId, 'countries', next)
   }
 
   const summary =
@@ -406,14 +406,14 @@ type ListField = 'categories' | 'paymentMethods' | 'countries' | 'cities'
 
 interface EditableLabeledListProps {
   items: LabeledItem[]
-  travelId: string
+  spaceId: string
   field: ListField
   placeholder: string
   onItemsChange: (items: LabeledItem[]) => void
   hideEmoji?: boolean
 }
 
-function EditableLabeledList({ items, travelId, field, placeholder, onItemsChange, hideEmoji }: EditableLabeledListProps) {
+function EditableLabeledList({ items, spaceId, field, placeholder, onItemsChange, hideEmoji }: EditableLabeledListProps) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editLabel, setEditLabel] = useState('')
   const [addLabel, setAddLabel] = useState('')
@@ -430,7 +430,7 @@ function EditableLabeledList({ items, travelId, field, placeholder, onItemsChang
 
   async function persist(next: LabeledItem[]) {
     onItemsChange(next)
-    await updateTravelList(travelId, field, next)
+    await updateSpaceList(spaceId, field, next)
   }
 
   function startEdit(item: LabeledItem) {
@@ -519,7 +519,7 @@ function avatarHue(seed: string): number {
 
 // Claimed member: coloured avatar (using userId as seed so it matches the profile page).
 // Unclaimed member: grey avatar.
-function MemberAvatar({ member }: { member: TravelMember }) {
+function MemberAvatar({ member }: { member: SpaceMember }) {
   if (member.userId) {
     const hue = avatarHue(member.userId)
     return (
@@ -705,7 +705,7 @@ function AddMemberModal({
                 <p className="py-4 text-center text-xs text-muted-foreground">
                   {friends.length === 0
                     ? 'No friends yet. Use the @Username tab to find people, or share the invite link.'
-                    : 'All your friends are already in this travel.'}
+                    : 'All your friends are already in this space.'}
                 </p>
               )}
               {!friendsLoading && invitableFriends.map(friend => {
@@ -769,7 +769,7 @@ function AddMemberModal({
                 <div className="flex flex-col gap-2">
                   {usernameResults.map(user => {
                     const alreadyInvited = invitedByUsername.has(user.uid)
-                    const alreadyInTravel = existingMemberUids.has(user.uid)
+                    const alreadyInSpace = existingMemberUids.has(user.uid)
                     return (
                       <div key={user.uid} className="flex items-center gap-3 rounded-lg border px-3 py-2">
                         <div
@@ -782,8 +782,8 @@ function AddMemberModal({
                           <p className="text-sm font-medium truncate">{user.displayName}</p>
                           <p className="text-xs text-muted-foreground">@{user.nametag}</p>
                         </div>
-                        {alreadyInTravel ? (
-                          <span className="shrink-0 text-xs text-muted-foreground">In travel</span>
+                        {alreadyInSpace ? (
+                          <span className="shrink-0 text-xs text-muted-foreground">In space</span>
                         ) : alreadyInvited ? (
                           <span className="flex items-center gap-1 text-xs text-green-600 shrink-0">
                             <Check className="h-3 w-3" /> Invited
@@ -814,7 +814,7 @@ function AddMemberModal({
           {tab === 'link' && (
             <div className="flex flex-col gap-3">
               <p className="text-xs text-muted-foreground">
-                Share this link with anyone. They can join the travel and become your friend.
+                Share this link with anyone. They can join the space and become your friend.
               </p>
               {!generatedInviteUrl ? (
                 <button
@@ -841,7 +841,7 @@ function AddMemberModal({
                     </button>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Anyone with this link can join this travel.
+                    Anyone with this link can join this space.
                   </p>
                 </div>
               )}
@@ -859,24 +859,24 @@ function AddMemberModal({
 // ---------------------------------------------------------------------------
 
 function MembersSection({
-  travel,
-  onTravelChange,
+  space,
+  onSpaceChange,
 }: {
-  travel: Travel
-  onTravelChange: (updated: Partial<Travel>) => void
+  space: Space
+  onSpaceChange: (updated: Partial<Space>) => void
 }) {
   const { currentUser, userProfile } = useAuthStore()
 
-  // The current user's linked TravelMember slot (null if they have no slot yet)
-  const myMember = travel.members.find((m) => m.userId === currentUser?.uid) ?? null
-  const isCreator = currentUser?.uid === travel.createdBy
+  // The current user's linked SpaceMember slot (null if they have no slot yet)
+  const myMember = space.members.find((m) => m.userId === currentUser?.uid) ?? null
+  const isCreator = currentUser?.uid === space.createdBy
 
   // "No slot" nudge: user is in memberUids (has access) but has no slot with their userId
-  const hasNoSlot = !!currentUser && travel.memberUids.includes(currentUser.uid) && !myMember
+  const hasNoSlot = !!currentUser && space.memberUids.includes(currentUser.uid) && !myMember
 
-  // Solo travel check: only one member slot total, and no unclaimed slots (truly just the user)
+  // Solo space check: only one member slot total, and no unclaimed slots (truly just the user)
   // Used for simplified UI in MembersSection (show "Members: You" instead of full management)
-  const isSoloTravel = travel.members.length === 1 && !travel.members.some((m) => m.userId === null)
+  const isSoloSpace = space.members.length === 1 && !space.members.some((m) => m.userId === null)
 
   // --- Inline rename state ---
   // renamingId: travelMemberId of the slot being renamed
@@ -951,8 +951,8 @@ function MembersSection({
     })
   }, [addMemberOpen, addMemberTab, userProfile]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Friends already in this travel (filter them out of the picker)
-  const existingMemberUids = new Set(travel.memberUids)
+  // Friends already in this space (filter them out of the picker)
+  const existingMemberUids = new Set(space.memberUids)
   const invitableFriends = friends.filter(f => !existingMemberUids.has(f.uid))
 
   // --- Merge members modal state ---
@@ -988,8 +988,8 @@ function MembersSection({
   function proceedToConfirm() {
     const [a, b] = Array.from(mergeSelected)
     // Default: keep the claimed one if one is claimed; otherwise keep the first selected
-    const memberA = travel.members.find(m => m.travelMemberId === a)
-    const memberB = travel.members.find(m => m.travelMemberId === b)
+    const memberA = space.members.find(m => m.travelMemberId === a)
+    const memberB = space.members.find(m => m.travelMemberId === b)
     const defaultKeep = (memberA?.userId !== null ? a : memberB?.userId !== null ? b : a)
     setMergeKeepId(defaultKeep)
     setMergeStep('confirm')
@@ -999,14 +999,14 @@ function MembersSection({
     if (!mergeKeepId) return
     const [a, b] = Array.from(mergeSelected)
     const deleteId = mergeKeepId === a ? b : a
-    const keptMember = travel.members.find(m => m.travelMemberId === mergeKeepId)
-    const deletedMember = travel.members.find(m => m.travelMemberId === deleteId)
+    const keptMember = space.members.find(m => m.travelMemberId === mergeKeepId)
+    const deletedMember = space.members.find(m => m.travelMemberId === deleteId)
     if (!keptMember || !deletedMember) return
 
     setMergeLoading(true)
     try {
-      await mergeMembers(travel.travelId, mergeKeepId, deleteId, travel.members, travel.createdBy)
-      onTravelChange({ members: travel.members.filter(m => m.travelMemberId !== deleteId) })
+      await mergeMembers(space.spaceId, mergeKeepId, deleteId, space.members, space.createdBy)
+      onSpaceChange({ members: space.members.filter(m => m.travelMemberId !== deleteId) })
       setMergeDone({ keptName: keptMember.displayName, deletedName: deletedMember.displayName })
     } finally {
       setMergeLoading(false)
@@ -1020,14 +1020,14 @@ function MembersSection({
   // Returns member name in format "Marc (Marcus)" where Marc is current displayName
   // and Marcus is their account's original displayName. For now, shows account
   // name only for current user (who we have displayName for). Future: store
-  // originalDisplayName in TravelMember schema when claiming.
-  function getMemberDisplayLabel(member: TravelMember): string {
+  // originalDisplayName in SpaceMember schema when claiming.
+  function getMemberDisplayLabel(member: SpaceMember): string {
     if (member.userId === null) return member.displayName  // unclaimed: no account
     if (member.userId === currentUser?.uid && userProfile) {
       return `${member.displayName} (${userProfile.displayName})`  // we have current user's display name
     }
     // For other claimed members, we don't have their account displayName yet
-    // (future: store originalDisplayName in TravelMember when claiming)
+    // (future: store originalDisplayName in SpaceMember when claiming)
     return member.displayName
   }
 
@@ -1035,7 +1035,7 @@ function MembersSection({
   // Permission checks
   // ---------------------------------------------------------------------------
 
-  function canRename(member: TravelMember): boolean {
+  function canRename(member: SpaceMember): boolean {
     if (!currentUser) return false
     if (member.userId === null) return true  // unclaimed: anyone can rename
     if (member.userId === currentUser.uid) return true  // linked user always can rename themselves
@@ -1045,12 +1045,12 @@ function MembersSection({
     return true
   }
 
-  function canUnclaim(member: TravelMember): boolean {
+  function canUnclaim(member: SpaceMember): boolean {
     if (!currentUser) return false
     return member.userId === currentUser.uid || isCreator
   }
 
-  function showAllowRenameToggle(member: TravelMember): boolean {
+  function showAllowRenameToggle(member: SpaceMember): boolean {
     if (!currentUser) return false
     if (member.userId === null) return false  // toggle only relevant for claimed slots
     return member.userId === currentUser.uid || isCreator
@@ -1060,19 +1060,19 @@ function MembersSection({
   // Action handlers
   // ---------------------------------------------------------------------------
 
-  async function handleRenameCommit(member: TravelMember) {
+  async function handleRenameCommit(member: SpaceMember) {
     const trimmed = renameValue.trim()
     setRenamingId(null)
     if (!trimmed || trimmed === member.displayName) return
-    await renameTravelMember(travel.travelId, member.travelMemberId, trimmed, travel.members)
-    onTravelChange({
-      members: travel.members.map((m) =>
+    await renameSpaceMember(space.spaceId, member.travelMemberId, trimmed, space.members)
+    onSpaceChange({
+      members: space.members.map((m) =>
         m.travelMemberId === member.travelMemberId ? { ...m, displayName: trimmed } : m,
       ),
     })
   }
 
-  async function handleClaim(member: TravelMember) {
+  async function handleClaim(member: SpaceMember) {
     if (!currentUser) return
 
     // If user already has a claimed slot, they must use the unlink flow first
@@ -1084,10 +1084,10 @@ function MembersSection({
     }
 
     // User has no claimed slot, or is claiming the same slot — proceed with claim
-    await claimTravelMember(travel.travelId, member.travelMemberId, currentUser.uid, travel.members)
+    await claimSpaceMember(space.spaceId, member.travelMemberId, currentUser.uid, space.members)
     // Transfer semantics: null any slot the user previously owned, then set this one
-    onTravelChange({
-      members: travel.members.map((m) => {
+    onSpaceChange({
+      members: space.members.map((m) => {
         if (m.travelMemberId === member.travelMemberId) return { ...m, userId: currentUser.uid }
         if (m.userId === currentUser.uid) return { ...m, userId: null }
         return m
@@ -1096,7 +1096,7 @@ function MembersSection({
   }
 
   // Opens the "This is not me" modal — forces user to choose another member or create new
-  function handleThisIsNotMe(member: TravelMember) {
+  function handleThisIsNotMe(member: SpaceMember) {
     setUnlinkingMemberId(member.travelMemberId)
     setUnlinkNewMemberName('')
   }
@@ -1115,9 +1115,9 @@ function MembersSection({
     setUnlinkLoading(true)
     try {
       // Claim the unclaimed member (old slot auto-unlinks via transfer semantics)
-      await claimTravelMember(travel.travelId, unclaimedMemberId, currentUser.uid, travel.members)
-      onTravelChange({
-        members: travel.members.map((m) => {
+      await claimSpaceMember(space.spaceId, unclaimedMemberId, currentUser.uid, space.members)
+      onSpaceChange({
+        members: space.members.map((m) => {
           if (m.travelMemberId === unclaimedMemberId) return { ...m, userId: currentUser.uid }
           if (m.userId === currentUser.uid) return { ...m, userId: null }
           return m
@@ -1138,11 +1138,11 @@ function MembersSection({
 
     setUnlinkLoading(true)
     try {
-      const newMember = await addUnclaimedMember(travel.travelId, trimmed, travel.members)
+      const newMember = await addUnclaimedMember(space.spaceId, trimmed, space.members)
       // Claim the newly created member (old slot auto-unlinks via transfer semantics)
-      await claimTravelMember(travel.travelId, newMember.travelMemberId, currentUser.uid, travel.members)
-      onTravelChange({
-        members: travel.members.map((m) => {
+      await claimSpaceMember(space.spaceId, newMember.travelMemberId, currentUser.uid, space.members)
+      onSpaceChange({
+        members: space.members.map((m) => {
           if (m.travelMemberId === newMember.travelMemberId) return { ...m, userId: currentUser.uid }
           if (m.userId === currentUser.uid) return { ...m, userId: null }
           return m
@@ -1155,10 +1155,10 @@ function MembersSection({
     }
   }
 
-  async function handleAllowRenameToggle(member: TravelMember) {
-    await setMemberAllowRename(travel.travelId, member.travelMemberId, !member.allowRename, travel.members)
-    onTravelChange({
-      members: travel.members.map((m) =>
+  async function handleAllowRenameToggle(member: SpaceMember) {
+    await setMemberAllowRename(space.spaceId, member.travelMemberId, !member.allowRename, space.members)
+    onSpaceChange({
+      members: space.members.map((m) =>
         m.travelMemberId === member.travelMemberId ? { ...m, allowRename: !m.allowRename } : m,
       ),
     })
@@ -1168,23 +1168,23 @@ function MembersSection({
   async function handleAddUnclaimed(name: string) {
     const trimmed = name.trim()
     if (!trimmed) return
-    const newMember = await addUnclaimedMember(travel.travelId, trimmed, travel.members)
-    onTravelChange({ members: [...travel.members, newMember] })
+    const newMember = await addUnclaimedMember(space.spaceId, trimmed, space.members)
+    onSpaceChange({ members: [...space.members, newMember] })
     setAddMemberOpen(false)
   }
 
-  // Send a travel invite to a friend (friend tab)
-  async function handleSendTravelInvite(toUid: string) {
+  // Send a space invite to a friend (friend tab)
+  async function handleSendSpaceInvite(toUid: string) {
     if (!userProfile) return
     setInvitedUids(prev => new Set(prev).add(toUid))
-    await sendTravelInvite(userProfile, toUid, travel.travelId, travel.name)
+    await sendSpaceInvite(userProfile, toUid, space.spaceId, space.name)
   }
 
-  // Send a travel invite via username search result (username tab)
-  async function handleSendTravelInviteByUsername(toUid: string) {
+  // Send a space invite via username search result (username tab)
+  async function handleSendSpaceInviteByUsername(toUid: string) {
     if (!userProfile) return
     setInvitedByUsername(prev => new Set(prev).add(toUid))
-    await sendTravelInvite(userProfile, toUid, travel.travelId, travel.name)
+    await sendSpaceInvite(userProfile, toUid, space.spaceId, space.name)
   }
 
   // Generate shareable invite link (link tab) — also auto-copies to clipboard
@@ -1193,7 +1193,7 @@ function MembersSection({
     setShareLoading(true)
     try {
       const inviteId = await createShareableInvite(
-        userProfile, 'travel_member', travel.travelId, travel.name,
+        userProfile, 'travel_member', space.spaceId, space.name,
       )
       const url = `${window.location.origin}/invite/${inviteId}`
       setGeneratedInviteUrl(url)
@@ -1222,15 +1222,15 @@ function MembersSection({
   // Render
   // ---------------------------------------------------------------------------
 
-  // Solo travel: simplified UI (just "you" + educational message + add button)
-  if (isSoloTravel) {
+  // Solo space: simplified UI (just "you" + educational message + add button)
+  if (isSoloSpace) {
     return (
       <div className="flex flex-col gap-3">
         {/* Simplified solo display */}
         <div className="rounded-lg border bg-muted/30 px-3 py-2">
           <p className="text-sm font-medium">Members: You</p>
           <p className="text-xs text-muted-foreground mt-1">
-            You're the only member in this travel.
+            You're the only member in this space.
           </p>
         </div>
 
@@ -1238,7 +1238,7 @@ function MembersSection({
         <div className="rounded-lg border border-dashed border-primary/30 bg-primary/5 px-3 py-2.5">
           <p className="text-xs font-medium text-primary mb-1">ℹ️ Did you know?</p>
           <p className="text-xs text-muted-foreground">
-            You can add other people in this travel, and share your transactions with them.
+            You can add other people in this space, and share your transactions with them.
           </p>
         </div>
 
@@ -1263,13 +1263,13 @@ function MembersSection({
             friendsLoading={friendsLoading}
             invitableFriends={invitableFriends}
             invitedUids={invitedUids}
-            onInviteFriend={handleSendTravelInvite}
+            onInviteFriend={handleSendSpaceInvite}
             usernameQuery={usernameQuery}
             onUsernameQueryChange={setUsernameQuery}
             usernameResults={usernameResults}
             usernameSearching={usernameSearching}
             invitedByUsername={invitedByUsername}
-            onInviteByUsername={handleSendTravelInviteByUsername}
+            onInviteByUsername={handleSendSpaceInviteByUsername}
             existingMemberUids={existingMemberUids}
             shareLoading={shareLoading}
             generatedInviteUrl={generatedInviteUrl}
@@ -1283,11 +1283,11 @@ function MembersSection({
     )
   }
 
-  // Multi-member travel: full UI
+  // Multi-member space: full UI
   return (
     <div className="flex flex-col gap-3">
 
-      {/* "No slot" nudge — shown when user has travel access but no claimed slot */}
+      {/* "No slot" nudge — shown when user has space access but no claimed slot */}
       {hasNoSlot && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
           You haven&apos;t claimed a slot yet — pick who you are below.
@@ -1296,7 +1296,7 @@ function MembersSection({
 
       {/* Member list */}
       <ul className="flex flex-col gap-1.5">
-        {travel.members.map((member) => {
+        {space.members.map((member) => {
           const isMine = member.userId === currentUser?.uid
           const isUnclaimed = member.userId === null
           const isRenaming = renamingId === member.travelMemberId
@@ -1332,7 +1332,7 @@ function MembersSection({
                   {/* Sub-label: "You", "Linked account", or "Unclaimed" */}
                   <p className="text-xs text-muted-foreground">
                     {isMine ? 'You' : isUnclaimed ? 'Unclaimed' : 'Linked account'}
-                    {member.userId === travel.createdBy && (
+                    {member.userId === space.createdBy && (
                       <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px]">creator</span>
                     )}
                   </p>
@@ -1404,7 +1404,7 @@ function MembersSection({
       </button>
 
       {/* Merge members — only shown when 2+ members exist */}
-      {travel.members.length >= 2 && (
+      {space.members.length >= 2 && (
         <button
           type="button"
           onClick={openMergeModal}
@@ -1425,13 +1425,13 @@ function MembersSection({
           friendsLoading={friendsLoading}
           invitableFriends={invitableFriends}
           invitedUids={invitedUids}
-          onInviteFriend={handleSendTravelInvite}
+          onInviteFriend={handleSendSpaceInvite}
           usernameQuery={usernameQuery}
           onUsernameQueryChange={setUsernameQuery}
           usernameResults={usernameResults}
           usernameSearching={usernameSearching}
           invitedByUsername={invitedByUsername}
-          onInviteByUsername={handleSendTravelInviteByUsername}
+          onInviteByUsername={handleSendSpaceInviteByUsername}
           existingMemberUids={existingMemberUids}
           shareLoading={shareLoading}
           generatedInviteUrl={generatedInviteUrl}
@@ -1497,7 +1497,7 @@ function MembersSection({
                     Select two member slots that represent the same person. Their expenses will be combined.
                   </p>
                   <div className="flex flex-col gap-2">
-                    {travel.members.map((member) => {
+                    {space.members.map((member) => {
                       const isSelected = mergeSelected.has(member.travelMemberId)
                       const isDisabled = !isSelected && mergeSelected.size >= 2
                       return (
@@ -1543,10 +1543,10 @@ function MembersSection({
               {/* ── Step 2: choose which to keep + confirm ── */}
               {!mergeDone && mergeStep === 'confirm' && (() => {
                 const [a, b] = Array.from(mergeSelected)
-                const memberA = travel.members.find(m => m.travelMemberId === a)!
-                const memberB = travel.members.find(m => m.travelMemberId === b)!
+                const memberA = space.members.find(m => m.travelMemberId === a)!
+                const memberB = space.members.find(m => m.travelMemberId === b)!
                 const deleteId = mergeKeepId === a ? b : a
-                const deletedMember = travel.members.find(m => m.travelMemberId === deleteId)!
+                const deletedMember = space.members.find(m => m.travelMemberId === deleteId)!
                 return (
                   <div className="flex flex-col gap-4">
                     <p className="text-xs text-muted-foreground">
@@ -1588,7 +1588,7 @@ function MembersSection({
                     <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
                       <p className="font-medium">⚠️ This cannot be undone.</p>
                       <p className="mt-0.5">
-                        "{deletedMember.displayName}" will be permanently deleted. All their transactions will move to "{travel.members.find(m => m.travelMemberId === mergeKeepId)?.displayName}".
+                        "{deletedMember.displayName}" will be permanently deleted. All their transactions will move to "{space.members.find(m => m.travelMemberId === mergeKeepId)?.displayName}".
                       </p>
                     </div>
 
@@ -1640,7 +1640,7 @@ function MembersSection({
 
             <div className="max-h-96 overflow-y-auto px-4 py-3 flex flex-col gap-2">
               {/* List all members (claimed + unclaimed) — user can claim any of them */}
-              {travel.members.map((member) => {
+              {space.members.map((member) => {
                 const isCurrent = member.travelMemberId === myMember?.travelMemberId
                 return (
                   <button
@@ -1729,32 +1729,32 @@ function MembersSection({
 // ---------------------------------------------------------------------------
 
 interface ParametersTabProps {
-  travel: Travel
+  space: Space
   transactions: TransactionWithStatus[]
-  onTravelChange: (updated: Partial<Travel>) => void
+  onSpaceChange: (updated: Partial<Space>) => void
 }
 
-export function ParametersTab({ travel, transactions, onTravelChange }: ParametersTabProps) {
+export function ParametersTab({ space, transactions, onSpaceChange }: ParametersTabProps) {
   const navigate = useNavigate()
   const { currentUser } = useAuthStore()
-  const [name, setName] = useState(travel.name)
-  const [emoji, setEmoji] = useState(travel.emoji ?? '')
+  const [name, setName] = useState(space.name)
+  const [emoji, setEmoji] = useState(space.emoji ?? '')
 
-  useEffect(() => { setName(travel.name) }, [travel.name])
-  useEffect(() => { setEmoji(travel.emoji ?? '') }, [travel.emoji])
+  useEffect(() => { setName(space.name) }, [space.name])
+  useEffect(() => { setEmoji(space.emoji ?? '') }, [space.emoji])
 
   async function handleNameBlur() {
     const trimmed = name.trim()
-    if (!trimmed || trimmed === travel.name) return
-    await updateTravelMeta(travel.travelId, { name: trimmed })
-    onTravelChange({ name: trimmed })
+    if (!trimmed || trimmed === space.name) return
+    await updateSpaceMeta(space.spaceId, { name: trimmed })
+    onSpaceChange({ name: trimmed })
   }
 
   async function handleEmojiBlur() {
     const trimmed = emoji.trim()
-    if (trimmed === (travel.emoji ?? '')) return
-    await updateTravelMeta(travel.travelId, { emoji: trimmed || undefined })
-    onTravelChange({ emoji: trimmed || undefined })
+    if (trimmed === (space.emoji ?? '')) return
+    await updateSpaceMeta(space.spaceId, { emoji: trimmed || undefined })
+    onSpaceChange({ emoji: trimmed || undefined })
   }
 
   // Merge transaction-derived cities into the stored cities list (read-only auto-seeding)
@@ -1770,15 +1770,15 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
     return [...stored, ...derived]
   }
 
-  const effectiveCities = mergeCitiesFromTransactions(travel.cities ?? [])
+  const effectiveCities = mergeCitiesFromTransactions(space.cities ?? [])
 
-  function handleListChange(field: keyof Pick<Travel, 'categories' | 'paymentMethods' | 'countries' | 'cities'>) {
-    return (items: LabeledItem[]) => onTravelChange({ [field]: items })
+  function handleListChange(field: keyof Pick<Space, 'categories' | 'paymentMethods' | 'countries' | 'cities'>) {
+    return (items: LabeledItem[]) => onSpaceChange({ [field]: items })
   }
 
   async function handleCurrenciesChange(codes: string[]) {
-    await updateTravelCurrencies(travel.travelId, codes)
-    onTravelChange({ currencies: codes })
+    await updateSpaceCurrencies(space.spaceId, codes)
+    onSpaceChange({ currencies: codes })
   }
 
   // ---------------------------------------------------------------------------
@@ -1786,13 +1786,13 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
   // ---------------------------------------------------------------------------
 
   const uid = currentUser?.uid ?? ''
-  const isArchived = (travel.archivedByUids ?? []).includes(uid)
+  const isArchived = (space.archivedByUids ?? []).includes(uid)
 
   // Solo check based on memberUids (access-control array).
   // A user in memberUids may not have claimed a slot yet, but they still count
-  // as a real user with access to the travel.
-  // For leave/delete decisions only — use isOnlyClaimedUser, not isSoloTravel (see MembersSection).
-  const isOnlyClaimedUser = travel.memberUids.length <= 1
+  // as a real user with access to the space.
+  // For leave/delete decisions only — use isOnlyClaimedUser, not isSoloSpace (see MembersSection).
+  const isOnlyClaimedUser = space.memberUids.length <= 1
 
   // State for the leave/delete confirmation dialog
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -1806,11 +1806,11 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
     setArchiving(true)
     try {
       if (isArchived) {
-        await unarchiveTravel(travel.travelId, uid)
-        onTravelChange({ archivedByUids: (travel.archivedByUids ?? []).filter((u) => u !== uid) })
+        await unarchiveSpace(space.spaceId, uid)
+        onSpaceChange({ archivedByUids: (space.archivedByUids ?? []).filter((u) => u !== uid) })
       } else {
-        await archiveTravel(travel.travelId, uid)
-        onTravelChange({ archivedByUids: [...(travel.archivedByUids ?? []), uid] })
+        await archiveSpace(space.spaceId, uid)
+        onSpaceChange({ archivedByUids: [...(space.archivedByUids ?? []), uid] })
       }
       // Brief "Done!" feedback before label updates
       setArchiveDone(true)
@@ -1825,14 +1825,14 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
     setActionInProgress(true)
     try {
       if (isOnlyClaimedUser) {
-        // Solo or last user — hard-delete the entire travel + transactions
-        await deleteTravel(travel.travelId)
+        // Solo or last user — hard-delete the entire space + transactions
+        await deleteSpace(space.spaceId)
       } else {
         // Multi-user — leave: remove self from memberUids, unclaim slot
-        await leaveTravel(travel.travelId, uid, travel.members, travel.memberUids, travel.createdBy)
+        await leaveSpace(space.spaceId, uid, space.members, space.memberUids, space.createdBy)
       }
-      // Navigate back to travels list after leaving/deleting
-      navigate('/travels')
+      // Navigate back to spaces list after leaving/deleting
+      navigate('/spaces')
     } catch (err) {
       console.error('[ParametersTab] leave/delete failed:', err)
       setActionInProgress(false)
@@ -1842,12 +1842,12 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
   return (
     <div className="flex flex-col gap-6 pb-8">
 
-      {/* Travel identity */}
-      <Section title="Travel">
+      {/* Space identity */}
+      <Section title="Space">
         <div className="flex gap-3">
           <div className="flex flex-col gap-1">
             <label className="text-xs font-medium text-muted-foreground">Emoji</label>
-            <EmojiInput value={emoji} onChange={setEmoji} onBlur={handleEmojiBlur} ariaLabel="Travel emoji" />
+            <EmojiInput value={emoji} onChange={setEmoji} onBlur={handleEmojiBlur} ariaLabel="Space emoji" />
             <span className="text-[10px] text-muted-foreground">Tap 🌐</span>
           </div>
           <div className="flex flex-1 flex-col gap-1">
@@ -1857,23 +1857,23 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
               value={name}
               onChange={(e) => setName(e.target.value)}
               onBlur={handleNameBlur}
-              placeholder="Travel name"
+              placeholder="Space name"
               className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
         </div>
       </Section>
 
-      {/* Members — MembersSection receives onTravelChange so it can update members array */}
+      {/* Members — MembersSection receives onSpaceChange so it can update members array */}
       <Section title="Members">
-        <MembersSection travel={travel} onTravelChange={onTravelChange} />
+        <MembersSection space={space} onSpaceChange={onSpaceChange} />
       </Section>
 
       {/* Currencies */}
       <Section title="Currencies">
         {/* Read-only main currency display — locked after creation (editable + recompute is v2). */}
         {(() => {
-          const mc = getTravelMainCurrency(travel)
+          const mc = getSpaceMainCurrency(space)
           const match = ALL_CURRENCIES.find(([code]) => code === mc)
           const label = match ? `${mc} (${match[1]}) — ${match[2]}` : mc
           return (
@@ -1889,17 +1889,17 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
           )
         })()}
         <CurrencyPicker
-          selected={travel.currencies ?? []}
+          selected={space.currencies ?? []}
           onChange={handleCurrenciesChange}
-          lockedCurrency={getTravelMainCurrency(travel)}
+          lockedCurrency={getSpaceMainCurrency(space)}
         />
       </Section>
 
       {/* Exchange Rates — editable default rates for each currency vs mainCurrency */}
       {(() => {
-        const mc = getTravelMainCurrency(travel)
-        // Show all currencies in the travel's list except the main currency.
-        const currenciesWithRates = (travel.currencies ?? []).filter((c) => c !== mc)
+        const mc = getSpaceMainCurrency(space)
+        // Show all currencies in the space's list except the main currency.
+        const currenciesWithRates = (space.currencies ?? []).filter((c) => c !== mc)
 
         if (currenciesWithRates.length === 0) return null
 
@@ -1909,8 +1909,8 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
               Default rates for new transactions. Editing a rate only affects future transactions.
             </p>
             {currenciesWithRates.map((code) => {
-              // Read from travel.defaultRates, fall back to hardcoded cross-rate
-              const storedRate = travel.defaultRates?.[code]
+              // Read from space.defaultRates, fall back to hardcoded cross-rate
+              const storedRate = space.defaultRates?.[code]
               const rate = storedRate ?? getExchangeRate(code, mc)
               return (
                 <ExchangeRateRow
@@ -1918,11 +1918,11 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
                   code={code}
                   mainCurrency={mc}
                   rate={rate}
-                  travelId={travel.travelId}
+                  spaceId={space.spaceId}
                   onRateChange={(c, newRate) => {
                     // Optimistic local update so other components see the change immediately
-                    onTravelChange({
-                      defaultRates: { ...(travel.defaultRates ?? {}), [c]: newRate },
+                    onSpaceChange({
+                      defaultRates: { ...(space.defaultRates ?? {}), [c]: newRate },
                     })
                   }}
                 />
@@ -1935,8 +1935,8 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
       {/* Categories */}
       <Section title="Categories">
         <EditableLabeledList
-          items={travel.categories ?? []}
-          travelId={travel.travelId}
+          items={space.categories ?? []}
+          spaceId={space.spaceId}
           field="categories"
           placeholder="Category name…"
           onItemsChange={handleListChange('categories')}
@@ -1946,8 +1946,8 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
       {/* Payment methods */}
       <Section title="Payment methods">
         <EditableLabeledList
-          items={travel.paymentMethods ?? []}
-          travelId={travel.travelId}
+          items={space.paymentMethods ?? []}
+          spaceId={space.spaceId}
           field="paymentMethods"
           placeholder="Payment method…"
           onItemsChange={handleListChange('paymentMethods')}
@@ -1957,8 +1957,8 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
       {/* Countries — CountryPicker replaces EditableLabeledList */}
       <Section title="Countries">
         <CountryPicker
-          selected={travel.countries ?? []}
-          travelId={travel.travelId}
+          selected={space.countries ?? []}
+          spaceId={space.spaceId}
           onSelectedChange={handleListChange('countries')}
         />
       </Section>
@@ -1967,7 +1967,7 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
       <Section title="Cities">
         <EditableLabeledList
           items={effectiveCities}
-          travelId={travel.travelId}
+          spaceId={space.spaceId}
           field="cities"
           placeholder="City name…"
           onItemsChange={handleListChange('cities')}
@@ -1981,9 +1981,9 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
       </Section>
 
       {/* ----------------------------------------------------------------- */}
-      {/* Manage travel — archive and leave/delete actions                   */}
+      {/* Manage space — archive and leave/delete actions                   */}
       {/* ----------------------------------------------------------------- */}
-      <Section title="Manage travel">
+      <Section title="Manage space">
         <div className="flex flex-col gap-2">
           {/* Archive / Unarchive — with loading spinner and "Done!" feedback */}
           <Button
@@ -1997,14 +1997,14 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
               ? (isArchived ? 'Unarchiving…' : 'Archiving…')
               : archiveDone
                 ? (isArchived ? 'Archived!' : 'Unarchived!')
-                : (isArchived ? 'Unarchive this travel' : 'Archive this travel')}
+                : (isArchived ? 'Unarchive this space' : 'Archive this space')}
           </Button>
-          {/* Explanation label — different wording for solo vs multi-user travels */}
+          {/* Explanation label — different wording for solo vs multi-user spaces */}
           {!isArchived && !archiveDone && (
             <p className="text-xs text-muted-foreground">
               {isOnlyClaimedUser
-                ? 'Move this travel to an archive directory. You will still be able to open it and add or edit transactions.'
-                : 'Move this travel to an archive directory. You will remain a member of this travel, and still be able to open it and add or edit transactions. This will have no impact on other participants.'}
+                ? 'Move this space to an archive directory. You will still be able to open it and add or edit transactions.'
+                : 'Move this space to an archive directory. You will remain a member of this space, and still be able to open it and add or edit transactions. This will have no impact on other participants.'}
             </p>
           )}
 
@@ -2016,8 +2016,8 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
                 : 'bg-green-50 text-green-800 border border-green-200 dark:bg-green-950 dark:text-green-200 dark:border-green-800'
             }`}>
               {isArchived
-                ? 'This travel is now archived. It will appear in your "Archived" section.'
-                : 'This travel has been unarchived and is back in your active list.'}
+                ? 'This space is now archived. It will appear in your "Archived" section.'
+                : 'This space has been unarchived and is back in your active list.'}
             </div>
           )}
 
@@ -2028,15 +2028,15 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
             className="w-full justify-start"
             onClick={() => setConfirmOpen(true)}
           >
-            {isOnlyClaimedUser ? 'Delete this travel' : 'Leave this travel'}
+            {isOnlyClaimedUser ? 'Delete this space' : 'Leave this space'}
           </Button>
         </div>
 
         {/* Explanation text */}
         <p className="text-xs text-muted-foreground">
           {isOnlyClaimedUser
-            ? 'You are the only user. Deleting will permanently remove this travel and all its transactions.'
-            : 'Leaving will remove you from the travel. Other members will still have access. Your past transactions will be preserved.'}
+            ? 'You are the only user. Deleting will permanently remove this space and all its transactions.'
+            : 'Leaving will remove you from the space. Other members will still have access. Your past transactions will be preserved.'}
         </p>
       </Section>
 
@@ -2045,12 +2045,12 @@ export function ParametersTab({ travel, transactions, onTravelChange }: Paramete
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {isOnlyClaimedUser ? 'Delete this travel?' : 'Leave this travel?'}
+              {isOnlyClaimedUser ? 'Delete this space?' : 'Leave this space?'}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {isOnlyClaimedUser
-                ? 'This will permanently delete the travel and all its transactions. This action cannot be undone.'
-                : 'You will lose access to this travel. Your expense history will be preserved for other members.'}
+                ? 'This will permanently delete the space and all its transactions. This action cannot be undone.'
+                : 'You will lose access to this space. Your expense history will be preserved for other members.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

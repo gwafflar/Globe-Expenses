@@ -5,14 +5,14 @@
 //
 // Filter dimensions:
 //   category, currency, country, city, paymentMethod
-//   + paidBy, beneficiaries (multi-user travels only)
+//   + paidBy, beneficiaries (multi-user spaces only)
 //
 // Search: fuzzy match on transaction name (case-insensitive substring),
 //         or exact match on amount (if the search term is a number).
 
 import { useMemo, useState, useCallback } from 'react'
 import type { TransactionWithStatus } from './useTransactions'
-import type { Travel } from '@/travels/types'
+import type { Space } from '@/spaces/types'
 import { getTransactionType } from '@/transactions/utils/walletHelpers'
 
 // Sentinel value representing transactions where the field is undefined/empty.
@@ -145,7 +145,7 @@ function extractDimensionValues(tx: TransactionWithStatus, dim: FilterDimension)
 
 export function useTransactionFilters(
   transactions: TransactionWithStatus[],
-  travel: Travel,
+  space: Space,
   _isSolo: boolean,
 ): UseTransactionFiltersResult {
   // -- State --
@@ -178,13 +178,13 @@ export function useTransactionFilters(
       if (tx.country) countries.add(tx.country); else hasUndefinedCountry = true
       if (tx.city) cities.add(tx.city); else hasUndefinedCity = true
       if (tx.paymentMethod) methods.add(tx.paymentMethod); else hasUndefinedMethod = true
-      // For paidBy/beneficiaries, use displayName resolved from travel.members
+      // For paidBy/beneficiaries, use displayName resolved from space.members
       for (const s of tx.paidBy) {
-        const m = travel.members.find((mem) => mem.travelMemberId === s.travelMemberId)
+        const m = space.members.find((mem) => mem.travelMemberId === s.travelMemberId)
         if (m) payers.add(m.travelMemberId)
       }
       for (const s of tx.beneficiaries) {
-        const m = travel.members.find((mem) => mem.travelMemberId === s.travelMemberId)
+        const m = space.members.find((mem) => mem.travelMemberId === s.travelMemberId)
         if (m) beneficiaries.add(m.travelMemberId)
       }
     }
@@ -211,7 +211,7 @@ export function useTransactionFilters(
       paidBy: Array.from(payers),
       beneficiaries: Array.from(beneficiaries),
     }
-  }, [transactions, travel.members])
+  }, [transactions, space.members])
 
   // -- Actions --
 

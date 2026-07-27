@@ -1,7 +1,7 @@
-// src/travels/pages/TravelDetailPage.tsx
+// src/spaces/pages/SpaceDetailPage.tsx
 //
-// Travel detail page. Fetches the travel document once on mount (getDoc),
-// then renders TravelTabs which owns the four-tab UI.
+// Space detail page. Fetches the space document once on mount (getDoc),
+// then renders SpaceTabs which owns the four-tab UI.
 // Transaction list is subscribed via useTransactions (onSnapshot).
 
 import { useEffect, useRef, useState } from 'react'
@@ -9,8 +9,8 @@ import { useNavigate, useParams } from 'react-router-dom'
 
 import { doc, getDoc } from 'firebase/firestore'
 import { db } from '@/services/firebase'
-import type { LabeledItem, Travel } from '@/travels/types'
-import { normaliseMember, getTravelMainCurrency } from '@/travels/types'
+import type { LabeledItem, Space } from '@/spaces/types'
+import { normaliseMember, getSpaceMainCurrency } from '@/spaces/types'
 import { useAuthStore } from '@/auth/store/useAuthStore'
 import { usePendingInvites } from '@/friends/hooks/usePendingInvites'
 import { ChevronLeft, WifiOff } from 'lucide-react'
@@ -25,10 +25,10 @@ import { useTransactions, type TransactionWithStatus } from '@/transactions/hook
 import { Button } from '@/components/ui/button'
 import { TransactionForm, type TransferPrefill } from '@/transactions/components/TransactionForm'
 import type { TransactionType } from '@/transactions/types'
-import { TravelTabs } from '@/travels/components/TravelTabs'
+import { SpaceTabs } from '@/spaces/components/SpaceTabs'
 import { InstallPromptBanner } from '@/shared/components/InstallPromptBanner'
 import { deleteTransaction } from '@/transactions/services/transactionService'
-import { unarchiveTravel, updateTravelDefaultRate } from '@/travels/services/travelService'
+import { unarchiveSpace, updateSpaceDefaultRate } from '@/spaces/services/spaceService'
 import { findStaleDefaultRates } from '@/shared/utils/exchangeRates'
 import {
   AlertDialog,
@@ -66,20 +66,20 @@ function SaveBanner({ state, onDismiss }: { state: BannerState; onDismiss: () =>
 }
 
 // ---------------------------------------------------------------------------
-// ArchiveBanner — shown at the top of an archived travel with unarchive action.
+// ArchiveBanner — shown at the top of an archived space with unarchive action.
 // Shows loading state while unarchiving, then green confirmation for 10 seconds.
 // ---------------------------------------------------------------------------
 
 function ArchiveBanner({
-  travel,
+  space,
   currentUserUid,
-  onTravelChange,
+  onSpaceChange,
 }: {
-  travel: Travel
+  space: Space
   currentUserUid: string
-  onTravelChange: (updated: Partial<Travel>) => void
+  onSpaceChange: (updated: Partial<Space>) => void
 }) {
-  const isArchived = (travel.archivedByUids ?? []).includes(currentUserUid)
+  const isArchived = (space.archivedByUids ?? []).includes(currentUserUid)
   const [unarchiving, setUnarchiving] = useState(false)
   const [done, setDone] = useState(false)
 
@@ -94,9 +94,9 @@ function ArchiveBanner({
 
   async function handleUnarchive() {
     setUnarchiving(true)
-    await unarchiveTravel(travel.travelId, currentUserUid)
-    onTravelChange({
-      archivedByUids: (travel.archivedByUids ?? []).filter((u) => u !== currentUserUid),
+    await unarchiveSpace(space.spaceId, currentUserUid)
+    onSpaceChange({
+      archivedByUids: (space.archivedByUids ?? []).filter((u) => u !== currentUserUid),
     })
     setUnarchiving(false)
     setDone(true)
@@ -106,7 +106,7 @@ function ArchiveBanner({
   if (done) {
     return (
       <div className="mx-4 mt-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm font-medium text-green-800 dark:border-green-800 dark:bg-green-950 dark:text-green-200">
-        This travel has been unarchived and is back in your active list.
+        This space has been unarchived and is back in your active list.
       </div>
     )
   }
@@ -114,7 +114,7 @@ function ArchiveBanner({
   // Amber banner with unarchive action
   return (
     <div className="mx-4 mt-2 flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm dark:border-amber-800 dark:bg-amber-950">
-      <span className="text-amber-800 dark:text-amber-200">This travel is archived.</span>
+      <span className="text-amber-800 dark:text-amber-200">This space is archived.</span>
       <button
         type="button"
         onClick={handleUnarchive}
@@ -159,15 +159,15 @@ function RateRepairBanner({ codes, onDismiss }: { codes: string[]; onDismiss: ()
 // Page
 // ---------------------------------------------------------------------------
 
-export function TravelDetailPage() {
-  const { travelId } = useParams()
+export function SpaceDetailPage() {
+  const { spaceId } = useParams()
   const navigate = useNavigate()
   const { currentUser, userProfile } = useAuthStore()
   const currentUserUid = currentUser?.uid ?? ''
 
-  const [travel, setTravel] = useState<Travel | null>(null)
-  const [loadingTravel, setLoadingTravel] = useState(true)
-  const [travelError, setTravelError] = useState<string | null>(null)
+  const [space, setSpace] = useState<Space | null>(null)
+  const [loadingSpace, setLoadingSpace] = useState(true)
+  const [spaceError, setSpaceError] = useState<string | null>(null)
   const [isFormOpen, setIsFormOpen] = useState(false)
   // When non-null, the form opens in edit mode pre-filled from this transaction.
   const [editingTx, setEditingTx] = useState<TransactionWithStatus | null>(null)
@@ -188,37 +188,37 @@ export function TravelDetailPage() {
   // Currency codes auto-corrected by the stale-defaultRates repair (null = nothing to show)
   const [repairedRateCodes, setRepairedRateCodes] = useState<string[] | null>(null)
 
-  // mainCurrency is now per-travel, not per-user.
-  // getTravelMainCurrency handles legacy docs that lack the field.
-  const mainCurrency = travel ? getTravelMainCurrency(travel) : 'EUR'
+  // mainCurrency is now per-space, not per-user.
+  // getSpaceMainCurrency handles legacy docs that lack the field.
+  const mainCurrency = space ? getSpaceMainCurrency(space) : 'EUR'
   const [settlementCurrency, setSettlementCurrency] = useState<string>(mainCurrency)
   const [settlementRate, setSettlementRate] = useState<number>(1)
 
   const { transactions, loading: loadingTransactions, error: transactionsError } =
-    useTransactions(travelId)
+    useTransactions(spaceId)
 
   // One-time repair: getExchangeRate()/buildDefaultRates() computed the reciprocal
-  // of the correct rate until 2026-07-24. Travels created/edited before that fix
+  // of the correct rate until 2026-07-24. Spaces created/edited before that fix
   // may have defaultRates entries baked in backwards. rateRepairDone guards against
   // re-running (and re-fetching/re-writing) on every re-render of this effect.
   const rateRepairDone = useRef(false)
   useEffect(() => {
-    if (!travel || rateRepairDone.current || !travel.defaultRates) return
+    if (!space || rateRepairDone.current || !space.defaultRates) return
     rateRepairDone.current = true
-    const corrections = findStaleDefaultRates(travel.defaultRates, mainCurrency)
+    const corrections = findStaleDefaultRates(space.defaultRates, mainCurrency)
     const codes = Object.keys(corrections)
     if (codes.length === 0) return
     Promise.all(
-      codes.map((code) => updateTravelDefaultRate(travel.travelId, code, corrections[code])),
+      codes.map((code) => updateSpaceDefaultRate(space.spaceId, code, corrections[code])),
     )
       .then(() => {
-        setTravel((prev) =>
+        setSpace((prev) =>
           prev ? { ...prev, defaultRates: { ...prev.defaultRates, ...corrections } } : prev,
         )
         setRepairedRateCodes(codes)
       })
       .catch((err) => console.error('[rate repair] failed to persist corrections:', err))
-  }, [travel, mainCurrency])
+  }, [space, mainCurrency])
 
   // Reset settlement currency when mainCurrency changes (e.g. userProfile loads after mount)
   useEffect(() => {
@@ -235,24 +235,24 @@ export function TravelDetailPage() {
     if (!watched.isPending) setWatchedTxId(null)
   }, [transactions, watchedTxId])
 
-  // Fetch travel document once on mount
+  // Fetch space document once on mount
   useEffect(() => {
-    if (!travelId) {
-      setLoadingTravel(false)
-      setTravelError('Missing travel identifier.')
+    if (!spaceId) {
+      setLoadingSpace(false)
+      setSpaceError('Missing space identifier.')
       return
     }
-    const id = travelId
-    setLoadingTravel(true)
-    async function fetchTravel() {
+    const id = spaceId
+    setLoadingSpace(true)
+    async function fetchSpace() {
       try {
         const snapshot = await getDoc(doc(db, 'travels', id))
         if (!snapshot.exists()) {
-          setTravelError('This travel does not exist or you do not have access to it.')
+          setSpaceError('This space does not exist or you do not have access to it.')
         } else {
           const d = snapshot.data()
-          setTravel({
-            travelId: snapshot.id,
+          setSpace({
+            spaceId: snapshot.id,
             name: d.name as string,
             emoji: d.emoji as string | undefined,
             description: d.description as string | undefined,
@@ -273,24 +273,24 @@ export function TravelDetailPage() {
           })
         }
       } catch {
-        setTravelError('Unable to load this travel. Please try again later.')
+        setSpaceError('Unable to load this space. Please try again later.')
       } finally {
-        setLoadingTravel(false)
+        setLoadingSpace(false)
       }
     }
-    fetchTravel()
-  }, [travelId])
+    fetchSpace()
+  }, [spaceId])
 
   // Called by ParametersTab when it saves a field change — keeps local state in sync
-  function handleTravelChange(updated: Partial<Travel>) {
-    setTravel((prev) => prev ? { ...prev, ...updated } : prev)
+  function handleSpaceChange(updated: Partial<Space>) {
+    setSpace((prev) => prev ? { ...prev, ...updated } : prev)
   }
 
   // Opens the new-expense form and forces TransactionForm to remount (fresh state).
   // First checks: user must have claimed a member slot to create transactions.
   function openForm(initialType?: TransactionType, prefill?: TransferPrefill) {
     // Check if current user has a claimed member slot
-    const myMember = travel?.members.find((m) => m.userId === currentUser?.uid)
+    const myMember = space?.members.find((m) => m.userId === currentUser?.uid)
     if (!myMember) {
       // User has no claimed slot — show guidance dialog instead of opening form
       setShowNoSlotDialog(true)
@@ -331,16 +331,16 @@ export function TravelDetailPage() {
 
   // Called when the user confirms deletion in the AlertDialog.
   function confirmDelete() {
-    if (!travelId || !deletingTxId) return
-    deleteTransaction(travelId, deletingTxId)
+    if (!spaceId || !deletingTxId) return
+    deleteTransaction(spaceId, deletingTxId)
     setDeletingTxId(null)
   }
 
   // Called by TransactionForm after a new transaction introduces a country/city
-  // not yet in the travel's lists — updates local state immediately so dropdowns
+  // not yet in the space's lists — updates local state immediately so dropdowns
   // and ParametersTab reflect the new value without a page reload.
   function handleLocationAdded(newCountry: LabeledItem | null, newCity: LabeledItem | null) {
-    setTravel((prev) => {
+    setSpace((prev) => {
       if (!prev) return prev
       return {
         ...prev,
@@ -350,12 +350,12 @@ export function TravelDetailPage() {
     })
   }
 
-  const isSolo = (travel?.members.length ?? 0) === 1
+  const isSolo = (space?.members.length ?? 0) === 1
 
-  // Tab navigation request — used by the solo-travel CTA to switch to Parameters
+  // Tab navigation request — used by the solo-space CTA to switch to Parameters
   const [requestTab, setRequestTab] = useState<'transactions' | 'balance' | 'dashboard' | 'parameters' | undefined>(undefined)
 
-  const handleBack = () => navigate('/travels')
+  const handleBack = () => navigate('/spaces')
 
   const hue = currentUser ? avatarHue(currentUser.uid) : 0
   const initials = (userProfile?.displayName || currentUser?.email || '?').charAt(0).toUpperCase()
@@ -375,12 +375,12 @@ export function TravelDetailPage() {
 
   // Called when user adds a new category from within the transaction form
   function handleCategoryAdded(item: LabeledItem) {
-    setTravel((prev) => prev ? { ...prev, categories: [...prev.categories, item] } : prev)
+    setSpace((prev) => prev ? { ...prev, categories: [...prev.categories, item] } : prev)
   }
 
   // Called when user adds a new payment method from within the transaction form
   function handlePaymentMethodAdded(item: LabeledItem) {
-    setTravel((prev) => prev ? { ...prev, paymentMethods: [...prev.paymentMethods, item] } : prev)
+    setSpace((prev) => prev ? { ...prev, paymentMethods: [...prev.paymentMethods, item] } : prev)
   }
 
   // ---------------------------------------------------------------------------
@@ -393,7 +393,7 @@ export function TravelDetailPage() {
   const slowHintTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
-    if (loadingTravel) {
+    if (loadingSpace) {
       slowHintTimer.current = setTimeout(() => setShowSlowHint(true), 5000)
     } else {
       setShowSlowHint(false)
@@ -401,16 +401,16 @@ export function TravelDetailPage() {
     return () => {
       if (slowHintTimer.current) clearTimeout(slowHintTimer.current)
     }
-  }, [loadingTravel])
+  }, [loadingSpace])
 
-  if (loadingTravel) {
+  if (loadingSpace) {
     return (
       <div className="flex min-h-screen flex-col bg-background">
         <header className="flex items-center gap-3 border-b px-4 py-3">
           <button type="button" onClick={handleBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors">
-            <ChevronLeft className="h-4 w-4" />All travels
+            <ChevronLeft className="h-4 w-4" />All spaces
           </button>
-          <h1 className="text-base font-semibold">Loading travel…</h1>
+          <h1 className="text-base font-semibold">Loading space…</h1>
         </header>
         <main className="flex flex-1 flex-col items-center justify-center gap-4 px-6">
           <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary border-t-transparent" />
@@ -418,7 +418,7 @@ export function TravelDetailPage() {
             <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
               <WifiOff className="mt-0.5 h-4 w-4 shrink-0" />
               <p>
-                You seem to have connection issues. If the travel doesn&apos;t load,
+                You seem to have connection issues. If the space doesn&apos;t load,
                 try turning off Wi-Fi and mobile data to use the app offline.
               </p>
             </div>
@@ -428,21 +428,21 @@ export function TravelDetailPage() {
     )
   }
 
-  if (!travel || travelError) {
+  if (!space || spaceError) {
     return (
       <div className="flex min-h-screen flex-col bg-background">
         <header className="flex items-center gap-3 border-b px-4 py-3">
           <button type="button" onClick={handleBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors">
-            <ChevronLeft className="h-4 w-4" />All travels
+            <ChevronLeft className="h-4 w-4" />All spaces
           </button>
-          <h1 className="text-base font-semibold">Travel not found</h1>
+          <h1 className="text-base font-semibold">Space not found</h1>
         </header>
         <main className="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-center">
-          <p className="text-lg font-medium">We couldn&apos;t find this travel.</p>
+          <p className="text-lg font-medium">We couldn&apos;t find this space.</p>
           <p className="max-w-sm text-sm text-muted-foreground">
             It may have been deleted, or you might not have permission to view it.
           </p>
-          <Button type="button" onClick={handleBack}>Back to travels</Button>
+          <Button type="button" onClick={handleBack}>Back to spaces</Button>
         </main>
       </div>
     )
@@ -458,26 +458,26 @@ export function TravelDetailPage() {
 
       {/* Header */}
       <header className="flex items-center justify-between gap-3 border-b px-4 py-3">
-        {/* Left: back to travels list */}
+        {/* Left: back to spaces list */}
         <button
           type="button"
           onClick={handleBack}
           className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
           <ChevronLeft className="h-4 w-4" />
-          All travels
+          All spaces
         </button>
 
-        {/* Centre: travel emoji + name — tap to go to Parameters tab */}
+        {/* Centre: space emoji + name — tap to go to Parameters tab */}
         <button
           type="button"
           onClick={() => setRequestTab('parameters')}
           className="flex items-center gap-2 hover:opacity-70 transition-opacity"
         >
           <div className="flex h-8 w-8 items-center justify-center rounded-full bg-secondary text-lg">
-            {travel.emoji || '🌍'}
+            {space.emoji || '🌍'}
           </div>
-          <h1 className="text-base font-semibold leading-tight">{travel.name}</h1>
+          <h1 className="text-base font-semibold leading-tight">{space.name}</h1>
         </button>
 
         {/* Right: profile avatar with pending-invites badge */}
@@ -500,12 +500,12 @@ export function TravelDetailPage() {
       {/* Install PWA banner — shown on mobile browsers only, hidden once installed */}
       <InstallPromptBanner />
 
-      {/* Archived travel banner — shown when the travel is archived for the current user.
+      {/* Archived space banner — shown when the space is archived for the current user.
           Three states: idle (amber), unarchiving (amber + spinner text), done (green + confirmation). */}
       <ArchiveBanner
-        travel={travel}
+        space={space}
         currentUserUid={currentUserUid}
-        onTravelChange={handleTravelChange}
+        onSpaceChange={handleSpaceChange}
       />
 
       {/* One-time notice when stale (pre-fix) default exchange rates were auto-corrected */}
@@ -513,10 +513,10 @@ export function TravelDetailPage() {
         <RateRepairBanner codes={repairedRateCodes} onDismiss={() => setRepairedRateCodes(null)} />
       )}
 
-      {/* Tab content — flex-1 + overflow-hidden so TravelTabs fills remaining height */}
+      {/* Tab content — flex-1 + overflow-hidden so SpaceTabs fills remaining height */}
       <main className="mx-auto w-full max-w-2xl flex-1 overflow-hidden px-4">
-        <TravelTabs
-          travel={travel}
+        <SpaceTabs
+          space={space}
           transactions={transactions}
           loadingTransactions={loadingTransactions}
           transactionsError={transactionsError}
@@ -532,7 +532,7 @@ export function TravelDetailPage() {
           onAddWithdrawal={openWithdrawalForm}
           onEditTransaction={handleEditById}
           onDeleteTransaction={handleDeleteTransaction}
-          onTravelChange={handleTravelChange}
+          onSpaceChange={handleSpaceChange}
           requestTab={requestTab}
           onRequestTabHandled={() => setRequestTab(undefined)}
         />
@@ -572,7 +572,7 @@ export function TravelDetailPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Claim your member slot first</AlertDialogTitle>
             <AlertDialogDescription>
-              You haven't claimed a member slot yet. Choose who you are in this travel so we know who paid for transactions you record.
+              You haven't claimed a member slot yet. Choose who you are in this space so we know who paid for transactions you record.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -611,23 +611,23 @@ export function TravelDetailPage() {
       {isFormOpen && (
         <TransactionForm
           key={formKey}
-          travelId={travelId!}
-          members={travel.members}
-          travelSettings={travel.settings}
-          travelCategories={travel.categories}
-          travelPaymentMethods={travel.paymentMethods}
-          travelCurrencies={travel.currencies}
+          spaceId={spaceId!}
+          members={space.members}
+          spaceSettings={space.settings}
+          spaceCategories={space.categories}
+          spacePaymentMethods={space.paymentMethods}
+          spaceCurrencies={space.currencies}
           mainCurrency={mainCurrency}
-          defaultRates={travel.defaultRates}
+          defaultRates={space.defaultRates}
           onDefaultRateChanged={(code, rate) => {
             // Optimistic local update so the rate is immediately reflected in the form
-            setTravel((prev) => prev ? {
+            setSpace((prev) => prev ? {
               ...prev,
               defaultRates: { ...(prev.defaultRates ?? {}), [code]: rate },
             } : prev)
           }}
-          travelCountries={travel.countries}
-          travelCities={travel.cities}
+          spaceCountries={space.countries}
+          spaceCities={space.cities}
           existingTransactions={transactions}
           initialValues={editingTx ?? undefined}
           initialType={formInitialType}

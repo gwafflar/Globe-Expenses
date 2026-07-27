@@ -1,37 +1,37 @@
-// CreateTravelModal.tsx — modal dialog for creating a new travel.
-// Focuses on UI and uses the travelService for Firestore writes.
+// CreateSpaceModal.tsx — modal dialog for creating a new space.
+// Focuses on UI and uses the spaceService for Firestore writes.
 
 import { useState, type FormEvent, type MouseEvent } from 'react'
-import { createTravel } from '@/travels/services/travelService'
+import { createSpace } from '@/spaces/services/spaceService'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ALL_CURRENCIES } from '@/shared/data/pickerData'
 
-interface CreateTravelModalProps {
+interface CreateSpaceModalProps {
   isOpen: boolean
   onClose: () => void
   uid: string
   displayName: string
   // The user's preferred currency — pre-fills the main currency picker.
   defaultMainCurrency: string
-  // Called with the new travel's Firestore doc ID after successful creation.
-  onCreated?: (travelId: string) => void
+  // Called with the new space's Firestore doc ID after successful creation.
+  onCreated?: (spaceId: string) => void
 }
 
-export function CreateTravelModal({
+export function CreateSpaceModal({
   isOpen,
   onClose,
   uid,
   displayName,
   defaultMainCurrency,
   onCreated,
-}: CreateTravelModalProps) {
+}: CreateSpaceModalProps) {
   const [name, setName] = useState<string>('')
   const [emoji, setEmoji] = useState<string>('')
   const [description, setDescription] = useState<string>('')
-  // Main currency for the travel — locked after creation (editable in v2).
+  // Main currency for the space — locked after creation (editable in v2).
   const [mainCurrency, setMainCurrency] = useState<string>(defaultMainCurrency)
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -54,7 +54,7 @@ export function CreateTravelModal({
     setIsSubmitting(true)
 
     try {
-      const newTravelId = await createTravel({
+      const newSpaceId = await createSpace({
         uid,
         displayName,
         name,
@@ -65,8 +65,8 @@ export function CreateTravelModal({
 
       onClose()
 
-      // Navigate to the newly created travel page
-      if (onCreated) onCreated(newTravelId)
+      // Navigate to the newly created space page
+      if (onCreated) onCreated(newSpaceId)
 
       // Reset fields after closing so the next open starts clean.
       setName('')
@@ -77,8 +77,8 @@ export function CreateTravelModal({
       // Log the raw error to the console so we can see the underlying
       // Firebase / network error details during development.
       // eslint-disable-next-line no-console
-      console.error('Error creating travel:', error)
-      setErrorMessage('Unable to create travel. Please try again.')
+      console.error('Error creating space:', error)
+      setErrorMessage('Unable to create space. Please try again.')
     } finally {
       setIsSubmitting(false)
     }
@@ -93,7 +93,7 @@ export function CreateTravelModal({
       {/* Centered card acting as the modal dialog */}
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle>New travel</CardTitle>
+          <CardTitle>New space</CardTitle>
           <CardDescription>
             Create a new trip to track shared expenses with your companions.
           </CardDescription>
@@ -101,9 +101,9 @@ export function CreateTravelModal({
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="travel-name">Name</Label>
+              <Label htmlFor="space-name">Name</Label>
               <Input
-                id="travel-name"
+                id="space-name"
                 type="text"
                 required
                 value={name}
@@ -112,9 +112,9 @@ export function CreateTravelModal({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="travel-emoji">Emoji (optional)</Label>
+              <Label htmlFor="space-emoji">Emoji (optional)</Label>
               <Input
-                id="travel-emoji"
+                id="space-emoji"
                 type="text"
                 maxLength={2}
                 value={emoji}
@@ -125,9 +125,9 @@ export function CreateTravelModal({
             {/* Main currency — the reference currency for all exchange rate conversions.
                 Locked after creation (editable + batch recompute is v2). */}
             <div className="space-y-2">
-              <Label htmlFor="travel-currency">Main currency</Label>
+              <Label htmlFor="space-currency">Main currency</Label>
               <select
-                id="travel-currency"
+                id="space-currency"
                 value={mainCurrency}
                 onChange={(e) => setMainCurrency(e.target.value)}
                 className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
@@ -146,9 +146,9 @@ export function CreateTravelModal({
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="travel-description">Description (optional)</Label>
+              <Label htmlFor="space-description">Description (optional)</Label>
               <textarea
-                id="travel-description"
+                id="space-description"
                 className="min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
@@ -169,7 +169,7 @@ export function CreateTravelModal({
                 Cancel
               </Button>
               <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting ? 'Creating…' : 'Create travel'}
+                {isSubmitting ? 'Creating…' : 'Create space'}
               </Button>
             </div>
           </form>

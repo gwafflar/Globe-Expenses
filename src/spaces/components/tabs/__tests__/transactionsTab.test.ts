@@ -1,4 +1,4 @@
-// src/travels/components/tabs/__tests__/transactionsTab.test.ts
+// src/spaces/components/tabs/__tests__/transactionsTab.test.ts
 import { describe, it, expect } from 'vitest'
 import {
   currencySymbol,

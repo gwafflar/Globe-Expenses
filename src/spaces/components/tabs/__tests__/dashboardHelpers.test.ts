@@ -10,7 +10,7 @@
 
 import { describe, it, expect } from 'vitest'
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
-import type { Travel } from '@/travels/types'
+import type { Space } from '@/spaces/types'
 import {
   filterTransactions,
   getTripDurationDays,
@@ -77,15 +77,15 @@ function daysAgo(n: number): string {
   ].join('-')
 }
 
-/** Build a minimal Travel fixture. */
-function makeTravel(overrides: Partial<Travel> = {}): Travel {
+/** Build a minimal Space fixture. */
+function makeSpace(overrides: Partial<Space> = {}): Space {
   return {
-    travelId: 'travel-1',
+    spaceId: 'space-1',
     name: 'Test Trip',
     members: [],
     memberUids: [],
     createdBy: 'user-a',
-    createdAt: null as unknown as Travel['createdAt'],
+    createdAt: null as unknown as Space['createdAt'],
     currencies: ['EUR'],
     categories: [],
     paymentMethods: [],
@@ -163,18 +163,18 @@ describe('filterTransactions', () => {
 
 describe('getTripDurationDays', () => {
   it('returns span of transactions when dates exist', () => {
-    const travel = makeTravel()
+    const space = makeSpace()
     const txs = [
       makeTx('01-03-2025'),  // earliest
       makeTx('10-03-2025'),
       makeTx('15-03-2025'),  // latest → span = 15 days (1st to 15th inclusive)
     ]
-    expect(getTripDurationDays(travel, txs)).toBe(15)
+    expect(getTripDurationDays(space, txs)).toBe(15)
   })
 
   it('returns 30 when no dates and no transactions', () => {
-    const travel = makeTravel()
-    expect(getTripDurationDays(travel, [])).toBe(30)
+    const space = makeSpace()
+    expect(getTripDurationDays(space, [])).toBe(30)
   })
 })
 
@@ -295,7 +295,7 @@ describe('categoryColor', () => {
 // ---------------------------------------------------------------------------
 
 describe('normalizeTransactionSplits', () => {
-  // Build minimal TravelMember fixtures
+  // Build minimal SpaceMember fixtures
   function makeMember(userId: string, travelMemberId: string) {
     return {
       travelMemberId,

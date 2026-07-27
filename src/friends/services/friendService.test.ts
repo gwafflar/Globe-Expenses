@@ -1,9 +1,9 @@
-// friendService.test.ts — unit tests for acceptTravelInvite()'s "already a member"
-// detection (the dedup fix: don't create a duplicate TravelMember slot when the
-// accepter is already in travel.memberUids).
+// friendService.test.ts — unit tests for acceptSpaceInvite()'s "already a member"
+// detection (the dedup fix: don't create a duplicate SpaceMember slot when the
+// accepter is already in space.memberUids).
 //
-// acceptTravelInvite is not a pure function (it calls Firestore), so 'firebase/firestore'
-// is mocked. The key behavior under test is the branch on the pre-read of the travel doc:
+// acceptSpaceInvite is not a pure function (it calls Firestore), so 'firebase/firestore'
+// is mocked. The key behavior under test is the branch on the pre-read of the space doc:
 //   - read throws (permission-denied, simulating a genuinely new member) -> creates a slot
 //   - read succeeds and memberUids already contains the uid -> skips slot creation
 //   - read succeeds but memberUids does NOT contain the uid -> still creates a slot
@@ -43,7 +43,7 @@ vi.mock('firebase/firestore', async () => {
   }
 })
 
-const { acceptTravelInvite } = await import('./friendService')
+const { acceptSpaceInvite } = await import('./friendService')
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -93,22 +93,22 @@ beforeEach(() => {
 // New member (permission-denied pre-read)
 // ---------------------------------------------------------------------------
 
-describe('acceptTravelInvite — new member', () => {
-  it('creates a new TravelMember slot when the pre-read is denied (genuinely new member)', async () => {
+describe('acceptSpaceInvite — new member', () => {
+  it('creates a new SpaceMember slot when the pre-read is denied (genuinely new member)', async () => {
     mockGetDoc.mockRejectedValue(new Error('Missing or insufficient permissions'))
 
-    const result = await acceptTravelInvite(makeInvite(), makeUser())
+    const result = await acceptSpaceInvite(makeInvite(), makeUser())
 
     expect(result.alreadyMember).toBe(false)
-    expect(result.travelId).toBe('travel1')
+    expect(result.spaceId).toBe('travel1')
 
-    // Two batch.update calls: invite doc + travel doc (with a new members entry).
+    // Two batch.update calls: invite doc + space doc (with a new members entry).
     expect(mockBatchUpdate).toHaveBeenCalledTimes(2)
-    const travelUpdateCall = mockBatchUpdate.mock.calls.find((c) => c[0].path === 'travels/travel1')
-    expect(travelUpdateCall).toBeDefined()
-    const [, travelPayload] = travelUpdateCall!
-    expect(travelPayload.memberUids).toEqual({ __arrayUnion: ['bob-uid'] })
-    expect(travelPayload.pendingInviteId).toBe('invite1')
+    const spaceUpdateCall = mockBatchUpdate.mock.calls.find((c) => c[0].path === 'travels/travel1')
+    expect(spaceUpdateCall).toBeDefined()
+    const [, spacePayload] = spaceUpdateCall!
+    expect(spacePayload.memberUids).toEqual({ __arrayUnion: ['bob-uid'] })
+    expect(spacePayload.pendingInviteId).toBe('invite1')
   })
 })
 
@@ -116,17 +116,17 @@ describe('acceptTravelInvite — new member', () => {
 // Already a member
 // ---------------------------------------------------------------------------
 
-describe('acceptTravelInvite — already a member', () => {
+describe('acceptSpaceInvite — already a member', () => {
   it('skips creating a new slot when the uid is already in memberUids', async () => {
     mockGetDoc.mockResolvedValue({
       data: () => ({ memberUids: ['bob-uid', 'sender-uid'] }),
     })
 
-    const result = await acceptTravelInvite(makeInvite(), makeUser({ uid: 'bob-uid' }))
+    const result = await acceptSpaceInvite(makeInvite(), makeUser({ uid: 'bob-uid' }))
 
     expect(result.alreadyMember).toBe(true)
 
-    // Only the invite doc is updated (marks it used) — no travel doc update at all.
+    // Only the invite doc is updated (marks it used) — no space doc update at all.
     expect(mockBatchUpdate).toHaveBeenCalledTimes(1)
     const [ref] = mockBatchUpdate.mock.calls[0]
     expect(ref.path).toBe('invites/invite1')
@@ -135,7 +135,7 @@ describe('acceptTravelInvite — already a member', () => {
   it('still marks the invite as used even when already a member', async () => {
     mockGetDoc.mockResolvedValue({ data: () => ({ memberUids: ['bob-uid'] }) })
 
-    await acceptTravelInvite(makeInvite({ multiUse: false }), makeUser({ uid: 'bob-uid' }))
+    await acceptSpaceInvite(makeInvite({ multiUse: false }), makeUser({ uid: 'bob-uid' }))
 
     const [, invitePayload] = mockBatchUpdate.mock.calls[0]
     expect(invitePayload.status).toBe('accepted')
@@ -145,7 +145,7 @@ describe('acceptTravelInvite — already a member', () => {
   it('still fires the (idempotent) friendship writes when already a member', async () => {
     mockGetDoc.mockResolvedValue({ data: () => ({ memberUids: ['bob-uid'] }) })
 
-    await acceptTravelInvite(makeInvite(), makeUser({ uid: 'bob-uid' }))
+    await acceptSpaceInvite(makeInvite(), makeUser({ uid: 'bob-uid' }))
 
     // Two fire-and-forget setDoc calls: sender's friend list + accepter's friend list.
     expect(mockSetDoc).toHaveBeenCalledTimes(2)
@@ -156,28 +156,28 @@ describe('acceptTravelInvite — already a member', () => {
 // Edge cases
 // ---------------------------------------------------------------------------
 
-describe('acceptTravelInvite — edge cases', () => {
+describe('acceptSpaceInvite — edge cases', () => {
   it('treats a successful read where the uid is absent from memberUids as NOT already a member', async () => {
     // Defensive case: read succeeded (shouldn't normally happen for a non-member per
     // the security rules) but memberUids doesn't actually contain this uid yet.
     mockGetDoc.mockResolvedValue({ data: () => ({ memberUids: ['someone-else'] }) })
 
-    const result = await acceptTravelInvite(makeInvite(), makeUser({ uid: 'bob-uid' }))
+    const result = await acceptSpaceInvite(makeInvite(), makeUser({ uid: 'bob-uid' }))
 
     expect(result.alreadyMember).toBe(false)
-    const travelUpdateCall = mockBatchUpdate.mock.calls.find((c) => c[0].path === 'travels/travel1')
-    expect(travelUpdateCall).toBeDefined()
+    const spaceUpdateCall = mockBatchUpdate.mock.calls.find((c) => c[0].path === 'travels/travel1')
+    expect(spaceUpdateCall).toBeDefined()
   })
 
   it('throws when the invite has no travelId', async () => {
     await expect(
-      acceptTravelInvite(makeInvite({ travelId: undefined }), makeUser()),
+      acceptSpaceInvite(makeInvite({ travelId: undefined }), makeUser()),
     ).rejects.toThrow('Invite missing travelId')
   })
 
   it('commits the batch exactly once regardless of membership branch', async () => {
     mockGetDoc.mockRejectedValue(new Error('permission-denied'))
-    await acceptTravelInvite(makeInvite(), makeUser())
+    await acceptSpaceInvite(makeInvite(), makeUser())
     expect(mockBatchCommit).toHaveBeenCalledTimes(1)
   })
 })

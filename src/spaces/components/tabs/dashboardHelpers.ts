@@ -8,7 +8,7 @@
 
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
 import type { Split } from '@/transactions/types'
-import type { Travel, TravelMember } from '@/travels/types'
+import type { Space, SpaceMember } from '@/spaces/types'
 
 // ---------------------------------------------------------------------------
 // PeriodFilter — discriminated union describing which time window is active
@@ -80,7 +80,7 @@ function diffDays(a: Date, b: Date): number {
  */
 export function normalizeTransactionSplits(
   transactions: TransactionWithStatus[],
-  members: TravelMember[],
+  members: SpaceMember[],
 ): TransactionWithStatus[] {
   // Build uid → travelMemberId lookup from the already-normalised members list.
   // member.userId is the Firebase Auth UID; member.travelMemberId is the stable nanoid.
@@ -182,7 +182,7 @@ export function filterTransactions(
  * Used to cap the "Recent days" slider max value.
  */
 export function getTripDurationDays(
-  _travel: Travel,
+  _space: Space,
   transactions: TransactionWithStatus[],
 ): number {
   if (transactions.length > 0) {
@@ -200,18 +200,18 @@ export function getTripDurationDays(
 // ---------------------------------------------------------------------------
 
 /**
- * Compute how much a member consumed and paid, in the travel's main currency.
+ * Compute how much a member consumed and paid, in the space's main currency.
  *
  * `travelMemberId` is the nanoid stored in Split.travelMemberId — NOT a
  * Firebase Auth UID. The caller is responsible for resolving the correct
- * travelMemberId from the TravelMember list before calling this function.
+ * travelMemberId from the SpaceMember list before calling this function.
  *
  * consumed = Σ (split.amount * tx.exchangeRate) for beneficiary splits
  *            where split.travelMemberId === travelMemberId
  * paid     = Σ (split.amount * tx.exchangeRate) for paidBy splits
  *            where split.travelMemberId === travelMemberId
  *
- * Amounts are in the travel's main currency (exchangeRate already converts them).
+ * Amounts are in the space's main currency (exchangeRate already converts them).
  */
 export function computeMemberStats(
   transactions: TransactionWithStatus[],

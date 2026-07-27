@@ -1,4 +1,4 @@
-// src/travels/components/SettlementCurrencyDrawer.tsx
+// src/spaces/components/SettlementCurrencyDrawer.tsx
 // Dialog for selecting a settlement currency and exchange rate.
 // The rate means: 1 mainCurrency = rate settlementCurrency.
 
@@ -24,7 +24,7 @@ interface SettlementCurrencyDrawerProps {
   currentCurrency: string
   currentRate: number
   onApply: (currency: string, rate: number) => void
-  /** Per-travel default exchange rates. Used to pre-fill rates for known currencies. */
+  /** Per-space default exchange rates. Used to pre-fill rates for known currencies. */
   defaultRates?: Record<string, number>
 }
 

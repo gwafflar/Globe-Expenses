@@ -4,7 +4,7 @@
 //   1. parseSheetFile(file)   — pure: reads xlsx, returns typed rows + slot metadata
 //   2. importParsedRows(...)  — writes: calls createTransaction for each valid row
 //
-// The member-mapping step (slot index → travel member UID) happens in the UI
+// The member-mapping step (slot index → space member UID) happens in the UI
 // between the two steps.  See ImportXlsxDialog.tsx.
 
 import * as XLSX from 'xlsx'
@@ -254,17 +254,17 @@ export interface ImportResult {
 /**
  * Writes parsed rows to Firestore as Transaction documents and syncs
  * any new list values (categories, countries, cities, paymentMethods,
- * currencies) to the travel document.
+ * currencies) to the space document.
  *
  * If a row carries a txId (from a previous GlobeExpenses export), the
  * existing document is updated in-place (merge: true) instead of creating
  * a duplicate.
  *
- * @param slotToTravelMemberId  Maps slotIndex → travel member's travelMemberId.
+ * @param slotToTravelMemberId  Maps slotIndex → space member's travelMemberId.
  *                              undefined value = skip that slot's transactions.
  */
 export async function importParsedRows(
-  travelId: string,
+  spaceId: string,
   rows: ParsedSheetRow[],
   slotToTravelMemberId: Record<number, string | undefined>,
   currentUserUid: string,
@@ -281,7 +281,7 @@ export async function importParsedRows(
   // This avoids 1400+ individual pending writes which flood the onSnapshot listener.
   const BATCH_SIZE = 500
   const payloads: Array<{ ref: ReturnType<typeof doc>; data: Record<string, unknown> }> = []
-  const txCollection = collection(db, 'travels', travelId, 'transactions')
+  const txCollection = collection(db, 'travels', spaceId, 'transactions')
 
   for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
     const row = rows[rowIndex]

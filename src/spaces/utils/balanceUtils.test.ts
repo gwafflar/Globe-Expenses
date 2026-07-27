@@ -1,14 +1,14 @@
 import { describe, it, expect } from 'vitest'
 import { computeBalances, computeBalancesRaw, computeSettlements, getSingleCurrency } from './balanceUtils'
 import type { Transaction } from '@/transactions/types'
-import type { TravelMember } from '@/travels/types'
+import type { SpaceMember } from '@/spaces/types'
 import { Timestamp } from 'firebase/firestore'
 
 // ---------------------------------------------------------------------------
 // Helpers — minimal factories to keep tests readable
 // ---------------------------------------------------------------------------
 
-function member(id: string, name: string): TravelMember {
+function member(id: string, name: string): SpaceMember {
   return {
     travelMemberId: id,
     displayName: name,
@@ -130,7 +130,7 @@ describe('computeBalances', () => {
     expect(settlements).toHaveLength(0)
   })
 
-  it('solo travel (one member) → net 0, no settlements', () => {
+  it('solo space (one member) → net 0, no settlements', () => {
     const members = [member('a', 'Alice')]
     const transactions = [
       tx({

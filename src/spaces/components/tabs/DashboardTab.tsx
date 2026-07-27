@@ -1,7 +1,7 @@
-// DashboardTab.tsx — read-only analytics view for a travel.
+// DashboardTab.tsx — read-only analytics view for a space.
 //
 // All statistics are computed client-side from the `transactions` array that
-// is already loaded in memory by TravelDetailPage. No Firestore queries here.
+// is already loaded in memory by SpaceDetailPage. No Firestore queries here.
 //
 // Layout (top to bottom):
 //   1. Controls bar — period filter pills + member picker button
@@ -13,9 +13,9 @@
 //   7. Currencies — grouped by currency with converted totals
 
 import { useState, useMemo } from 'react'
-import type { Travel, TravelMember } from '@/travels/types'
+import type { Space, SpaceMember } from '@/spaces/types'
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
-import { CollapsibleCard } from '@/travels/components/CollapsibleCard'
+import { CollapsibleCard } from '@/spaces/components/CollapsibleCard'
 import {
   Drawer,
   DrawerContent,
@@ -50,7 +50,7 @@ import { ReconciliationDialog } from '@/transactions/components/ReconciliationDi
 // ---------------------------------------------------------------------------
 
 interface DashboardTabProps {
-  travel: Travel
+  space: Space
   transactions: TransactionWithStatus[]
   currentUserUid: string
   isSolo: boolean
@@ -65,7 +65,7 @@ interface DashboardTabProps {
 
 /**
  * MemberAvatar — a small circle showing a member's initial, coloured by their
- * index in the travel.members array using CATEGORY_PALETTE.
+ * index in the space.members array using CATEGORY_PALETTE.
  */
 function MemberAvatar({
   name,
@@ -96,7 +96,7 @@ function MemberAvatar({
 // ---------------------------------------------------------------------------
 
 export function DashboardTab({
-  travel,
+  space,
   transactions,
   currentUserUid,
   isSolo,
@@ -189,15 +189,15 @@ export function DashboardTab({
 
   // The prop gives us a Firebase Auth UID. We need the corresponding
   // travelMemberId so we can filter Split[] which uses travelMemberId.
-  const currentMember = travel.members.find((m) => m.userId === currentUserUid)
+  const currentMember = space.members.find((m) => m.userId === currentUserUid)
   const currentTravelMemberId = currentMember?.travelMemberId ?? ''
 
   // focusTravelMemberId: the member whose stats are highlighted in the hero card.
   // Defaults to the current user when nothing is explicitly selected.
   const focusTravelMemberId = selectedTravelMemberId ?? currentTravelMemberId
 
-  // focusMember: full TravelMember record for the focus member
-  const focusMember = travel.members.find(
+  // focusMember: full SpaceMember record for the focus member
+  const focusMember = space.members.find(
     (m) => m.travelMemberId === focusTravelMemberId,
   )
 
@@ -207,14 +207,14 @@ export function DashboardTab({
 
   // normalizedTxs — transactions with split IDs remapped from the legacy 'uid'
   // field to 'travelMemberId'.  Transactions created before the Session 009
-  // TravelMember refactor stored splits as { uid, amount }; post-refactor splits
+  // SpaceMember refactor stored splits as { uid, amount }; post-refactor splits
   // use { travelMemberId, amount }.  Without this step, computeMemberStats would
   // see split.travelMemberId === undefined for every old split and return paid=0
   // even for members who did pay.  The normalisation is O(n) and only allocates
   // new objects when a split actually needs remapping.
   const normalizedTxs = useMemo(
-    () => normalizeTransactionSplits(transactions, travel.members),
-    [transactions, travel.members],
+    () => normalizeTransactionSplits(transactions, space.members),
+    [transactions, space.members],
   )
 
   // spendingTxs — only transactions that count toward spending analytics.
@@ -234,14 +234,14 @@ export function DashboardTab({
 
   // walletBalances — per (paymentMethod, currency) remaining balance for the
   // current user. Computed from ALL normalised transactions (not period-filtered)
-  // because wallet balance is cumulative across the entire travel.
+  // because wallet balance is cumulative across the entire space.
   const pmLabelMap = useMemo(() => {
     const m = new Map<string, string>()
-    for (const pm of travel.paymentMethods ?? []) {
+    for (const pm of space.paymentMethods ?? []) {
       m.set(pm.id, pm.emoji ? `${pm.emoji} ${pm.label}` : pm.label)
     }
     return m
-  }, [travel.paymentMethods])
+  }, [space.paymentMethods])
 
   const walletBalances = useMemo(
     () => computeWalletBalances(normalizedTxs, currentTravelMemberId, pmLabelMap),
@@ -358,8 +358,8 @@ export function DashboardTab({
   // tripDurationDays — total trip length in days. Used to cap the slider max
   // and as the "n" for the 'all' period average.
   const tripDurationDays = useMemo(
-    () => getTripDurationDays(travel, normalizedTxs),
-    [travel, normalizedTxs],
+    () => getTripDurationDays(space, normalizedTxs),
+    [space, normalizedTxs],
   )
 
   // nDaysInRange — how many calendar days the active filter spans.
@@ -426,7 +426,7 @@ export function DashboardTab({
   // perMemberStats — sorted array of { member, consumed, paid } for Card ⑥.
   // Current user always first, then descending by consumed.
   const perMemberStats = useMemo(() => {
-    const stats = travel.members.map((member, idx) => ({
+    const stats = space.members.map((member, idx) => ({
       member,
       memberIndex: idx,
       ...computeMemberStats(filteredTxs, member.travelMemberId),
@@ -440,7 +440,7 @@ export function DashboardTab({
       if (bIsCurrent && !aIsCurrent) return 1
       return b.consumed - a.consumed
     })
-  }, [filteredTxs, travel.members, currentUserUid])
+  }, [filteredTxs, space.members, currentUserUid])
 
   // labelForPeriod — active period button label, used in the hero subtitle.
   const rangeLabelStr = useMemo(
@@ -453,13 +453,13 @@ export function DashboardTab({
   // ---------------------------------------------------------------------------
 
   /** The currently selected member's display info for the picker button. */
-  const selectedMember: TravelMember | null =
+  const selectedMember: SpaceMember | null =
     selectedTravelMemberId
-      ? (travel.members.find((m) => m.travelMemberId === selectedTravelMemberId) ?? null)
+      ? (space.members.find((m) => m.travelMemberId === selectedTravelMemberId) ?? null)
       : null
 
   const selectedMemberIndex = selectedMember
-    ? travel.members.indexOf(selectedMember)
+    ? space.members.indexOf(selectedMember)
     : -1
 
   // ---------------------------------------------------------------------------
@@ -803,7 +803,7 @@ export function DashboardTab({
             />
           </div>
 
-          {/* Member picker button — hidden for solo travels */}
+          {/* Member picker button — hidden for solo spaces */}
           {!isSolo && (
             <button
               type="button"
@@ -1998,11 +1998,11 @@ export function DashboardTab({
         <ReconciliationDialog
           open={!!reconcileBalance}
           onOpenChange={(open) => { if (!open) setReconcileBalance(null) }}
-          travelId={travel.travelId}
+          spaceId={space.spaceId}
           balance={reconcileBalance}
           currentTravelMemberId={currentTravelMemberId}
           mainCurrency={mainCurrency}
-          defaultRates={travel.defaultRates}
+          defaultRates={space.defaultRates}
           onSuccess={() => setReconcileBalance(null)}
         />
       )}
@@ -2039,7 +2039,7 @@ export function DashboardTab({
               </button>
 
               {/* One row per member */}
-              {travel.members.map((member, idx) => {
+              {space.members.map((member, idx) => {
                 const isActive    = member.travelMemberId === selectedTravelMemberId
                 const isCurrentUser = member.userId === currentUserUid
 

@@ -174,12 +174,12 @@ export const EXCHANGE_RATES: Record<string, number> = {
 /**
  * Returns the exchange rate to convert 1 unit of `currency` into `mainCurrency`.
  *
- * If `travelRates` is provided, it is used as the primary source.
- * `travelRates` stores rates relative to the travel's mainCurrency:
- *   travelRates[currency] = how many mainCurrency units per 1 unit of that currency.
- *   Example: travelRates["USD"] = 0.92 → 1 USD = 0.92 mainCurrency.
+ * If `spaceRates` is provided, it is used as the primary source.
+ * `spaceRates` stores rates relative to the space's mainCurrency:
+ *   spaceRates[currency] = how many mainCurrency units per 1 unit of that currency.
+ *   Example: spaceRates["USD"] = 0.92 → 1 USD = 0.92 mainCurrency.
  *
- * Fallback: if the currency is not in travelRates, derive from the hardcoded
+ * Fallback: if the currency is not in spaceRates, derive from the hardcoded
  * EXCHANGE_RATES table via cross-rate through EUR.
  *
  *   Cross-rate derivation (hardcoded fallback):
@@ -191,14 +191,14 @@ export const EXCHANGE_RATES: Record<string, number> = {
 export function getExchangeRate(
   currency: string,
   mainCurrency: string,
-  travelRates?: Record<string, number>,
+  spaceRates?: Record<string, number>,
 ): number {
   // Trivial case: same currency, rate is exactly 1.
   if (currency === mainCurrency) return 1.0
 
-  // 1. Try travel-specific rates first (already stored relative to mainCurrency).
-  if (travelRates?.[currency] !== undefined) {
-    return travelRates[currency]
+  // 1. Try space-specific rates first (already stored relative to mainCurrency).
+  if (spaceRates?.[currency] !== undefined) {
+    return spaceRates[currency]
   }
 
   // 2. Fallback: derive from hardcoded EUR-based table.
@@ -219,22 +219,22 @@ export function getExchangeRate(
 
 /**
  * Returns false when getExchangeRate() would have to fall back to the 1.0
- * "unknown currency" default — i.e. neither travelRates nor the hardcoded
+ * "unknown currency" default — i.e. neither spaceRates nor the hardcoded
  * table has a real rate for this pair. Used to surface a warning in the UI
  * instead of only logging to the console (which nobody sees in production).
  */
 export function hasExchangeRate(
   currency: string,
   mainCurrency: string,
-  travelRates?: Record<string, number>,
+  spaceRates?: Record<string, number>,
 ): boolean {
   if (currency === mainCurrency) return true
-  if (travelRates?.[currency] !== undefined) return true
+  if (spaceRates?.[currency] !== undefined) return true
   return EXCHANGE_RATES[currency] !== undefined && EXCHANGE_RATES[mainCurrency] !== undefined
 }
 
 /**
- * One-time client-side repair: detects Travel.defaultRates entries that were
+ * One-time client-side repair: detects Space.defaultRates entries that were
  * seeded (or saved) while getExchangeRate()/buildDefaultRates() computed the
  * reciprocal of the correct rate (fixed 2026-07-24 — see comments above).
  *

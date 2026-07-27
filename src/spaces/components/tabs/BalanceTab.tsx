@@ -1,13 +1,13 @@
-// src/travels/components/tabs/BalanceTab.tsx
+// src/spaces/components/tabs/BalanceTab.tsx
 // Balance & settlement tab — shows per-member net balances and optimal settlements.
 //
 // Normalisation: legacy splits (pre-Session-009) must be normalised before reaching
-// this component. TravelTabs passes transactions from useTransactions which are
+// this component. SpaceTabs passes transactions from useTransactions which are
 // already normalised in the parent (same pattern as DashboardTab).
 
 import { useMemo, useState } from 'react'
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
-import type { TravelMember } from '@/travels/types'
+import type { SpaceMember } from '@/spaces/types'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import {
@@ -15,10 +15,10 @@ import {
   computeBalancesRaw,
   computeSettlements,
   getSingleCurrency,
-} from '@/travels/utils/balanceUtils'
-import { normalizeTransactionSplits } from '@/travels/components/tabs/dashboardHelpers'
+} from '@/spaces/utils/balanceUtils'
+import { normalizeTransactionSplits } from '@/spaces/components/tabs/dashboardHelpers'
 import { affectsBalance } from '@/transactions/utils/walletHelpers'
-import { SettlementCurrencyDrawer } from '@/travels/components/SettlementCurrencyDrawer'
+import { SettlementCurrencyDrawer } from '@/spaces/components/SettlementCurrencyDrawer'
 import type { TransferPrefill } from '@/transactions/components/TransactionForm'
 import { Check, Plus } from 'lucide-react'
 
@@ -59,7 +59,7 @@ interface MemberTotals {
  */
 function computeMemberTotals(
   transactions: TransactionWithStatus[],
-  members: TravelMember[],
+  members: SpaceMember[],
   useRaw = false,
 ): Map<string, MemberTotals> {
   const totals = new Map<string, MemberTotals>()
@@ -109,15 +109,15 @@ function netPrefix(net: number): string {
 
 interface BalanceTabProps {
   transactions: TransactionWithStatus[]
-  members: TravelMember[]
+  members: SpaceMember[]
   isSolo: boolean
   mainCurrency: string
-  travelName: string
+  spaceName: string
   settlementCurrency: string
   settlementRate: number
   onSettlementCurrencyChange: (currency: string) => void
   onSettlementRateChange: (rate: number) => void
-  /** Per-travel default exchange rates, passed to SettlementCurrencyDrawer. */
+  /** Per-space default exchange rates, passed to SettlementCurrencyDrawer. */
   defaultRates?: Record<string, number>
   /** Opens TransactionForm in transfer mode, optionally pre-filled with settlement data. */
   onCreateTransfer?: (prefill?: TransferPrefill) => void
@@ -132,7 +132,7 @@ export function BalanceTab({
   members,
   isSolo,
   mainCurrency,
-  travelName,
+  spaceName,
   settlementCurrency,
   settlementRate,
   onSettlementCurrencyChange,
@@ -202,7 +202,7 @@ export function BalanceTab({
           <p className="text-xs text-muted-foreground">✦ Did you know?</p>
           <p className="mt-1 text-sm font-semibold">Travelling solo?</p>
           <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-            Add friends to a travel and GlobeExpenses will automatically track
+            Add friends to a space and GlobeExpenses will automatically track
             who paid what, split expenses any way you like, and compute the
             exact settlements so nobody has to do the maths.
           </p>
@@ -233,7 +233,7 @@ export function BalanceTab({
       (s) => `${s.fromName} → ${s.toName}: ${fmt(toSettlement(s.amount, displayRate), settlementCurrency)}`,
     )
     const text = [
-      `${travelName} — settlement summary`,
+      `${spaceName} — settlement summary`,
       '──────────────────────────────────',
       ...lines,
       '──────────────────────────────────',

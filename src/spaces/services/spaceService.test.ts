@@ -1,4 +1,4 @@
-// travelService.test.ts — unit tests for mergeMembers().
+// spaceService.test.ts — unit tests for mergeMembers().
 //
 // mergeMembers is not a pure function (it calls Firestore), so 'firebase/firestore'
 // is mocked. We keep the real Timestamp class (via importActual) since it's just a
@@ -7,12 +7,12 @@
 //
 // What we're actually testing is the split-rewriting logic inside mergeMembers:
 // given a set of fake transactions, does it correctly rename/merge travelMemberId
-// references and update the travel document? This is the exact logic that
+// references and update the space document? This is the exact logic that
 // backs the "merge duplicate members" tool in ParametersTab.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { Timestamp } from 'firebase/firestore'
-import type { TravelMember } from './../types'
+import type { SpaceMember } from './../types'
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -42,14 +42,14 @@ vi.mock('firebase/firestore', async () => {
   }
 })
 
-// Imported AFTER the mocks so travelService.ts picks up the mocked module.
-const { mergeMembers } = await import('./travelService')
+// Imported AFTER the mocks so spaceService.ts picks up the mocked module.
+const { mergeMembers } = await import('./spaceService')
 
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
 
-function makeMember(travelMemberId: string, userId: string | null = null): TravelMember {
+function makeMember(travelMemberId: string, userId: string | null = null): SpaceMember {
   return {
     travelMemberId,
     displayName: travelMemberId,
@@ -154,7 +154,7 @@ describe('mergeMembers — split rewriting', () => {
 
     await mergeMembers('travel1', 'marcus', 'marc-old', [makeMember('marcus'), makeMember('marc-old'), makeMember('alice')], 'marcus')
 
-    // Only the final travel-doc update should have been batched — no transaction update.
+    // Only the final space-doc update should have been batched — no transaction update.
     expect(mockBatchUpdate).toHaveBeenCalledTimes(1)
     expect(mockBatchUpdate.mock.calls[0][0]).toEqual(expect.objectContaining({ path: 'travels/travel1' }))
   })
@@ -188,27 +188,27 @@ describe('mergeMembers — split rewriting', () => {
 
     await mergeMembers('travel1', 'marcus', 'marc-old', [makeMember('marcus'), makeMember('marc-old'), makeMember('alice')], 'marcus')
 
-    // 2 transaction updates (tx1, tx3) + 1 travel-doc update = 3
+    // 2 transaction updates (tx1, tx3) + 1 space-doc update = 3
     expect(mockBatchUpdate).toHaveBeenCalledTimes(3)
   })
 })
 
 // ---------------------------------------------------------------------------
-// Travel document update
+// Space document update
 // ---------------------------------------------------------------------------
 
-describe('mergeMembers — travel document update', () => {
-  it('removes the deleted member slot from travel.members', async () => {
+describe('mergeMembers — space document update', () => {
+  it('removes the deleted member slot from space.members', async () => {
     mockGetDocs.mockResolvedValue(fakeSnapshot([]))
     const members = [makeMember('marcus'), makeMember('marc-old')]
 
     await mergeMembers('travel1', 'marcus', 'marc-old', members, 'marcus')
 
-    const travelUpdateCall = mockBatchUpdate.mock.calls.find(
+    const spaceUpdateCall = mockBatchUpdate.mock.calls.find(
       (call) => call[0].path === 'travels/travel1',
     )
-    expect(travelUpdateCall).toBeDefined()
-    const payload = travelUpdateCall![1] as { members: TravelMember[] }
+    expect(spaceUpdateCall).toBeDefined()
+    const payload = spaceUpdateCall![1] as { members: SpaceMember[] }
     expect(payload.members.map((m) => m.travelMemberId)).toEqual(['marcus'])
   })
 

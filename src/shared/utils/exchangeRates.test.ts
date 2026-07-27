@@ -19,16 +19,16 @@ describe('getExchangeRate', () => {
     expect(getExchangeRate('THB', 'THB')).toBe(1.0)
   })
 
-  // Travel-specific rates take priority over hardcoded table
-  it('returns the travel-specific rate when present in travelRates', () => {
-    const travelRates = { USD: 0.88 } // overrides the hardcoded USD rate
-    expect(getExchangeRate('USD', 'EUR', travelRates)).toBe(0.88)
+  // Space-specific rates take priority over hardcoded table
+  it('returns the space-specific rate when present in spaceRates', () => {
+    const spaceRates = { USD: 0.88 } // overrides the hardcoded USD rate
+    expect(getExchangeRate('USD', 'EUR', spaceRates)).toBe(0.88)
   })
 
-  it('still uses travelRates even when the hardcoded table has a different value', () => {
-    // Hardcoded EUR→EUR rate would be 1.0; travelRates deliberately says 0.5
-    const travelRates = { XXX: 0.5 }
-    expect(getExchangeRate('XXX', 'EUR', travelRates)).toBe(0.5)
+  it('still uses spaceRates even when the hardcoded table has a different value', () => {
+    // Hardcoded EUR→EUR rate would be 1.0; spaceRates deliberately says 0.5
+    const spaceRates = { XXX: 0.5 }
+    expect(getExchangeRate('XXX', 'EUR', spaceRates)).toBe(0.5)
   })
 
   // Hardcoded fallback via EUR cross-rate.
@@ -50,22 +50,22 @@ describe('getExchangeRate', () => {
     expect(getExchangeRate('EUR', 'ZZZ')).toBe(1.0)
   })
 
-  // travelRates absent vs empty
-  it('falls through to hardcoded table when travelRates is undefined', () => {
+  // spaceRates absent vs empty
+  it('falls through to hardcoded table when spaceRates is undefined', () => {
     const hardcoded = EXCHANGE_RATES['EUR'] / EXCHANGE_RATES['USD']
     expect(getExchangeRate('USD', 'EUR', undefined)).toBeCloseTo(hardcoded, 6)
   })
 
-  it('falls through to hardcoded table when the currency is missing from travelRates', () => {
-    const travelRates = { GBP: 1.1 } // only GBP present
+  it('falls through to hardcoded table when the currency is missing from spaceRates', () => {
+    const spaceRates = { GBP: 1.1 } // only GBP present
     const hardcoded = EXCHANGE_RATES['EUR'] / EXCHANGE_RATES['USD']
-    expect(getExchangeRate('USD', 'EUR', travelRates)).toBeCloseTo(hardcoded, 6)
+    expect(getExchangeRate('USD', 'EUR', spaceRates)).toBeCloseTo(hardcoded, 6)
   })
 
-  // travelRates same-currency shortcut fires before rate lookup
-  it('returns 1.0 for same currency regardless of travelRates content', () => {
-    const travelRates = { EUR: 99 } // nonsense entry — should be ignored
-    expect(getExchangeRate('EUR', 'EUR', travelRates)).toBe(1.0)
+  // spaceRates same-currency shortcut fires before rate lookup
+  it('returns 1.0 for same currency regardless of spaceRates content', () => {
+    const spaceRates = { EUR: 99 } // nonsense entry — should be ignored
+    expect(getExchangeRate('EUR', 'EUR', spaceRates)).toBe(1.0)
   })
 
   // Regression test: AED has been pegged to USD at exactly 3.6725 since 1997.
@@ -186,7 +186,7 @@ describe('findStaleDefaultRates', () => {
     expect(result).not.toHaveProperty('ZZZ')
   })
 
-  it('flags multiple stale entries in one travel and leaves valid ones alone', () => {
+  it('flags multiple stale entries in one space and leaves valid ones alone', () => {
     const correctVND = getExchangeRate('VND', 'EUR')
     const correctUSD = getExchangeRate('USD', 'EUR')
     const result = findStaleDefaultRates(

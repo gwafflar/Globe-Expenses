@@ -1,17 +1,17 @@
-// src/travels/components/tabs/TransactionsTab.tsx
+// src/spaces/components/tabs/TransactionsTab.tsx
 //
-// Transactions tab for TravelDetailPage.
+// Transactions tab for SpaceDetailPage.
 // Day-grouped accordion list: each row expands in-place to show full detail.
 // Edit opens the existing TransactionForm drawer via onEditTransaction(txId).
 
 import { useRef, useState, useEffect, useMemo } from 'react'
-import type { Travel, LabeledItem } from '@/travels/types'
+import type { Space, LabeledItem } from '@/spaces/types'
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
-import { exportTravelToXlsx } from '@/shared/utils/sheetExport'
+import { exportSpaceToXlsx } from '@/shared/utils/sheetExport'
 import { ImportXlsxDialog } from '@/shared/components/ImportXlsxDialog'
-import { normalizeTransactionSplits, parseTxDate } from '@/travels/components/tabs/dashboardHelpers'
+import { normalizeTransactionSplits, parseTxDate } from '@/spaces/components/tabs/dashboardHelpers'
 import { useTransactionFilters } from '@/transactions/hooks/useTransactionFilters'
 import { FilterPanel } from '@/transactions/components/FilterPanel'
 import { getTransactionType, countsAsSpending, isTransfer } from '@/transactions/utils/walletHelpers'
@@ -99,7 +99,7 @@ function extractCountryEmoji(country: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Category emoji — resolved from the travel's per-travel category list
+// Category emoji — resolved from the space's per-space category list
 // ---------------------------------------------------------------------------
 
 function getCategoryEmoji(category: string | undefined, categories: LabeledItem[]): string {
@@ -112,7 +112,7 @@ function getCategoryEmoji(category: string | undefined, categories: LabeledItem[
 }
 
 // ---------------------------------------------------------------------------
-// Member avatar color scheme (deterministic by position in travel.members)
+// Member avatar color scheme (deterministic by position in space.members)
 // ---------------------------------------------------------------------------
 
 const AVATAR_BG_COLORS = ['#CECBF6', '#9FE1CB', '#F5C4B3', '#FAC775', '#B5D4F4', '#F4C0D1']
@@ -262,7 +262,7 @@ function TransactionRow({
   onToggle,
 }: {
   transaction: TransactionWithStatus
-  members: Travel['members']
+  members: Space['members']
   categories: LabeledItem[]
   currentUserTravelMemberId: string
   isSolo: boolean
@@ -385,7 +385,7 @@ function TransactionDetail({
   onDelete,
 }: {
   transaction: TransactionWithStatus
-  members: Travel['members']
+  members: Space['members']
   currentUserUid: string
   isSolo: boolean
   mainCurrency: string
@@ -478,7 +478,7 @@ function TransactionDetail({
         </div>
       )}
 
-      {/* Paid by / Split — hidden in solo travel (only one member, no split info needed).
+      {/* Paid by / Split — hidden in solo space (only one member, no split info needed).
           Transfers use "From" / "To" labels instead of "Paid by" / "Split". */}
       {!isSolo && (
         <>
@@ -525,7 +525,7 @@ function SplitSection({
 }: {
   label: string
   splits: { travelMemberId: string; amount: number }[]
-  members: Travel['members']
+  members: Space['members']
   currentUserUid: string
   currency: string
 }) {
@@ -575,7 +575,7 @@ function DayGroupSection({
   onDeleteTransaction,
 }: {
   group: DayGroup
-  members: Travel['members']
+  members: Space['members']
   categories: LabeledItem[]
   currentUserTravelMemberId: string
   currentUserUid: string
@@ -682,7 +682,7 @@ function FilterToggleButton({
 // ---------------------------------------------------------------------------
 
 interface TransactionsTabProps {
-  travel: Travel
+  space: Space
   transactions: TransactionWithStatus[]
   loading: boolean
   error: string | null
@@ -695,7 +695,7 @@ interface TransactionsTabProps {
 }
 
 export function TransactionsTab({
-  travel,
+  space,
   transactions,
   loading,
   error,
@@ -708,8 +708,8 @@ export function TransactionsTab({
 }: TransactionsTabProps) {
   // Derive the current user's travelMemberId — used for "your share" and "(you)" labels
   const currentUserTravelMemberId = useMemo(
-    () => travel.members.find((m) => m.userId === currentUserUid)?.travelMemberId ?? '',
-    [travel.members, currentUserUid],
+    () => space.members.find((m) => m.userId === currentUserUid)?.travelMemberId ?? '',
+    [space.members, currentUserUid],
   )
 
   // Accordion state — only one card open at a time; null = all collapsed
@@ -722,8 +722,8 @@ export function TransactionsTab({
   // Normalize legacy splits (pre-Session 009 docs stored split.uid instead of split.travelMemberId).
   // Same approach as DashboardTab — returns same reference when nothing needs remapping.
   const normalizedTransactions = useMemo(
-    () => normalizeTransactionSplits(transactions, travel.members),
-    [transactions, travel.members],
+    () => normalizeTransactionSplits(transactions, space.members),
+    [transactions, space.members],
   )
 
   // -- Filter & search (all client-side, no extra Firestore reads) --
@@ -739,7 +739,7 @@ export function TransactionsTab({
     options,
     availableOptions,
     resultCount,
-  } = useTransactionFilters(normalizedTransactions, travel, isSolo)
+  } = useTransactionFilters(normalizedTransactions, space, isSolo)
 
   // Controls whether the filter panel is visible
   const [filterOpen, setFilterOpen] = useState(false)
@@ -771,7 +771,7 @@ export function TransactionsTab({
   async function handleExport() {
     setIsExporting(true)
     try {
-      await exportTravelToXlsx(travel, transactions)
+      await exportSpaceToXlsx(space, transactions)
     } catch (err) {
       console.error('[TransactionsTab] export failed:', err)
     } finally {
@@ -785,7 +785,7 @@ export function TransactionsTab({
       <ImportXlsxDialog
         open={importOpen}
         onOpenChange={setImportOpen}
-        travel={travel}
+        space={space}
         currentUserUid={currentUserUid}
       />
 
@@ -835,7 +835,7 @@ export function TransactionsTab({
           hasActiveFilters={hasActiveFilters}
           resultCount={resultCount}
           totalCount={normalizedTransactions.length}
-          travel={travel}
+          space={space}
           isSolo={isSolo}
         />
       )}
@@ -867,8 +867,8 @@ export function TransactionsTab({
             <DayGroupSection
               key={group.date}
               group={group}
-              members={travel.members}
-              categories={travel.categories ?? []}
+              members={space.members}
+              categories={space.categories ?? []}
               currentUserTravelMemberId={currentUserTravelMemberId}
               currentUserUid={currentUserUid}
               isSolo={isSolo}

@@ -2221,3 +2221,66 @@ Discussed and deferred to a future session:
 - Tier 1 item 4 (locale-derived default currency for new users) — explicitly declined by user, `UserProfile.mainCurrency` stays hardcoded to `'EUR'` at first sign-in.
 - Tier 2 items not yet implemented (see above) — this session was analysis + critical-fix only.
 - Changes not yet committed as of this log entry.
+
+## ♻️ Working Session 022 — 27 July 2026
+
+**Type**: Refactor — Space refactor Phase 1 (Travel → Space rename)
+**Tools used**: Claude Code (claude-code CLI)
+
+### Context
+
+`docs/SPACE_REFACTOR_SPEC.md` was added, generalising the app's container concept from "Travel" (trip-specific: countries, cities, cash wallets, multi-currency always on) to "Space" (also usable for flatshares, couple budgets, personal tracking) via a future config/preset system. This session executed **Phase 1 only**: a pure rename across the codebase, docs, and routes — no behaviour change, no data-model change, no config/preset system yet (that's Phase 2+, see decision log entries #83–92 in `GlobeExpenses_Specification.md`).
+
+### The one rule this session was built around
+
+Firestore collection paths and stored field keys are frozen as legacy even though every TypeScript type, function, folder, and UI string now says "Space". A blind find-and-replace across the repo would have silently corrupted production data (e.g. `doc(db, 'travels', id)` → `doc(db, 'spaces', id)` compiles fine but points at a nonexistent collection). Every file was therefore hand-reviewed (or scripted with protected placeholders around frozen substrings, then diff-reviewed) rather than mechanically substituted in bulk.
+
+**Frozen (unchanged) — confirmed and left exactly as-is:**
+- Firestore collection paths `travels/{travelId}` and `travels/{travelId}/transactions/{txId}`
+- Firestore field keys: `travelMemberId` (on `SpaceMember` and `Split`), `memberUids`, `archivedByUids`
+- Stored string values: the invite `type` discriminator `'travel_member'`, and `Invite.travelId` / `Invite.travelName` (fields on the `invites/{id}` documents)
+- Existing `localStorage` keys (untouched, out of scope)
+
+**Special case resolved**: `Travel.travelId` was checked against `createTravel()`/`useTravels` and confirmed **derived-only** — never written into the document body (always `snapshot.id`). Per the spec's decision rule, this made it safe to rename the TypeScript property freely: `Space.spaceId`.
+
+**Renamed everywhere else**: types (`Travel`→`Space`, `TravelMember`→`SpaceMember`, `TravelSettings`→`SpaceSettings`), functions (`createTravel`→`createSpace`, `updateTravelMeta`→`updateSpaceMeta`, `leaveTravel`→`leaveSpace`, `deleteTravel`→`deleteSpace`, `archiveTravel`/`unarchiveTravel`→`archiveSpace`/`unarchiveSpace`, `claimTravelMember`→`claimSpaceMember`, `renameTravelMember`→`renameSpaceMember`, `unclaimTravelMember`→`unclaimSpaceMember`, `getTravelMainCurrency`→`getSpaceMainCurrency`, `updateTravelList`/`updateTravelCurrencies`/`updateTravelDefaultRate`→`updateSpace*`, `sendTravelInvite`→`sendSpaceInvite`, `acceptTravelInvite`→`acceptSpaceInvite`, `exportTravelToXlsx`→`exportSpaceToXlsx`, `TravelInviteResult`→`SpaceInviteResult` with its `travelId` field renamed to `spaceId` since it's a plain client-side return type, not a stored key), props/variables (`travel`→`space`, `travelId`→`spaceId`, `travelSettings`/`travelCategories`/`travelPaymentMethods`/`travelCurrencies`/`travelCountries`/`travelCities`→`space*`, `onTravelChange`→`onSpaceChange`), routes (`/travels`→`/spaces`, `/travels/:travelId`→`/spaces/:spaceId`), and all user-facing English UI strings.
+
+**Exception preserved per spec §2.4**: identifiers built on the frozen `travelMemberId` key kept their names unchanged — `currentUserTravelMemberId`, `myTravelMemberId`, `selectedTravelMemberId`, `slotToTravelMemberId`, and by the same logic `currentTravelMemberId` / `focusTravelMemberId` (local variables in `DashboardTab.tsx` / `ReconciliationDialog.tsx`).
+
+### Files moved (`git mv`)
+
+`src/travels/` → `src/spaces/`, with `travelService.ts`→`spaceService.ts`, `useTravels.ts`→`useSpaces.ts`, `TravelDetailPage.tsx`→`SpaceDetailPage.tsx`, `TravelsPage.tsx`→`SpacesPage.tsx`, `TravelTabs.tsx`→`SpaceTabs.tsx`, `CreateTravelModal.tsx`→`CreateSpaceModal.tsx`. Tab components, `CollapsibleCard.tsx`, `dashboardHelpers.ts`, and all test files kept their filenames per the prompt's file table.
+
+### Bugs caught during self-review (not shipped)
+
+Working file-by-file with diff review after each script pass caught three real mistakes before they landed:
+1. A scripted word-boundary rename briefly turned `doc(db, 'travels', id)` into `doc(db, 'spaces', id)` in `SpaceDetailPage.tsx` (the bare, unquoted collection literal isn't protected by `\btravels\b` regex boundaries the way `travelMemberId` is) — caught by diffing the file before moving on, fixed immediately.
+2. `space.travelId` (a leftover from before the `Space.spaceId` rename propagated) in two places in `ImportXlsxDialog.tsx` and one in `DashboardTab.tsx`'s `ReconciliationDialog` call — caught by TypeScript-shaped review of each diff, fixed to `space.spaceId`.
+3. An import path collapsed to `@/spaces/services/travelService` (the old filename) in `ParametersTab.tsx` because the generic word regex ran before the explicit full-path string replace — fixed, and the ordering (exact import-path replacements before generic word regex) was corrected for every subsequent file.
+
+### Residual `ravel` grep (post-refactor, expected to remain)
+
+`grep -rn "ravel" src/ --include=*.ts --include=*.tsx` returns ~495 hits, all confirmed legitimate:
+- ~337 — the frozen `travelMemberId` field/property name (types, comments, Split literals, test fixtures)
+- ~84 — the frozen-by-convention compound identifiers (`currentUserTravelMemberId`, `myTravelMemberId`, `selectedTravelMemberId`, `slotToTravelMemberId`, `currentTravelMemberId`, `focusTravelMemberId`)
+- ~29 — the bare Firestore collection literal `'travels'` inside `doc()`/`collection()` calls
+- ~30 — the frozen invite `'travel_member'` discriminator and `Invite.travelId`/`Invite.travelName` fields
+- 1 explanatory comment in `App.tsx`'s legacy-redirect routes (`/travels` — the old path being redirected *from*, correctly still spelled `travels`)
+
+No stray `Travel`/`travel` identifiers, UI strings, or import paths remain outside these categories.
+
+### Docs updated
+
+- `GlobeExpenses_Architecture.md` — §3.1 module list, §4.1 collection table (added an explicit frozen-legacy note), §4.2 data model (`Travel`→`Space`, `TravelMember`→`SpaceMember`), §5.4/5.7 flow names, §6 security rules commentary, §7 roadmap.
+- `GlobeExpenses_Specification.md` — §3.2/§3.4/§3.5.5 section titles, function-name references, decision log entries #79–92 appended (renamed-container decisions + the Phase 2+ config/preset decisions from the spec, marked accordingly).
+- `CLAUDE.md` — "Per-travel lists" → "Per-space lists"; added two new Key Conventions bullets about the frozen Firestore keys and the (future) `getSpaceConfig()` / `presetOrigin` rule.
+
+### Verification
+
+- Full residual grep reviewed line-by-line (see above) — clean.
+- `pnpm tsc --noEmit`, `pnpm test`, `pnpm build`, and the manual smoke-test checklist from the prompt were run after this log entry — see next entry or commit message for results if not captured here.
+
+### Not done / still open
+
+- Phase 2 (config foundation: `SpaceConfig`, `getSpaceConfig()`, presets, per-field tiers) — next phase, not started.
+- Changes not yet committed as of this log entry (pending user review).

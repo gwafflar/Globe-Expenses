@@ -1,6 +1,6 @@
-// src/travels/components/TravelTabs.tsx
+// src/spaces/components/SpaceTabs.tsx
 //
-// Tab bar + swipe container for TravelDetailPage.
+// Tab bar + swipe container for SpaceDetailPage.
 // Supports both tap-to-switch and horizontal swipe gesture.
 //
 // Swipe implementation:
@@ -10,13 +10,13 @@
 //   - No animation library needed — CSS transform + transition handles the slide.
 
 import { useEffect, useRef, useState } from 'react'
-import type { Travel } from '@/travels/types'
+import type { Space } from '@/spaces/types'
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
 import type { TransferPrefill } from '@/transactions/components/TransactionForm'
-import { TransactionsTab } from '@/travels/components/tabs/TransactionsTab'
-import { BalanceTab } from '@/travels/components/tabs/BalanceTab'
-import { DashboardTab } from '@/travels/components/tabs/DashboardTab'
-import { ParametersTab } from '@/travels/components/tabs/ParametersTab'
+import { TransactionsTab } from '@/spaces/components/tabs/TransactionsTab'
+import { BalanceTab } from '@/spaces/components/tabs/BalanceTab'
+import { DashboardTab } from '@/spaces/components/tabs/DashboardTab'
+import { ParametersTab } from '@/spaces/components/tabs/ParametersTab'
 
 // ---------------------------------------------------------------------------
 // Tab definitions
@@ -37,8 +37,8 @@ const SWIPE_THRESHOLD = 50 // px
 // Props
 // ---------------------------------------------------------------------------
 
-interface TravelTabsProps {
-  travel: Travel
+interface SpaceTabsProps {
+  space: Space
   transactions: TransactionWithStatus[]
   loadingTransactions: boolean
   transactionsError: string | null
@@ -53,10 +53,10 @@ interface TravelTabsProps {
   onAddWithdrawal?: () => void
   onEditTransaction: (txId: string) => void
   onDeleteTransaction: (txId: string) => void
-  onTravelChange: (updated: Partial<Travel>) => void
+  onSpaceChange: (updated: Partial<Space>) => void
   /** Opens TransactionForm in transfer mode, optionally pre-filled with settlement data. */
   onCreateTransfer?: (prefill?: TransferPrefill) => void
-  /** When set, TravelTabs switches to this tab. Caller should reset to undefined after. */
+  /** When set, SpaceTabs switches to this tab. Caller should reset to undefined after. */
   requestTab?: typeof TABS[number]['id']
   onRequestTabHandled?: () => void
 }
@@ -65,8 +65,8 @@ interface TravelTabsProps {
 // Component
 // ---------------------------------------------------------------------------
 
-export function TravelTabs({
-  travel,
+export function SpaceTabs({
+  space,
   transactions,
   loadingTransactions,
   transactionsError,
@@ -81,11 +81,11 @@ export function TravelTabs({
   onAddWithdrawal,
   onEditTransaction,
   onDeleteTransaction,
-  onTravelChange,
+  onSpaceChange,
   onCreateTransfer,
   requestTab,
   onRequestTabHandled,
-}: TravelTabsProps) {
+}: SpaceTabsProps) {
   const [activeTab, setActiveTab] = useState<TabId>('transactions')
 
   // External tab navigation request — switch to the requested tab and notify caller
@@ -172,7 +172,7 @@ export function TravelTabs({
             >
               {tab.id === 'transactions' && (
                 <TransactionsTab
-                  travel={travel}
+                  space={space}
                   transactions={transactions}
                   loading={loadingTransactions}
                   error={transactionsError}
@@ -187,21 +187,21 @@ export function TravelTabs({
               {tab.id === 'balance' && (
                 <BalanceTab
                   transactions={transactions}
-                  members={travel.members}
+                  members={space.members}
                   isSolo={isSolo}
                   mainCurrency={mainCurrency}
-                  travelName={travel.name}
+                  spaceName={space.name}
                   settlementCurrency={settlementCurrency}
                   settlementRate={settlementRate}
                   onSettlementCurrencyChange={onSettlementCurrencyChange}
                   onSettlementRateChange={onSettlementRateChange}
-                  defaultRates={travel.defaultRates}
+                  defaultRates={space.defaultRates}
                   onCreateTransfer={onCreateTransfer}
                 />
               )}
               {tab.id === 'dashboard' && (
                 <DashboardTab
-                  travel={travel}
+                  space={space}
                   transactions={transactions}
                   currentUserUid={currentUserUid}
                   isSolo={isSolo}
@@ -212,9 +212,9 @@ export function TravelTabs({
               )}
               {tab.id === 'parameters' && (
                 <ParametersTab
-                  travel={travel}
+                  space={space}
                   transactions={transactions}
-                  onTravelChange={onTravelChange}
+                  onSpaceChange={onSpaceChange}
                 />
               )}
             </div>

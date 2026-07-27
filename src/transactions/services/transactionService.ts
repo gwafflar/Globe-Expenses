@@ -24,10 +24,10 @@ import type { Transaction, Split, TransactionType, AdjustmentMode } from '@/tran
  * immediately without awaiting anything.
  */
 export function createTransaction(
-  travelId: string,
+  spaceId: string,
   data: Omit<Transaction, 'txId' | 'createdAt' | 'lastModifiedAt'>,
 ): string {
-  const txCollection = collection(db, 'travels', travelId, 'transactions')
+  const txCollection = collection(db, 'travels', spaceId, 'transactions')
 
   // doc() with no ID argument generates a unique random ID client-side.
   const newDocRef = doc(txCollection)
@@ -84,11 +84,11 @@ export type UpdateTransactionData = {
  * so that clearing a category/city in the form actually removes the old value.
  */
 export function updateTransaction(
-  travelId: string,
+  spaceId: string,
   txId: string,
   data: UpdateTransactionData,
 ): void {
-  const txRef = doc(db, 'travels', travelId, 'transactions', txId)
+  const txRef = doc(db, 'travels', spaceId, 'transactions', txId)
 
   // updateDoc only modifies the specified fields — createdAt/createdBy are untouched.
   updateDoc(txRef, {
@@ -127,8 +127,8 @@ export function updateTransaction(
  * The onSnapshot listener will remove the document from the UI immediately
  * (local cache delete), then sync the deletion when back online.
  */
-export function deleteTransaction(travelId: string, txId: string): void {
-  const txRef = doc(db, 'travels', travelId, 'transactions', txId)
+export function deleteTransaction(spaceId: string, txId: string): void {
+  const txRef = doc(db, 'travels', spaceId, 'transactions', txId)
 
   deleteDoc(txRef).catch((err: unknown) => {
     console.error('[transactionService] deleteDoc failed:', err)

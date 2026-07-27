@@ -1,7 +1,7 @@
 // sheetColumns.ts — shared column layout for GlobeExpenses Standard Sheet.
 //
 // The Expenses tab has a DYNAMIC column layout that scales with the number of
-// travel members (N). Fixed cols A–L are always present; then N cost-local cols,
+// space members (N). Fixed cols A–L are always present; then N cost-local cols,
 // N paid-local cols, 2 detail cols, N cost-main cols, and 3 check cols.
 //
 // This module is imported by BOTH sheetExport.ts and sheetImport.ts so the
@@ -22,7 +22,7 @@ export interface ColumnMap {
   splitLabel: number    // col K  — derived split label
   paidByLabel: number   // col L  — derived paid-by label
 
-  // Dynamic columns — arrays of length N (one entry per travel member)
+  // Dynamic columns — arrays of length N (one entry per space member)
   costLocal: number[]           // cols 13…12+N   — beneficiaries[i].amount
   paidLocal: number[]           // cols 13+N…12+2N — paidBy[i].amount
 
@@ -45,7 +45,7 @@ export interface ColumnMap {
 }
 
 /**
- * Computes the full column layout for a given number of travel members.
+ * Computes the full column layout for a given number of space members.
  * All column numbers are 1-based (col A = 1, col B = 2, …).
  *
  * Example with N=2:

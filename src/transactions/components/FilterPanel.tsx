@@ -11,7 +11,7 @@
 
 import { useState } from 'react'
 import { Input } from '@/components/ui/input'
-import type { Travel } from '@/travels/types'
+import type { Space } from '@/spaces/types'
 import {
   UNDEFINED_FILTER,
   type FilterDimension,
@@ -27,7 +27,7 @@ interface DimensionMeta {
   key: FilterDimension
   label: string
   emoji: string
-  /** Only show this dimension in multi-user travels */
+  /** Only show this dimension in multi-user spaces */
   multiUserOnly?: boolean
 }
 
@@ -59,7 +59,7 @@ interface FilterPanelProps {
   hasActiveFilters: boolean
   resultCount: number
   totalCount: number
-  travel: Travel
+  space: Space
   isSolo: boolean
 }
 
@@ -79,13 +79,13 @@ export function FilterPanel({
   hasActiveFilters,
   resultCount,
   totalCount,
-  travel,
+  space,
   isSolo,
 }: FilterPanelProps) {
   // Which dimension is currently expanded (showing its checkboxes). null = none.
   const [expandedDim, setExpandedDim] = useState<FilterDimension | null>(null)
 
-  // Filter out dimensions that don't apply (solo travel → hide paidBy/beneficiaries)
+  // Filter out dimensions that don't apply (solo space → hide paidBy/beneficiaries)
   // and dimensions that have no options (e.g. no countries recorded)
   const visibleDimensions = DIMENSIONS.filter((d) => {
     if (d.multiUserOnly && isSolo) return false
@@ -107,7 +107,7 @@ export function FilterPanel({
     if (value === UNDEFINED_FILTER) return 'Undefined'
     if (dimension === 'type') return TYPE_LABELS[value] ?? value
     if (dimension === 'paidBy' || dimension === 'beneficiaries') {
-      return travel.members.find((m) => m.travelMemberId === value)?.displayName ?? value
+      return space.members.find((m) => m.travelMemberId === value)?.displayName ?? value
     }
     return value
   }

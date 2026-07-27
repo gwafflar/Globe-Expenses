@@ -1,8 +1,10 @@
 import type { Timestamp } from 'firebase/firestore'
 
 export interface Split {
-  // Stable travelMemberId (nanoid) — never a Firebase Auth UID.
-  // Use travel.members.find(m => m.travelMemberId === s.travelMemberId) to resolve display info.
+  /** Stable nanoid identifying a SpaceMember.
+   *  ⚠️ Name kept as `travelMemberId`: it is a Firestore field key, frozen as legacy.
+   *  See docs/SPACE_REFACTOR_SPEC.md §2.1. Never a Firebase Auth UID.
+   *  Use space.members.find(m => m.travelMemberId === s.travelMemberId) to resolve display info. */
   travelMemberId: string
   amount: number // in transaction currency
 }

@@ -1,7 +1,7 @@
 // CollapsibleCard.tsx — a reusable card that can be toggled open/closed.
 //
 // Used by DashboardTab and (planned) BalanceTab. Keeping it in
-// src/travels/components/ (not inside tabs/) so both sibling tabs can import it.
+// src/spaces/components/ (not inside tabs/) so both sibling tabs can import it.
 //
 // Anatomy when OPEN:
 //   ┌──────────────────────────────────────────┐

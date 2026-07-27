@@ -1,12 +1,12 @@
 // balanceUtils.ts — pure computation for balance & settlement.
 //
-// Identity key: travelMemberId (stable nanoid from TravelMember).
+// Identity key: travelMemberId (stable nanoid from SpaceMember).
 // Split.travelMemberId is fully migrated (Session 009). No uid fallback needed.
 // Legacy splits should be normalised via normalizeTransactionSplits() before
 // calling these functions.
 
 import type { Transaction } from '@/transactions/types'
-import type { TravelMember } from '@/travels/types'
+import type { SpaceMember } from '@/spaces/types'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -45,16 +45,16 @@ function isZero(x: number): boolean {
 // ---------------------------------------------------------------------------
 
 /**
- * Compute net balance for each travel member across all transactions.
+ * Compute net balance for each space member across all transactions.
  *
  * net(member) = sum(paidBy amounts * exchangeRate) − sum(beneficiary amounts * exchangeRate)
  *
- * All amounts are converted to the travel's main currency using the exchangeRate
+ * All amounts are converted to the space's main currency using the exchangeRate
  * already stored on each transaction.
  */
 export function computeBalances(
   transactions: Transaction[],
-  members: TravelMember[],
+  members: SpaceMember[],
 ): MemberBalance[] {
   // Accumulate net per travelMemberId
   const netMap = new Map<string, number>()
@@ -110,7 +110,7 @@ export function computeBalances(
 
 export function computeBalancesRaw(
   transactions: Transaction[],
-  members: TravelMember[],
+  members: SpaceMember[],
 ): MemberBalance[] {
   const netMap = new Map<string, number>()
   for (const m of members) {

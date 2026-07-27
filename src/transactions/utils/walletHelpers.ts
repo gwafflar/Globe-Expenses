@@ -3,7 +3,7 @@
 // No React imports — keeping this file pure makes it easy to unit-test with
 // Vitest without needing a browser/DOM environment.
 //
-// A "wallet" is a (paymentMethod, currency) pair for a specific travel member.
+// A "wallet" is a (paymentMethod, currency) pair for a specific space member.
 // The balance is: deposits (withdrawals) minus expenses, plus/minus adjustments.
 // Only payment methods with at least one withdrawal are tracked.
 
@@ -74,7 +74,7 @@ export function affectsBalance(tx: { type?: TransactionType; adjustmentMode?: Ad
 /** Computed wallet balance for a (paymentMethod, currency) pair. */
 export interface WalletBalance {
   paymentMethod: string      // LabeledItem.id (or raw string for legacy)
-  paymentMethodLabel: string // Display label (resolved from travel's LabeledItem[] by the caller)
+  paymentMethodLabel: string // Display label (resolved from space's LabeledItem[] by the caller)
   currency: string           // ISO 4217 code
   deposited: number          // Sum of withdrawals (totalAmount - fees)
   spent: number              // Sum of expenses paid by this member with this PM + currency
@@ -95,14 +95,14 @@ function memberPaidAmount(
 }
 
 /**
- * Compute wallet balances for a specific travel member across all transactions.
+ * Compute wallet balances for a specific space member across all transactions.
  *
  * Only returns entries for (paymentMethod, currency) pairs that have at least
  * one withdrawal — a payment method with no deposits has no "wallet" to track.
  *
- * @param transactions   All transactions in the travel (from useTransactions)
- * @param travelMemberId The member's stable nanoid (from TravelMember)
- * @param pmLabelMap     Map from paymentMethod id → display label (built by caller from travel.paymentMethods)
+ * @param transactions   All transactions in the space (from useTransactions)
+ * @param travelMemberId The member's stable nanoid (from SpaceMember)
+ * @param pmLabelMap     Map from paymentMethod id → display label (built by caller from space.paymentMethods)
  */
 export function computeWalletBalances(
   transactions: TransactionWithStatus[],

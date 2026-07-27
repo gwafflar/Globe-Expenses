@@ -18,13 +18,13 @@
  * Shows a red dot when !isValid.
  */
 
-import type { TravelMember } from '@/travels/types'
+import type { SpaceMember } from '@/spaces/types'
 import type { Split } from '@/transactions/types'
 
 interface SplitSummaryRowProps {
   label: string
   splits: Split[]
-  members: TravelMember[]
+  members: SpaceMember[]
   mode: 'equal' | 'custom'
   isValid: boolean
   /** The current user's travelMemberId (NOT their Firebase Auth UID). Used to show "You". */
@@ -87,7 +87,7 @@ export function SplitSummaryRow({
 
 function buildSummary(
   splits: Split[],
-  members: TravelMember[],
+  members: SpaceMember[],
   mode: 'equal' | 'custom',
   currentUserTravelMemberId: string,
   label: string,

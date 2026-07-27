@@ -1,5 +1,6 @@
-// src/travels/services/travelService.ts
-// Firestore operations for travels.
+// src/spaces/services/spaceService.ts
+// Firestore operations for spaces.
+// ⚠️ Collection path stays `travels/` — frozen as legacy. See docs/SPACE_REFACTOR_SPEC.md §2.1.
 
 import {
   Timestamp,
@@ -16,7 +17,7 @@ import {
 } from 'firebase/firestore'
 import { nanoid } from 'nanoid'
 import { db } from '@/services/firebase'
-import type { LabeledItem, TravelMember, TravelSettings } from '@/travels/types'
+import type { LabeledItem, SpaceMember, SpaceSettings } from '@/spaces/types'
 import { getFlagForCountry } from '@/shared/data/pickerData'
 import { buildDefaultRates } from '@/shared/utils/exchangeRates'
 
@@ -24,11 +25,11 @@ import { buildDefaultRates } from '@/shared/utils/exchangeRates'
 // serialiseMember — strips undefined field values before writing to Firestore.
 //
 // Firestore rejects `undefined` values. They can appear when spreading a
-// normalised legacy document that didn't have all TravelMember fields.
+// normalised legacy document that didn't have all SpaceMember fields.
 // Use this in every updateDoc() call that writes the members array.
 // ---------------------------------------------------------------------------
 
-function serialiseMember(m: TravelMember): Record<string, unknown> {
+function serialiseMember(m: SpaceMember): Record<string, unknown> {
   const obj: Record<string, unknown> = {
     travelMemberId: m.travelMemberId,
     displayName: m.displayName,
@@ -44,7 +45,7 @@ function serialiseMember(m: TravelMember): Record<string, unknown> {
 // Create
 // ---------------------------------------------------------------------------
 
-interface CreateTravelInput {
+interface CreateSpaceInput {
   uid: string
   displayName: string
   name: string
@@ -53,14 +54,15 @@ interface CreateTravelInput {
   mainCurrency: string  // ISO 4217 — the reference currency for all exchange rate conversions
 }
 
-export async function createTravel(input: CreateTravelInput): Promise<string> {
+export async function createSpace(input: CreateSpaceInput): Promise<string> {
   const { uid, displayName, name, emoji, description, mainCurrency } = input
 
-  const travelsRef = collection(db, 'travels')
+  // Collection name stays `travels` — Firestore path frozen as legacy.
+  const spacesRef = collection(db, 'travels')
 
   // Creator gets a stable travelMemberId (nanoid). Their Firebase Auth UID is stored in
   // both userId (slot link) and memberUids (access control flat array).
-  const creatorMember: TravelMember = {
+  const creatorMember: SpaceMember = {
     travelMemberId: nanoid(),
     displayName,
     userId: uid,
@@ -78,7 +80,7 @@ export async function createTravel(input: CreateTravelInput): Promise<string> {
     mainCurrency,
     // Seed exchange rates from hardcoded defaults, relative to mainCurrency.
     defaultRates: buildDefaultRates(mainCurrency),
-    // Per-travel lists initialised empty
+    // Per-space lists initialised empty
     categories: [],
     paymentMethods: [],
     countries: [],
@@ -88,7 +90,7 @@ export async function createTravel(input: CreateTravelInput): Promise<string> {
   if (emoji?.trim()) docData.emoji = emoji.trim()
   if (description?.trim()) docData.description = description.trim()
 
-  const docRef = await addDoc(travelsRef, docData)
+  const docRef = await addDoc(spacesRef, docData)
   return docRef.id
 }
 
@@ -96,11 +98,11 @@ export async function createTravel(input: CreateTravelInput): Promise<string> {
 // Update name / emoji (auto-save, called on blur)
 // ---------------------------------------------------------------------------
 
-export async function updateTravelMeta(
-  travelId: string,
+export async function updateSpaceMeta(
+  spaceId: string,
   fields: { name?: string; emoji?: string },
 ): Promise<void> {
-  const ref = doc(db, 'travels', travelId)
+  const ref = doc(db, 'travels', spaceId)
   const update: Record<string, unknown> = {}
   if (fields.name !== undefined) update.name = fields.name
   if (fields.emoji !== undefined) update.emoji = fields.emoji
@@ -111,26 +113,26 @@ export async function updateTravelMeta(
 // Update settings (trackLocation toggle)
 // ---------------------------------------------------------------------------
 
-export async function updateTravelSettings(
-  travelId: string,
-  settings: TravelSettings,
+export async function updateSpaceSettings(
+  spaceId: string,
+  settings: SpaceSettings,
 ): Promise<void> {
-  const ref = doc(db, 'travels', travelId)
+  const ref = doc(db, 'travels', spaceId)
   await updateDoc(ref, { settings })
 }
 
 // ---------------------------------------------------------------------------
 // Generic list update helper
-// Used by all four per-travel lists: categories, paymentMethods, countries, cities
+// Used by all four per-space lists: categories, paymentMethods, countries, cities
 // ---------------------------------------------------------------------------
 
-type TravelListField = 'categories' | 'paymentMethods' | 'countries' | 'cities'
+type SpaceListField = 'categories' | 'paymentMethods' | 'countries' | 'cities'
 
-export async function updateTravelCurrencies(
-  travelId: string,
+export async function updateSpaceCurrencies(
+  spaceId: string,
   currencies: string[],
 ): Promise<void> {
-  const ref = doc(db, 'travels', travelId)
+  const ref = doc(db, 'travels', spaceId)
   await updateDoc(ref, { currencies })
 }
 
@@ -139,41 +141,41 @@ export async function updateTravelCurrencies(
 // Uses dot-notation to update a single key without overwriting the whole map.
 // ---------------------------------------------------------------------------
 
-export async function updateTravelDefaultRate(
-  travelId: string,
+export async function updateSpaceDefaultRate(
+  spaceId: string,
   currencyCode: string,
   rate: number,
 ): Promise<void> {
-  const ref = doc(db, 'travels', travelId)
+  const ref = doc(db, 'travels', spaceId)
   await updateDoc(ref, { [`defaultRates.${currencyCode}`]: rate })
 }
 
-export async function updateTravelList(
-  travelId: string,
-  field: TravelListField,
+export async function updateSpaceList(
+  spaceId: string,
+  field: SpaceListField,
   items: LabeledItem[],
 ): Promise<void> {
-  const ref = doc(db, 'travels', travelId)
+  const ref = doc(db, 'travels', spaceId)
   await updateDoc(ref, { [field]: items })
 }
 
 // ---------------------------------------------------------------------------
-// Sync country/city from a new transaction into the travel's lists.
+// Sync country/city from a new transaction into the space's lists.
 // Called after createTransaction() — ensures Parameters tab and future
 // TransactionForm dropdowns reflect newly used locations immediately.
 //
 // Returns { newCountry, newCity } — the LabeledItems that were added
-// (null if already present). TravelDetailPage uses this to update local state.
+// (null if already present). SpaceDetailPage uses this to update local state.
 // ---------------------------------------------------------------------------
 
 export async function syncTransactionLocation(
-  travelId: string,
+  spaceId: string,
   country: string | undefined,
   city: string | undefined,
   existingCountries: LabeledItem[],
   existingCities: LabeledItem[],
 ): Promise<{ newCountry: LabeledItem | null; newCity: LabeledItem | null }> {
-  const ref = doc(db, 'travels', travelId)
+  const ref = doc(db, 'travels', spaceId)
   const updates: Record<string, unknown> = {}
 
   let newCountry: LabeledItem | null = null
@@ -213,25 +215,25 @@ export async function syncTransactionLocation(
 }
 
 // ---------------------------------------------------------------------------
-// TravelMember operations
+// SpaceMember operations
 //
 // These functions write the full members array (via serialiseMember) so that
 // Firestore never receives undefined field values from normalised legacy docs.
 //
 // IMPORTANT invariants:
 //  - memberUids is NEVER modified by claim/unclaim — it is access control only.
-//  - claimTravelMember implements transfer semantics: if the userId already owns
+//  - claimSpaceMember implements transfer semantics: if the userId already owns
 //    another slot, that slot is silently set to userId: null first.
 // ---------------------------------------------------------------------------
 
 /** Adds a name-only unclaimed member slot. memberUids unchanged. */
 export async function addUnclaimedMember(
-  travelId: string,
+  spaceId: string,
   displayName: string,
-  currentMembers: TravelMember[],
-): Promise<TravelMember> {
-  const ref = doc(db, 'travels', travelId)
-  const newMember: TravelMember = {
+  currentMembers: SpaceMember[],
+): Promise<SpaceMember> {
+  const ref = doc(db, 'travels', spaceId)
+  const newMember: SpaceMember = {
     travelMemberId: nanoid(),
     displayName,
     userId: null,           // unclaimed — no Auth account linked yet
@@ -244,13 +246,13 @@ export async function addUnclaimedMember(
 }
 
 /** Renames a slot. Caller must verify permission before calling. */
-export async function renameTravelMember(
-  travelId: string,
+export async function renameSpaceMember(
+  spaceId: string,
   travelMemberId: string,
   newName: string,
-  currentMembers: TravelMember[],
+  currentMembers: SpaceMember[],
 ): Promise<void> {
-  const ref = doc(db, 'travels', travelId)
+  const ref = doc(db, 'travels', spaceId)
   const updated = currentMembers.map((m) =>
     m.travelMemberId === travelMemberId ? { ...m, displayName: newName } : m,
   )
@@ -263,13 +265,13 @@ export async function renameTravelMember(
  * silently set to userId: null before the target slot is claimed.
  * memberUids is NOT modified — access was already granted on join.
  */
-export async function claimTravelMember(
-  travelId: string,
+export async function claimSpaceMember(
+  spaceId: string,
   travelMemberId: string,
   userId: string,
-  currentMembers: TravelMember[],
+  currentMembers: SpaceMember[],
 ): Promise<void> {
-  const ref = doc(db, 'travels', travelId)
+  const ref = doc(db, 'travels', spaceId)
   const updated = currentMembers.map((m) => {
     if (m.travelMemberId === travelMemberId) {
       // Claim this slot for the user
@@ -288,12 +290,12 @@ export async function claimTravelMember(
  * Unclaims a slot — sets userId to null.
  * memberUids is NOT modified. The person whose account was unlinked retains access.
  */
-export async function unclaimTravelMember(
-  travelId: string,
+export async function unclaimSpaceMember(
+  spaceId: string,
   travelMemberId: string,
-  currentMembers: TravelMember[],
+  currentMembers: SpaceMember[],
 ): Promise<void> {
-  const ref = doc(db, 'travels', travelId)
+  const ref = doc(db, 'travels', spaceId)
   const updated = currentMembers.map((m) =>
     m.travelMemberId === travelMemberId ? { ...m, userId: null } : m,
   )
@@ -303,12 +305,12 @@ export async function unclaimTravelMember(
 
 /** Toggles the allowRename flag on a slot. */
 export async function setMemberAllowRename(
-  travelId: string,
+  spaceId: string,
   travelMemberId: string,
   allowRename: boolean,
-  currentMembers: TravelMember[],
+  currentMembers: SpaceMember[],
 ): Promise<void> {
-  const ref = doc(db, 'travels', travelId)
+  const ref = doc(db, 'travels', spaceId)
   const updated = currentMembers.map((m) =>
     m.travelMemberId === travelMemberId ? { ...m, allowRename } : m,
   )
@@ -316,7 +318,7 @@ export async function setMemberAllowRename(
 }
 
 // ---------------------------------------------------------------------------
-// Leave / Delete travel
+// Leave / Delete space
 //
 // "Leave" removes the current user from memberUids (revokes access) and
 // unclaims their member slot (sets userId to null). The slot itself is kept
@@ -325,26 +327,26 @@ export async function setMemberAllowRename(
 // If the leaving user is the creator and other real users remain, createdBy
 // is reassigned to a random remaining real user.
 //
-// "Delete" hard-deletes the travel doc AND all child transactions. Used when
-// the user is the only real user left (solo travel or last person standing).
+// "Delete" hard-deletes the space doc AND all child transactions. Used when
+// the user is the only real user left (solo space or last person standing).
 //
 // Impact on memberUids: YES — arrayRemove(uid) revokes Firestore access.
 // Impact on members:    slot is unclaimed (userId → null), NOT removed.
 // ---------------------------------------------------------------------------
 
 /**
- * Leaves a multi-user travel. The user's UID is removed from memberUids
+ * Leaves a multi-user space. The user's UID is removed from memberUids
  * (revoking access) and their member slot is unclaimed (userId → null).
  * If the user is the creator, createdBy is reassigned to another real user.
  */
-export async function leaveTravel(
-  travelId: string,
+export async function leaveSpace(
+  spaceId: string,
   uid: string,
-  currentMembers: TravelMember[],
+  currentMembers: SpaceMember[],
   currentMemberUids: string[],
   currentCreatedBy: string,
 ): Promise<void> {
-  const ref = doc(db, 'travels', travelId)
+  const ref = doc(db, 'travels', spaceId)
 
   // Unclaim the leaving user's slot but keep the slot for split integrity
   const updatedMembers = currentMembers.map((m) =>
@@ -370,13 +372,13 @@ export async function leaveTravel(
 }
 
 /**
- * Hard-deletes a travel and all its child transactions.
- * Used for solo travels or when the user is the last real user.
+ * Hard-deletes a space and all its child transactions.
+ * Used for solo spaces or when the user is the last real user.
  */
-export async function deleteTravel(travelId: string): Promise<void> {
+export async function deleteSpace(spaceId: string): Promise<void> {
   // Delete all transactions in the subcollection first
   // (Firestore does not cascade-delete subcollections)
-  const txRef = collection(db, 'travels', travelId, 'transactions')
+  const txRef = collection(db, 'travels', spaceId, 'transactions')
   const txSnapshot = await getDocs(txRef)
 
   // Batch delete transactions (max 500 per batch — fine for v1)
@@ -386,29 +388,29 @@ export async function deleteTravel(travelId: string): Promise<void> {
     await batch.commit()
   }
 
-  // Delete the travel document itself
-  const travelRef = doc(db, 'travels', travelId)
-  await deleteDoc(travelRef)
+  // Delete the space document itself
+  const spaceRef = doc(db, 'travels', spaceId)
+  await deleteDoc(spaceRef)
 }
 
 // ---------------------------------------------------------------------------
 // Archive / Unarchive
 //
-// Per-user archive: each user can independently archive/unarchive a travel.
+// Per-user archive: each user can independently archive/unarchive a space.
 // The user's UID is added to / removed from archivedByUids[].
 //
 // No impact on memberUids or members — purely additive.
 // ---------------------------------------------------------------------------
 
-/** Archives a travel for the current user. */
-export async function archiveTravel(travelId: string, uid: string): Promise<void> {
-  const ref = doc(db, 'travels', travelId)
+/** Archives a space for the current user. */
+export async function archiveSpace(spaceId: string, uid: string): Promise<void> {
+  const ref = doc(db, 'travels', spaceId)
   await updateDoc(ref, { archivedByUids: arrayUnion(uid) })
 }
 
-/** Unarchives a travel for the current user. */
-export async function unarchiveTravel(travelId: string, uid: string): Promise<void> {
-  const ref = doc(db, 'travels', travelId)
+/** Unarchives a space for the current user. */
+export async function unarchiveSpace(spaceId: string, uid: string): Promise<void> {
+  const ref = doc(db, 'travels', spaceId)
   await updateDoc(ref, { archivedByUids: arrayRemove(uid) })
 }
 
@@ -419,23 +421,23 @@ export async function unarchiveTravel(travelId: string, uid: string): Promise<vo
 // All references to `deleteId` in every transaction's paidBy / beneficiaries
 // are rewritten to `keepId`. If both members appear in the same Split array,
 // their amounts are summed (no duplicate travelMemberIds after merge).
-// The `deleteId` slot is then removed from travel.members.
+// The `deleteId` slot is then removed from space.members.
 //
 // Everything runs in a single Firestore batch.
-// Firestore batch limit: 500 writes. Fine for v1 (travels rarely have 490+ transactions).
+// Firestore batch limit: 500 writes. Fine for v1 (spaces rarely have 490+ transactions).
 // ---------------------------------------------------------------------------
 
 export async function mergeMembers(
-  travelId: string,
+  spaceId: string,
   keepId: string,
   deleteId: string,
-  currentMembers: TravelMember[],
+  currentMembers: SpaceMember[],
   currentCreatedBy: string,
 ): Promise<void> {
   const batch = writeBatch(db)
 
   // --- 1. Read all transactions -----------------------------------------
-  const txCol = collection(db, 'travels', travelId, 'transactions')
+  const txCol = collection(db, 'travels', spaceId, 'transactions')
   const txSnapshot = await getDocs(txCol)
 
   // Helper: rewrite a Split[] replacing deleteId → keepId, merging amounts if both present
@@ -482,16 +484,16 @@ export async function mergeMembers(
     }
   })
 
-  // --- 3. Update travel: remove deleteId slot, reassign createdBy if needed
-  const travelRef = doc(db, 'travels', travelId)
+  // --- 3. Update space: remove deleteId slot, reassign createdBy if needed
+  const spaceRef = doc(db, 'travels', spaceId)
   const updatedMembers = currentMembers.filter((m) => m.travelMemberId !== deleteId)
-  const travelUpdate: Record<string, unknown> = {
+  const spaceUpdate: Record<string, unknown> = {
     members: updatedMembers.map(serialiseMember),
   }
   if (currentCreatedBy === deleteId) {
-    travelUpdate.createdBy = keepId
+    spaceUpdate.createdBy = keepId
   }
-  batch.update(travelRef, travelUpdate)
+  batch.update(spaceRef, spaceUpdate)
 
   await batch.commit()
 }

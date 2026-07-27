@@ -1,5 +1,5 @@
-// TravelsPage.tsx — lists all travels for the current user.
-// Active travels are shown first, followed by a collapsible "Archived" section.
+// SpacesPage.tsx — lists all spaces for the current user.
+// Active spaces are shown first, followed by a collapsible "Archived" section.
 
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -13,32 +13,32 @@ function avatarHue(uid: string): number {
   for (const ch of uid) hash = (hash * 31 + ch.charCodeAt(0)) & 0xffffffff
   return Math.abs(hash) % 360
 }
-import { useTravels } from '@/travels/hooks/useTravels'
-import type { Travel } from '@/travels/types'
+import { useSpaces } from '@/spaces/hooks/useSpaces'
+import type { Space } from '@/spaces/types'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Archive } from 'lucide-react'
-import { CreateTravelModal } from '@/travels/components/CreateTravelModal'
+import { CreateSpaceModal } from '@/spaces/components/CreateSpaceModal'
 
-// Reusable travel card grid — renders a list of travels as clickable cards.
-function TravelCardGrid({
-  travels,
-  onTravelClick,
+// Reusable space card grid — renders a list of spaces as clickable cards.
+function SpaceCardGrid({
+  spaces,
+  onSpaceClick,
   dimmed,
 }: {
-  travels: Travel[]
-  onTravelClick: (travelId: string) => void
+  spaces: Space[]
+  onSpaceClick: (spaceId: string) => void
   dimmed?: boolean
 }) {
   return (
     <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-      {travels.map((travel) => {
-        const emoji = travel.emoji || '🌍'
+      {spaces.map((space) => {
+        const emoji = space.emoji || '🌍'
         return (
           <button
-            key={travel.travelId}
+            key={space.spaceId}
             type="button"
-            onClick={() => onTravelClick(travel.travelId)}
+            onClick={() => onSpaceClick(space.spaceId)}
             className={`text-left cursor-pointer group ${dimmed ? 'opacity-60' : ''}`}
             style={{ perspective: '800px' }}
           >
@@ -54,13 +54,13 @@ function TravelCardGrid({
                   <span>{emoji}</span>
                 </div>
                 <div className="space-y-1">
-                  <CardTitle className="text-base">{travel.name}</CardTitle>
+                  <CardTitle className="text-base">{space.name}</CardTitle>
                 </div>
               </CardHeader>
-              {travel.description && (
+              {space.description && (
                 <CardContent>
                   <p className="text-sm text-muted-foreground line-clamp-2">
-                    {travel.description}
+                    {space.description}
                   </p>
                 </CardContent>
               )}
@@ -72,31 +72,31 @@ function TravelCardGrid({
   )
 }
 
-export function TravelsPage() {
+export function SpacesPage() {
   const { currentUser, userProfile } = useAuthStore()
   const userId = currentUser?.uid
 
   // React Router helper that lets us imperatively change the current URL
-  // in response to a click (e.g. when a travel card is clicked).
+  // in response to a click (e.g. when a space card is clicked).
   const navigate = useNavigate()
 
-  // Local UI state controlling whether the "Create travel" modal is open.
+  // Local UI state controlling whether the "Create space" modal is open.
   const [isCreateModalOpen, setIsCreateModalOpen] = useState<boolean>(false)
 
   // Whether the archived section is expanded
   const [showArchived, setShowArchived] = useState<boolean>(false)
 
-  // Subscribe to the current user's travels via the custom hook.
-  const { activeTravels, archivedTravels, isLoading, error } = useTravels(userId)
+  // Subscribe to the current user's spaces via the custom hook.
+  const { activeSpaces, archivedSpaces, isLoading, error } = useSpaces(userId)
 
-  const handleOpenCreateTravel = () => {
+  const handleOpenCreateSpace = () => {
     setIsCreateModalOpen(true)
   }
 
-  // When the user clicks a travel card, we navigate to `/travels/:travelId`,
-  // which is wired in App.tsx to render the TravelDetailPage.
-  const handleTravelClick = (travelId: string) => {
-    navigate(`/travels/${travelId}`)
+  // When the user clicks a space card, we navigate to `/spaces/:spaceId`,
+  // which is wired in App.tsx to render the SpaceDetailPage.
+  const handleSpaceClick = (spaceId: string) => {
+    navigate(`/spaces/${spaceId}`)
   }
 
   const hue = currentUser ? avatarHue(currentUser.uid) : 0
@@ -104,21 +104,21 @@ export function TravelsPage() {
   // Badge count for the avatar button — driven by a real-time snapshot on invites
   const { count: pendingCount } = usePendingInvites(currentUser?.uid)
 
-  const hasNoTravels = activeTravels.length === 0 && archivedTravels.length === 0
+  const hasNoSpaces = activeSpaces.length === 0 && archivedSpaces.length === 0
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
       {/* Top bar with title and actions */}
       <header className="flex items-center justify-between gap-4 border-b px-4 py-3">
         <div>
-          <h1 className="text-lg font-semibold">Your travels</h1>
+          <h1 className="text-lg font-semibold">Your spaces</h1>
           <p className="text-sm text-muted-foreground">
             Select a trip to view and manage its expenses.
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button type="button" onClick={handleOpenCreateTravel}>
-            New travel
+          <Button type="button" onClick={handleOpenCreateSpace}>
+            New space
           </Button>
           {/* Profile avatar button — navigates to /profile.
               The red badge shows the count of pending friend requests. */}
@@ -144,11 +144,11 @@ export function TravelsPage() {
         {isLoading ? (
           // Loading state while the Firestore subscription is fetching data.
           <div className="flex h-full items-center justify-center">
-            <p className="text-sm text-muted-foreground">Loading your travels...</p>
+            <p className="text-sm text-muted-foreground">Loading your spaces...</p>
           </div>
         ) : error ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
-            <p className="text-base font-medium">Unable to load your travels.</p>
+            <p className="text-base font-medium">Unable to load your spaces.</p>
             <p className="max-w-sm text-sm text-muted-foreground">
               {error}
             </p>
@@ -156,30 +156,30 @@ export function TravelsPage() {
               Retry
             </Button>
           </div>
-        ) : hasNoTravels ? (
-          // Empty state when the user has no travels yet.
+        ) : hasNoSpaces ? (
+          // Empty state when the user has no spaces yet.
           <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
-            <p className="text-base font-medium">No travels yet.</p>
+            <p className="text-base font-medium">No spaces yet.</p>
             <p className="max-w-xs text-sm text-muted-foreground">
-              Create your first trip to start tracking shared expenses with your travel companions.
+              Create your first trip to start tracking shared expenses with your space companions.
             </p>
-            <Button type="button" onClick={handleOpenCreateTravel}>
+            <Button type="button" onClick={handleOpenCreateSpace}>
               🚀 Create your first trip
             </Button>
           </div>
         ) : (
           <div className="space-y-6">
-            {/* Active travels */}
-            {activeTravels.length > 0 ? (
-              <TravelCardGrid travels={activeTravels} onTravelClick={handleTravelClick} />
+            {/* Active spaces */}
+            {activeSpaces.length > 0 ? (
+              <SpaceCardGrid spaces={activeSpaces} onSpaceClick={handleSpaceClick} />
             ) : (
               <p className="text-sm text-muted-foreground">
-                All your travels are archived.
+                All your spaces are archived.
               </p>
             )}
 
-            {/* Archived travels — directory-style card that expands to show archived travels */}
-            {archivedTravels.length > 0 && (
+            {/* Archived spaces — directory-style card that expands to show archived spaces */}
+            {archivedSpaces.length > 0 && (
               <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
                 <button
                   type="button"
@@ -193,7 +193,7 @@ export function TravelsPage() {
                         <Archive className="h-5 w-5" />
                       </div>
                       <div className="space-y-1">
-                        <CardTitle className="text-base">Archived ({archivedTravels.length})</CardTitle>
+                        <CardTitle className="text-base">Archived ({archivedSpaces.length})</CardTitle>
                       </div>
                       <span className="ml-auto text-xs text-muted-foreground">
                         {showArchived ? '▲' : '▼'}
@@ -203,10 +203,10 @@ export function TravelsPage() {
                 </button>
               </div>
             )}
-            {showArchived && archivedTravels.length > 0 && (
-              <TravelCardGrid
-                travels={archivedTravels}
-                onTravelClick={handleTravelClick}
+            {showArchived && archivedSpaces.length > 0 && (
+              <SpaceCardGrid
+                spaces={archivedSpaces}
+                onSpaceClick={handleSpaceClick}
                 dimmed
               />
             )}
@@ -214,16 +214,16 @@ export function TravelsPage() {
         )}
       </main>
 
-      {/* Create Travel modal, rendered at the end so it can overlay the page.
+      {/* Create Space modal, rendered at the end so it can overlay the page.
           We pass the current user's uid and a displayName fallback.
        */}
       {userId && (
-        <CreateTravelModal
+        <CreateSpaceModal
           isOpen={isCreateModalOpen}
           onClose={() => setIsCreateModalOpen(false)}
           uid={userId}
           defaultMainCurrency={userProfile?.mainCurrency ?? 'EUR'}
-          onCreated={(travelId) => navigate(`/travels/${travelId}`)}
+          onCreated={(spaceId) => navigate(`/spaces/${spaceId}`)}
           displayName={
             currentUser?.displayName && currentUser.displayName.trim() !== ''
               ? currentUser.displayName

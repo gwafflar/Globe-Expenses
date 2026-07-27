@@ -14,8 +14,8 @@
 import XLSXStyleRaw from 'xlsx-js-style'
 import type * as XLSXTypes from 'xlsx'
 const XLSXStyle = XLSXStyleRaw as unknown as typeof XLSXTypes
-import type { Travel, TravelMember } from '@/travels/types'
-import { getTravelMainCurrency } from '@/travels/types'
+import type { Space, SpaceMember } from '@/spaces/types'
+import { getSpaceMainCurrency } from '@/spaces/types'
 import type { Transaction } from '@/transactions/types'
 import { EXCHANGE_RATES } from '@/shared/utils/exchangeRates'
 import { buildColumnMap, colLetter } from '@/shared/utils/sheetColumns'
@@ -175,7 +175,7 @@ function dat(ws: WS, col: number, row: number, dateStr: string, s?: S) {
 // ---------------------------------------------------------------------------
 // Split / paidBy label derivation
 // ---------------------------------------------------------------------------
-function deriveSplitLabel(tx: Transaction, members: TravelMember[]): string {
+function deriveSplitLabel(tx: Transaction, members: SpaceMember[]): string {
   const nonZero = tx.beneficiaries.filter((b) => b.amount > 0)
   if (nonZero.length === 0) return ''
   const ids = [...new Set(nonZero.map((b) => b.travelMemberId))]
@@ -188,7 +188,7 @@ function deriveSplitLabel(tx: Transaction, members: TravelMember[]): string {
   return allEqual ? 'Split equal' : 'Custom'
 }
 
-function derivePaidByLabel(tx: Transaction, members: TravelMember[]): string {
+function derivePaidByLabel(tx: Transaction, members: SpaceMember[]): string {
   const positive = tx.paidBy.filter((p) => p.amount > 0)
   const negative = tx.paidBy.filter((p) => p.amount < 0)
   if (positive.length === 1 && negative.length === 0)
@@ -204,7 +204,7 @@ function derivePaidByLabel(tx: Transaction, members: TravelMember[]): string {
 // ---------------------------------------------------------------------------
 // ⚙️ Parameters sheet
 // ---------------------------------------------------------------------------
-function buildParamsSheet(travel: Travel, mainCurrency: string, N: number): WS {
+function buildParamsSheet(space: Space, mainCurrency: string, N: number): WS {
   const ws: WS = {}
 
   // Row 1: main currency header bar
@@ -220,7 +220,7 @@ function buildParamsSheet(travel: Travel, mainCurrency: string, N: number): WS {
   str(ws, 2, 4, 'Name',   hdrDark(C.NAVY))
 
   // Rows 5…4+N: member slots
-  travel.members.forEach((m, i) => {
+  space.members.forEach((m, i) => {
     str(ws, 1, 5 + i, `Member_${i + 1}`, labelCell())
     str(ws, 2, 5 + i, m.displayName,     dataCell())
   })
@@ -231,20 +231,20 @@ function buildParamsSheet(travel: Travel, mainCurrency: string, N: number): WS {
   str(ws, 1, ratesHeaderRow, 'Currency',                hdrDark(C.NAVY))
   str(ws, 2, ratesHeaderRow, 'Rate (units per main ccy)', hdrDark(C.NAVY))
 
-  // Build the rate table from travel.defaultRates (if available), falling back to hardcoded.
+  // Build the rate table from space.defaultRates (if available), falling back to hardcoded.
   // Include all currencies from defaultRates + hardcoded EXCHANGE_RATES.
-  const travelRates = travel.defaultRates ?? {}
+  const spaceRates = space.defaultRates ?? {}
   const rateMainEur = EXCHANGE_RATES[mainCurrency] ?? 1
-  const allCurrencyCodes = new Set([...Object.keys(EXCHANGE_RATES), ...Object.keys(travelRates)])
+  const allCurrencyCodes = new Set([...Object.keys(EXCHANGE_RATES), ...Object.keys(spaceRates)])
   const sortedCurrencies = Array.from(allCurrencyCodes).sort()
   sortedCurrencies.forEach((code, i) => {
     const row  = ratesDataStart + i
-    // Prefer travel-specific rate, then derive from hardcoded table
+    // Prefer space-specific rate, then derive from hardcoded table
     let rate: number
     if (code === mainCurrency) {
       rate = 1
-    } else if (travelRates[code] !== undefined) {
-      rate = travelRates[code]
+    } else if (spaceRates[code] !== undefined) {
+      rate = spaceRates[code]
     } else {
       rate = rateMainEur / (EXCHANGE_RATES[code] ?? 1)
     }
@@ -270,13 +270,13 @@ function buildParamsSheet(travel: Travel, mainCurrency: string, N: number): WS {
 // 📃 Expenses sheet
 // ---------------------------------------------------------------------------
 function buildExpensesSheet(
-  travel: Travel,
+  space: Space,
   transactions: Transaction[],
   N: number,
 ): unknown {
   const cm = buildColumnMap(N)
   const ws: WS = {}
-  const members = travel.members
+  const members = space.members
   const amtLetter  = colLetter(cm.amountLocal) // col G
 
   // ── Row 1: section group headers ─────────────────────────────────────────
@@ -307,7 +307,7 @@ function buildExpensesSheet(
   str(ws, cm.amountLocal,  2, 'Amount (local)',        hdrDark(C.NAVY))
   str(ws, cm.currency,     2, 'Currency',             hdrDark(C.NAVY))
   str(ws, cm.exchangeRate, 2, 'Exch. rate',           hdrDark(C.NAVY))
-  str(ws, cm.costMain,     2, `Cost (${travel.currencies[0] ?? 'main'})`, hdrDark(C.NAVY2))
+  str(ws, cm.costMain,     2, `Cost (${space.currencies[0] ?? 'main'})`, hdrDark(C.NAVY2))
   str(ws, cm.splitLabel,   2, 'Split',                hdrDark(C.NAVY))
   str(ws, cm.paidByLabel,  2, 'Paid by',              hdrDark(C.NAVY))
   str(ws, cm.paymentMethod, 2, 'Payment method',      hdrDark(C.NAVY))
@@ -460,14 +460,14 @@ function balanceMemberCols(i: number) {
 }
 
 function buildBalanceSheet(
-  travel: Travel,
+  space: Space,
   N: number,
   _ratesDataStart: number,
   _ratesDataEnd: number,
 ): unknown {
   const cm = buildColumnMap(N)
   const ws: WS = {}
-  const members = travel.members
+  const members = space.members
   const lastExpCol    = colLetter(cm.totalCols)
   const expRange      = `'${SHEET_EXPENSES}'!$A:$${lastExpCol}`
 
@@ -541,9 +541,9 @@ function buildBalanceSheet(
 // ---------------------------------------------------------------------------
 // 💸 Balance Summary sheet
 // ---------------------------------------------------------------------------
-function buildBalanceSummarySheet(travel: Travel, N: number): WS {
+function buildBalanceSummarySheet(space: Space, N: number): WS {
   const ws: WS = {}
-  const members = travel.members
+  const members = space.members
   const balLastRow = 2 + MAX_DATA_ROWS
 
   str(ws, 1, 1, 'Member',               hdrDark(C.NAVY))
@@ -570,10 +570,10 @@ function buildBalanceSummarySheet(travel: Travel, N: number): WS {
 // ---------------------------------------------------------------------------
 // 📊 Analysis sheet
 // ---------------------------------------------------------------------------
-function buildAnalysisSheet(travel: Travel, N: number): unknown {
+function buildAnalysisSheet(space: Space, N: number): unknown {
   const cm = buildColumnMap(N)
   const ws: WS = {}
-  const members = travel.members
+  const members = space.members
 
   // B1: member selector
   str(ws, 1, 1, 'Member:', hdrDark(C.NAVY))
@@ -600,7 +600,7 @@ function buildAnalysisSheet(travel: Travel, N: number): unknown {
   str(ws, 1, row, 'Country',              hdrDark(C.NAVY2))
   str(ws, 2, row, 'Spending (main ccy)',  hdrDark(C.NAVY2))
   row++
-  travel.countries.forEach((c) => {
+  space.countries.forEach((c) => {
     const display = (c.emoji ? c.emoji + ' ' : '') + c.label
     str(ws, 1, row, display,                dataCell())
     fml(ws, 2, row, sumproductFml(countryLetter, display), formulaCell())
@@ -613,7 +613,7 @@ function buildAnalysisSheet(travel: Travel, N: number): unknown {
   str(ws, 1, row, 'Category',             hdrDark(C.PURPLE))
   str(ws, 2, row, 'Spending (main ccy)',  hdrDark(C.PURPLE))
   row++
-  travel.categories.forEach((c) => {
+  space.categories.forEach((c) => {
     const display = (c.emoji ? c.emoji + ' ' : '') + c.label
     str(ws, 1, row, display,               dataCell())
     fml(ws, 2, row, sumproductFml(categoryLetter, display), formulaCell())
@@ -629,13 +629,13 @@ function buildAnalysisSheet(travel: Travel, N: number): unknown {
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
-export async function exportTravelToXlsx(
-  travel: Travel,
+export async function exportSpaceToXlsx(
+  space: Space,
   transactions: Transaction[],
 ): Promise<void> {
-  const N            = Math.max(1, travel.members.length)
-  const mainCurrency = getTravelMainCurrency(travel)
-  const allCodes = new Set([...Object.keys(EXCHANGE_RATES), ...Object.keys(travel.defaultRates ?? {})])
+  const N            = Math.max(1, space.members.length)
+  const mainCurrency = getSpaceMainCurrency(space)
+  const allCodes = new Set([...Object.keys(EXCHANGE_RATES), ...Object.keys(space.defaultRates ?? {})])
   const numCurrencies = allCodes.size
   const ratesDataStart = N + 8
   const ratesDataEnd   = ratesDataStart + numCurrencies - 1
@@ -644,14 +644,14 @@ export async function exportTravelToXlsx(
   const wb = XLSXStyle.utils.book_new()
 
   type WB_WS = XLSXTypes.WorkSheet
-  XLSXStyle.utils.book_append_sheet(wb, buildParamsSheet(travel, mainCurrency, N)                           as WB_WS, SHEET_PARAMS)
-  XLSXStyle.utils.book_append_sheet(wb, buildExpensesSheet(travel, transactions, N) as WB_WS, SHEET_EXPENSES)
-  XLSXStyle.utils.book_append_sheet(wb, buildBalanceSheet(travel, N, ratesDataStart, ratesDataEnd)          as WB_WS, SHEET_BALANCE)
-  XLSXStyle.utils.book_append_sheet(wb, buildBalanceSummarySheet(travel, N)                                 as WB_WS, SHEET_BALANCE_SUMMARY)
-  XLSXStyle.utils.book_append_sheet(wb, buildAnalysisSheet(travel, N)                                       as WB_WS, SHEET_ANALYSIS)
+  XLSXStyle.utils.book_append_sheet(wb, buildParamsSheet(space, mainCurrency, N)                           as WB_WS, SHEET_PARAMS)
+  XLSXStyle.utils.book_append_sheet(wb, buildExpensesSheet(space, transactions, N) as WB_WS, SHEET_EXPENSES)
+  XLSXStyle.utils.book_append_sheet(wb, buildBalanceSheet(space, N, ratesDataStart, ratesDataEnd)          as WB_WS, SHEET_BALANCE)
+  XLSXStyle.utils.book_append_sheet(wb, buildBalanceSummarySheet(space, N)                                 as WB_WS, SHEET_BALANCE_SUMMARY)
+  XLSXStyle.utils.book_append_sheet(wb, buildAnalysisSheet(space, N)                                       as WB_WS, SHEET_ANALYSIS)
 
   XLSXStyle.writeFile(
     wb,
-    `GlobeExpenses_${travel.name}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+    `GlobeExpenses_${space.name}_${new Date().toISOString().slice(0, 10)}.xlsx`,
   )
 }

@@ -55,7 +55,7 @@ function isInstalledPWA(): boolean {
 export function RegisterPage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const redirectTo = new URLSearchParams(location.search).get('redirect') || '/travels'
+  const redirectTo = new URLSearchParams(location.search).get('redirect') || '/spaces'
 
   // Watch global auth state — once the Zustand store has the user (after
   // onAuthStateChanged fires and loads the profile), navigate to the app.
@@ -184,7 +184,7 @@ export function RegisterPage() {
         <CardHeader className="space-y-2">
           <CardTitle>Create your account</CardTitle>
           <CardDescription>
-            Start tracking your travel expenses with GlobeExpenses.
+            Start tracking your space expenses with GlobeExpenses.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -279,7 +279,7 @@ export function RegisterPage() {
           <p className="text-center text-sm text-muted-foreground">
             Already have an account?{' '}
             <Link
-              to={redirectTo !== '/travels' ? `/login?redirect=${encodeURIComponent(redirectTo)}` : '/login'}
+              to={redirectTo !== '/spaces' ? `/login?redirect=${encodeURIComponent(redirectTo)}` : '/login'}
               className="font-medium text-primary hover:underline"
             >
               Sign in

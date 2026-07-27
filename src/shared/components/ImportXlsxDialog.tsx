@@ -1,7 +1,7 @@
 // ImportXlsxDialog.tsx — 3-step wizard for importing a GlobeExpenses xlsx file.
 //
 // Step 1 — Upload:  drag-and-drop or file picker, calls parseSheetFile()
-// Step 2 — Mapping: table matching sheet member slots to travel member UIDs
+// Step 2 — Mapping: table matching sheet member slots to space member UIDs
 // Step 3 — Result:  shows imported/skipped counts and any errors
 //
 // The dialog is controlled (open prop) so the parent can close it cleanly.
@@ -9,10 +9,10 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { arrayUnion, doc, updateDoc } from 'firebase/firestore'
 import { db } from '@/services/firebase'
-import type { Travel, LabeledItem } from '@/travels/types'
-import { getTravelMainCurrency } from '@/travels/types'
+import type { Space, LabeledItem } from '@/spaces/types'
+import { getSpaceMainCurrency } from '@/spaces/types'
 import type { ParsedSheetRow } from '@/shared/utils/sheetImport'
-import { CollapsibleCard } from '@/travels/components/CollapsibleCard'
+import { CollapsibleCard } from '@/spaces/components/CollapsibleCard'
 import { getFlagForCountry } from '@/shared/data/pickerData'
 import {
   Dialog,
@@ -36,7 +36,7 @@ import {
 interface ImportXlsxDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  travel: Travel
+  space: Space
   currentUserUid: string
 }
 
@@ -139,17 +139,17 @@ function UploadStep({
 
 function MappingStep({
   parseResult,
-  travel,
+  space,
   slotToTravelMemberId,
   onChange,
 }: {
   parseResult: ParseResult
-  travel: Travel
+  space: Space
   slotToTravelMemberId: Record<number, string | undefined>
   onChange: (updated: Record<number, string | undefined>) => void
 }) {
   const { slots, nMembersInSheet } = parseResult
-  const members = travel.members
+  const members = space.members
 
   // Check for duplicate mappings (two slots → same non-undefined travelMemberId)
   const assignedIds = Object.values(slotToTravelMemberId).filter((id): id is string => id !== undefined)
@@ -167,14 +167,14 @@ function MappingStep({
       <p className="text-sm text-muted-foreground">
         Found <strong>{parseResult.rows.length}</strong> transactions across{' '}
         <strong>{slots.length}</strong> active member slot{slots.length !== 1 ? 's' : ''}.
-        Match each sheet member to a travel member below.
+        Match each sheet member to a space member below.
       </p>
 
       {/* Member count mismatch warning */}
       {nMembersInSheet !== members.length && (
         <div className="rounded-md bg-yellow-50 px-3 py-2 text-sm text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300">
           The sheet has {nMembersInSheet} member slot{nMembersInSheet !== 1 ? 's' : ''} but this
-          travel has {members.length} member{members.length !== 1 ? 's' : ''}. Check your mapping
+          space has {members.length} member{members.length !== 1 ? 's' : ''}. Check your mapping
           carefully.
         </div>
       )}
@@ -348,20 +348,20 @@ function uniqueValues(rows: ParsedSheetRow[], key: 'country' | 'city' | 'categor
 interface PreviewSection {
   label: string
   values: string[]
-  travelList: LabeledItem[]
+  spaceList: LabeledItem[]
 }
 
-function PreviewStep({ rows, travel }: { rows: ParsedSheetRow[]; travel: Travel }) {
-  // Build the four sections with their corresponding travel lists
+function PreviewStep({ rows, space }: { rows: ParsedSheetRow[]; space: Space }) {
+  // Build the four sections with their corresponding space lists
   const sections: PreviewSection[] = useMemo(() => [
-    { label: 'Countries',       values: uniqueValues(rows, 'country'),       travelList: travel.countries      ?? [] },
-    { label: 'Cities',          values: uniqueValues(rows, 'city'),          travelList: travel.cities         ?? [] },
-    { label: 'Categories',      values: uniqueValues(rows, 'category'),      travelList: travel.categories     ?? [] },
-    { label: 'Payment methods', values: uniqueValues(rows, 'paymentMethod'), travelList: travel.paymentMethods ?? [] },
-  ], [rows, travel])
+    { label: 'Countries',       values: uniqueValues(rows, 'country'),       spaceList: space.countries      ?? [] },
+    { label: 'Cities',          values: uniqueValues(rows, 'city'),          spaceList: space.cities         ?? [] },
+    { label: 'Categories',      values: uniqueValues(rows, 'category'),      spaceList: space.categories     ?? [] },
+    { label: 'Payment methods', values: uniqueValues(rows, 'paymentMethod'), spaceList: space.paymentMethods ?? [] },
+  ], [rows, space])
 
   const totalUnmatched = sections.reduce(
-    (sum, s) => sum + s.values.filter((v) => !matchesLabeledList(v, s.travelList)).length,
+    (sum, s) => sum + s.values.filter((v) => !matchesLabeledList(v, s.spaceList)).length,
     0,
   )
 
@@ -375,11 +375,11 @@ function PreviewStep({ rows, travel }: { rows: ParsedSheetRow[]; travel: Travel 
       {/* Match status banner */}
       {totalUnmatched === 0 ? (
         <div className="rounded-md bg-green-50 px-3 py-2 text-sm text-green-800 dark:bg-green-900/30 dark:text-green-300">
-          All values match the travel configuration.
+          All values match the space configuration.
         </div>
       ) : (
         <div className="rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
-          Some values don't match the travel configuration. They will be imported as-is.
+          Some values don't match the space configuration. They will be imported as-is.
         </div>
       )}
 
@@ -396,7 +396,7 @@ function PreviewStep({ rows, travel }: { rows: ParsedSheetRow[]; travel: Travel 
           ) : (
             <div className="flex flex-wrap gap-1.5">
               {section.values.map((value) => {
-                const matched = matchesLabeledList(value, section.travelList)
+                const matched = matchesLabeledList(value, section.spaceList)
                 return (
                   <span
                     key={value}
@@ -424,7 +424,7 @@ function PreviewStep({ rows, travel }: { rows: ParsedSheetRow[]; travel: Travel 
 
 function buildInitialMapping(
   slots: ParseResult['slots'],
-  members: Travel['members'],
+  members: Space['members'],
 ): Record<number, string | undefined> {
   const mapping: Record<number, string | undefined> = {}
   // Track which travelMemberIds have already been auto-matched
@@ -454,7 +454,7 @@ function buildInitialMapping(
 export function ImportXlsxDialog({
   open,
   onOpenChange,
-  travel,
+  space,
   currentUserUid,
 }: ImportXlsxDialogProps) {
   type Step = 'upload' | 'mapping' | 'preview' | 'result'
@@ -484,12 +484,12 @@ export function ImportXlsxDialog({
   const handleParsed = useCallback(
     (result: ParseResult) => {
       setParseResult(result)
-      // Auto-match slot names to travel member display names
-      const autoMapping = buildInitialMapping(result.slots, travel.members)
+      // Auto-match slot names to space member display names
+      const autoMapping = buildInitialMapping(result.slots, space.members)
       setSlotToTravelMemberId(autoMapping)
       setStep('mapping')
     },
-    [travel.members],
+    [space.members],
   )
 
   // Step 2 (mapping) → preview
@@ -497,16 +497,16 @@ export function ImportXlsxDialog({
     setStep('preview')
   }
 
-  // Step preview → result (runs the actual import + syncs travel lists)
+  // Step preview → result (runs the actual import + syncs space lists)
   async function handleImport() {
     if (!parseResult) return
 
     setIsImporting(true)
     setStep('result')
 
-    const mainCurrency = getTravelMainCurrency(travel)
+    const mainCurrency = getSpaceMainCurrency(space)
     const result = await importParsedRows(
-      travel.travelId,
+      space.spaceId,
       parseResult.rows,
       slotToTravelMemberId,
       currentUserUid,
@@ -514,17 +514,17 @@ export function ImportXlsxDialog({
       (committed, total) => setImportProgress({ committed, total }),
     )
 
-    // ── Sync travel lists ───────────────────────────────────────────────────
+    // ── Sync space lists ───────────────────────────────────────────────────
     // Reuse the same uniqueValues / matchesLabeledList helpers from PreviewStep
-    // to find values not already in the travel and write them via arrayUnion.
-    const travelRef = doc(db, 'travels', travel.travelId)
+    // to find values not already in the space and write them via arrayUnion.
+    const spaceRef = doc(db, 'travels', space.spaceId)
     const listUpdates: Record<string, unknown> = {}
 
     const listFields = [
-      { key: 'country'       as const, field: 'countries',      existing: travel.countries      ?? [], prefix: 'country' },
-      { key: 'city'          as const, field: 'cities',         existing: travel.cities         ?? [], prefix: 'city' },
-      { key: 'category'      as const, field: 'categories',     existing: travel.categories     ?? [], prefix: 'cat' },
-      { key: 'paymentMethod' as const, field: 'paymentMethods', existing: travel.paymentMethods ?? [], prefix: 'pm' },
+      { key: 'country'       as const, field: 'countries',      existing: space.countries      ?? [], prefix: 'country' },
+      { key: 'city'          as const, field: 'cities',         existing: space.cities         ?? [], prefix: 'city' },
+      { key: 'category'      as const, field: 'categories',     existing: space.categories     ?? [], prefix: 'cat' },
+      { key: 'paymentMethod' as const, field: 'paymentMethods', existing: space.paymentMethods ?? [], prefix: 'pm' },
     ] as const
 
     for (const { key, field, existing, prefix } of listFields) {
@@ -543,7 +543,7 @@ export function ImportXlsxDialog({
     }
 
     // Currencies are plain string[], not LabeledItem[]
-    const existingCurrencySet = new Set((travel.currencies ?? []).map((c) => c.toUpperCase()))
+    const existingCurrencySet = new Set((space.currencies ?? []).map((c) => c.toUpperCase()))
     const sheetCurrencies = new Set<string>()
     for (const row of parseResult.rows) {
       if (row.currency) sheetCurrencies.add(row.currency)
@@ -553,9 +553,9 @@ export function ImportXlsxDialog({
 
     if (Object.keys(listUpdates).length > 0) {
       try {
-        await updateDoc(travelRef, listUpdates)
+        await updateDoc(spaceRef, listUpdates)
       } catch (err) {
-        console.error('[ImportXlsxDialog] travel list sync failed:', err)
+        console.error('[ImportXlsxDialog] space list sync failed:', err)
       }
     }
 
@@ -588,14 +588,14 @@ export function ImportXlsxDialog({
         {step === 'mapping' && parseResult && (
           <MappingStep
             parseResult={parseResult}
-            travel={travel}
+            space={space}
             slotToTravelMemberId={slotToTravelMemberId}
             onChange={setSlotToTravelMemberId}
           />
         )}
 
         {step === 'preview' && parseResult && (
-          <PreviewStep rows={parseResult.rows} travel={travel} />
+          <PreviewStep rows={parseResult.rows} space={space} />
         )}
 
         {step === 'result' && (

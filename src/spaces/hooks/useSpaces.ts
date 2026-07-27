@@ -1,6 +1,7 @@
-// useTravels.ts — custom hook to subscribe to the current user's travels.
-// Returns active and archived travels separately so the UI can render them
+// useSpaces.ts — custom hook to subscribe to the current user's spaces.
+// Returns active and archived spaces separately so the UI can render them
 // in distinct sections.
+// ⚠️ Collection path stays `travels/` — frozen as legacy. See docs/SPACE_REFACTOR_SPEC.md §2.1.
 
 import { useEffect, useState } from 'react'
 import {
@@ -14,34 +15,34 @@ import {
   type FirestoreError,
 } from 'firebase/firestore'
 import { db } from '@/services/firebase'
-import type { Travel } from '@/travels/types'
-import { normaliseMember } from '@/travels/types'
+import type { Space } from '@/spaces/types'
+import { normaliseMember } from '@/spaces/types'
 
-interface UseTravelsResult {
-  activeTravels: Travel[]
-  archivedTravels: Travel[]
+interface UseSpacesResult {
+  activeSpaces: Space[]
+  archivedSpaces: Space[]
   isLoading: boolean
   error: string | null
 }
 
-export function useTravels(userId: string | undefined): UseTravelsResult {
-  const [activeTravels, setActiveTravels] = useState<Travel[]>([])
-  const [archivedTravels, setArchivedTravels] = useState<Travel[]>([])
+export function useSpaces(userId: string | undefined): UseSpacesResult {
+  const [activeSpaces, setActiveSpaces] = useState<Space[]>([])
+  const [archivedSpaces, setArchivedSpaces] = useState<Space[]>([])
   const [isLoading, setIsLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!userId) {
-      setActiveTravels([])
-      setArchivedTravels([])
+      setActiveSpaces([])
+      setArchivedSpaces([])
       setIsLoading(false)
       setError(null)
       return
     }
 
-    const travelsRef = collection(db, 'travels')
+    const spacesRef = collection(db, 'travels')
     const q = query(
-      travelsRef,
+      spacesRef,
       where('memberUids', 'array-contains', userId),
       orderBy('createdAt', 'desc'),
     )
@@ -50,15 +51,16 @@ export function useTravels(userId: string | undefined): UseTravelsResult {
     const unsubscribe = onSnapshot(
       q,
       (snapshot: QuerySnapshot<DocumentData>) => {
-        const active: Travel[] = []
-        const archived: Travel[] = []
+        const active: Space[] = []
+        const archived: Space[] = []
 
         for (const docSnapshot of snapshot.docs) {
           const data = docSnapshot.data()
           const archivedByUids: string[] = data.archivedByUids ?? []
 
-          const travel: Travel = {
-            travelId: docSnapshot.id,
+          const space: Space = {
+            // Derived from the doc id — travelId is never written into the document body.
+            spaceId: docSnapshot.id,
             name: data.name as string,
             emoji: data.emoji as string | undefined,
             description: data.description as string | undefined,
@@ -71,7 +73,7 @@ export function useTravels(userId: string | undefined): UseTravelsResult {
             mainCurrency: data.mainCurrency as string | undefined,
             defaultRates: data.defaultRates as Record<string, number> | undefined,
             settings: data.settings,
-            // Per-travel lists — default to [] for older documents that pre-date this field
+            // Per-space lists — default to [] for older documents that pre-date this field
             categories: data.categories ?? [],
             paymentMethods: data.paymentMethods ?? [],
             countries: data.countries ?? [],
@@ -80,26 +82,26 @@ export function useTravels(userId: string | undefined): UseTravelsResult {
           }
 
           // Split into active vs archived based on whether the current user
-          // has archived this travel
+          // has archived this space
           if (archivedByUids.includes(userId)) {
-            archived.push(travel)
+            archived.push(space)
           } else {
-            active.push(travel)
+            active.push(space)
           }
         }
 
-        setActiveTravels(active)
-        setArchivedTravels(archived)
+        setActiveSpaces(active)
+        setArchivedSpaces(archived)
         setIsLoading(false)
         setError(null)
       },
       (err: FirestoreError) => {
         // eslint-disable-next-line no-console
-        console.error('useTravels onSnapshot error:', err)
-        setActiveTravels([])
-        setArchivedTravels([])
+        console.error('useSpaces onSnapshot error:', err)
+        setActiveSpaces([])
+        setArchivedSpaces([])
         setIsLoading(false)
-        setError(err.message || 'Unable to load travels.')
+        setError(err.message || 'Unable to load spaces.')
       },
     )
 
@@ -108,5 +110,5 @@ export function useTravels(userId: string | undefined): UseTravelsResult {
     }
   }, [userId])
 
-  return { activeTravels, archivedTravels, isLoading, error }
+  return { activeSpaces, archivedSpaces, isLoading, error }
 }

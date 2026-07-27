@@ -6,11 +6,14 @@ import type { Timestamp } from 'firebase/firestore'
 // and shareable links (toUid absent, multiUse true).
 export interface Invite {
   inviteId: string
+  // ⚠️ 'travel_member' is a stored Firestore string value, frozen as legacy
+  // even though the container is now called Space. See docs/SPACE_REFACTOR_SPEC.md §2.1.
   type: 'friend' | 'travel_member'
   fromUid: string
   fromDisplayName: string
   fromNametag?: string        // denormalized for display
-  travelId?: string           // set when type = 'travel_member'
+  // ⚠️ Field keys `travelId` / `travelName` are frozen as legacy Firestore keys.
+  travelId?: string           // set when type = 'travel_member' — the space being invited to
   travelName?: string         // denormalized
   multiUse: boolean
   toUid?: string              // only set for targeted (non-link) invites

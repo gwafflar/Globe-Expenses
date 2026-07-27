@@ -1,4 +1,4 @@
-// useTransactions.ts — real-time transaction listener for a travel.
+// useTransactions.ts — real-time transaction listener for a space.
 //
 // Each transaction in the returned array carries a `isPending` flag derived
 // from Firestore's snapshot.metadata.hasPendingWrites. When true, the
@@ -29,20 +29,20 @@ interface UseTransactionsResult {
   error: string | null
 }
 
-export function useTransactions(travelId: string | undefined): UseTransactionsResult {
+export function useTransactions(spaceId: string | undefined): UseTransactionsResult {
   const [transactions, setTransactions] = useState<TransactionWithStatus[]>([])
   const [loading, setLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!travelId) {
+    if (!spaceId) {
       setTransactions([])
       setLoading(false)
-      setError('Missing travel identifier.')
+      setError('Missing space identifier.')
       return
     }
 
-    const transactionsRef = collection(db, 'travels', travelId, 'transactions')
+    const transactionsRef = collection(db, 'travels', spaceId, 'transactions')
 
     // Order by date descending, then createdAt descending for same-day entries.
     // This requires a composite Firestore index on (date DESC, createdAt DESC).
@@ -105,7 +105,7 @@ export function useTransactions(travelId: string | undefined): UseTransactionsRe
     )
 
     return () => unsubscribe()
-  }, [travelId])
+  }, [spaceId])
 
   return { transactions, loading, error }
 }

@@ -7,7 +7,7 @@
 // Close triggers unsaved-changes confirmation dialog.
 //
 // Field visibility is declarative: each field declares which types it appears for,
-// plus optional travelSettings gates. This makes future per-travel field
+// plus optional spaceSettings gates. This makes future per-space field
 // customisation (Parameters tab) easy to layer on without restructuring.
 
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
@@ -17,8 +17,8 @@ import { getExchangeRate, hasExchangeRate } from '@/shared/utils/exchangeRates'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import type { LabeledItem, TravelMember, TravelSettings } from '@/travels/types'
-import { updateTravelCurrencies, updateTravelList, updateTravelDefaultRate, syncTransactionLocation } from '@/travels/services/travelService'
+import type { LabeledItem, SpaceMember, SpaceSettings } from '@/spaces/types'
+import { updateSpaceCurrencies, updateSpaceList, updateSpaceDefaultRate, syncTransactionLocation } from '@/spaces/services/spaceService'
 import { ALL_CURRENCIES, ALL_COUNTRIES } from '@/shared/data/pickerData'
 import type { Split, TransactionType } from '@/transactions/types'
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
@@ -71,8 +71,8 @@ function getTodayDDMMYYYY(): string {
 // Field visibility — declarative config
 // ---------------------------------------------------------------------------
 // Each form field declares which transaction types show it.
-// travelSettings gates are layered on top (e.g. trackLocation for country/city).
-// Future: per-travel user overrides can be added to this structure.
+// spaceSettings gates are layered on top (e.g. trackLocation for country/city).
+// Future: per-space user overrides can be added to this structure.
 
 type FieldName =
   | 'date' | 'name' | 'amount' | 'formula' | 'fees'
@@ -201,7 +201,7 @@ function LocationSelect({ label, value, onChange, previousValues, placeholder }:
 interface SmartCurrencySelectProps {
   value: string
   onChange: (code: string) => void
-  travelId: string
+  spaceId: string
   orderedCurrencies: string[]
   onCurrencyAdded: (code: string) => void
 }
@@ -285,7 +285,7 @@ function SmartCurrencySelect({ value, onChange, onCurrencyAdded }: SmartCurrency
 interface SmartCountrySelectProps {
   value: string
   onChange: (name: string) => void
-  travelId: string
+  spaceId: string
   orderedCountries: LabeledItem[]
   onCountryAdded: (name: string, flag: string) => void
 }
@@ -534,7 +534,7 @@ function TransferSenderPicker({
   onChange,
   currentUserTravelMemberId,
 }: {
-  members: TravelMember[]
+  members: SpaceMember[]
   selectedId: string
   onChange: (travelMemberId: string) => void
   currentUserTravelMemberId: string
@@ -570,20 +570,20 @@ export interface TransferPrefill {
 }
 
 interface TransactionFormProps {
-  travelId: string
-  members: TravelMember[]
-  travelSettings?: TravelSettings
-  travelCategories?: LabeledItem[]
-  travelPaymentMethods?: LabeledItem[]
-  travelCurrencies?: string[]
-  // The travel's reference currency for exchange rate computation.
+  spaceId: string
+  members: SpaceMember[]
+  spaceSettings?: SpaceSettings
+  spaceCategories?: LabeledItem[]
+  spacePaymentMethods?: LabeledItem[]
+  spaceCurrencies?: string[]
+  // The space's reference currency for exchange rate computation.
   mainCurrency: string
-  // Per-travel default exchange rates (relative to mainCurrency). Falls back to hardcoded rates.
+  // Per-space default exchange rates (relative to mainCurrency). Falls back to hardcoded rates.
   defaultRates?: Record<string, number>
-  /** Called when user saves a custom rate as the new travel default. */
+  /** Called when user saves a custom rate as the new space default. */
   onDefaultRateChanged?: (code: string, rate: number) => void
-  travelCountries?: LabeledItem[]
-  travelCities?: LabeledItem[]
+  spaceCountries?: LabeledItem[]
+  spaceCities?: LabeledItem[]
   existingTransactions: TransactionWithStatus[]
   initialValues?: TransactionWithStatus
   /** Pre-set the type when opening for a new transaction (e.g. 'withdrawal' from DashboardTab). */
@@ -597,7 +597,7 @@ interface TransactionFormProps {
   onLocationAdded?: (newCountry: LabeledItem | null, newCity: LabeledItem | null) => void
   onCategoryAdded?: (item: LabeledItem) => void
   onPaymentMethodAdded?: (item: LabeledItem) => void
-  /** Called when user taps "Add" in solo-travel CTA — saves tx then navigates to Parameters. */
+  /** Called when user taps "Add" in solo-space CTA — saves tx then navigates to Parameters. */
   onNavigateToParameters?: () => void
 }
 
@@ -606,17 +606,17 @@ interface TransactionFormProps {
 // ---------------------------------------------------------------------------
 
 export function TransactionForm({
-  travelId,
+  spaceId,
   members,
-  travelSettings,
-  travelCategories,
-  travelPaymentMethods,
-  travelCurrencies,
+  spaceSettings,
+  spaceCategories,
+  spacePaymentMethods,
+  spaceCurrencies,
   mainCurrency,
   defaultRates,
   onDefaultRateChanged,
-  travelCountries,
-  travelCities,
+  spaceCountries,
+  spaceCities,
   existingTransactions,
   initialValues,
   initialType,
@@ -642,7 +642,7 @@ export function TransactionForm({
     )
   }
 
-  // --- Current user's travel member slot ---
+  // --- Current user's space member slot ---
   const myMember = members.find((m) => m.userId === currentUser.uid)
   const myTravelMemberId = myMember?.travelMemberId ?? ''
   const isSolo = members.length === 1
@@ -655,11 +655,11 @@ export function TransactionForm({
   // Helper: check if a field is visible for the current transaction type + settings
   const fieldVisible = useCallback((field: FieldName): boolean => {
     if (!FIELD_TYPES[field].includes(txType)) return false
-    // TravelSettings gates
-    const trackLocation = travelSettings?.trackLocation ?? true
+    // SpaceSettings gates
+    const trackLocation = spaceSettings?.trackLocation ?? true
     if (field === 'country' || field === 'city') return trackLocation
     return true
-  }, [txType, travelSettings])
+  }, [txType, spaceSettings])
 
   // --- Formula mode ---
   const [formulaMode, setFormulaMode] = useState(isEdit && !!initialValues?.amountFormula)
@@ -667,46 +667,46 @@ export function TransactionForm({
 
   // --- Effective lists ---
   const effectiveCategories: string[] =
-    travelCategories && travelCategories.length > 0
-      ? travelCategories.map((c) => c.emoji ? `${c.emoji} ${c.label}` : c.label)
+    spaceCategories && spaceCategories.length > 0
+      ? spaceCategories.map((c) => c.emoji ? `${c.emoji} ${c.label}` : c.label)
       : userProfile.categories
 
   const effectivePaymentMethods: string[] =
-    travelPaymentMethods && travelPaymentMethods.length > 0
-      ? travelPaymentMethods.map((p) => p.emoji ? `${p.emoji} ${p.label}` : p.label)
+    spacePaymentMethods && spacePaymentMethods.length > 0
+      ? spacePaymentMethods.map((p) => p.emoji ? `${p.emoji} ${p.label}` : p.label)
       : userProfile.paymentMethods
 
 
   // --- Currency list ---
  
   const orderedCurrencies = useMemo(() => {
-    const travelSet = new Set(travelCurrencies ?? [])
+    const spaceSet = new Set(spaceCurrencies ?? [])
     const recentlyUsed = [...new Set(existingTransactions.map((tx) => tx.currency))].filter(
-      (c) => travelSet.has(c),
+      (c) => spaceSet.has(c),
     )
-    const rest = (travelCurrencies ?? []).filter((c) => !recentlyUsed.includes(c))
+    const rest = (spaceCurrencies ?? []).filter((c) => !recentlyUsed.includes(c))
     return [...recentlyUsed, ...rest]
-  }, [travelCurrencies, existingTransactions])
+  }, [spaceCurrencies, existingTransactions])
 
-  // Default currency for new transactions — most recent transaction's currency, or the travel's main.
+  // Default currency for new transactions — most recent transaction's currency, or the space's main.
   const lastUsedCurrency = orderedCurrencies[0] ?? mainCurrency
 
   // --- Country list ---
   const orderedCountries = useMemo(() => {
-    const travelCountryNames = new Set((travelCountries ?? []).map((c) => c.label.toLowerCase()))
+    const spaceCountryNames = new Set((spaceCountries ?? []).map((c) => c.label.toLowerCase()))
     const recentlyUsed = [...new Set(existingTransactions.map((tx) => tx.country).filter(Boolean) as string[])].filter(
-      (name) => travelCountryNames.has(name.toLowerCase()),
+      (name) => spaceCountryNames.has(name.toLowerCase()),
     )
-    const rest = (travelCountries ?? []).filter(
+    const rest = (spaceCountries ?? []).filter(
       (c) => !recentlyUsed.map((r) => r.toLowerCase()).includes(c.label.toLowerCase()),
     )
     return [
-      ...recentlyUsed.map((name) => travelCountries?.find((c) => c.label.toLowerCase() === name.toLowerCase())!).filter(Boolean),
+      ...recentlyUsed.map((name) => spaceCountries?.find((c) => c.label.toLowerCase() === name.toLowerCase())!).filter(Boolean),
       ...rest,
     ]
-  }, [travelCountries, existingTransactions])
+  }, [spaceCountries, existingTransactions])
 
-  const trackLocation = travelSettings?.trackLocation ?? true
+  const trackLocation = spaceSettings?.trackLocation ?? true
   const previousCities = useMemo(
     () => getPreviousValues(existingTransactions, 'city'),
     [existingTransactions],
@@ -774,7 +774,7 @@ export function TransactionForm({
       return
     }
     // User changed the currency — reset the override so effectiveRate
-    // derives from the travel's defaultRates for the new currency.
+    // derives from the space's defaultRates for the new currency.
     setRateOverride(null)
     setRateExpanded(false)
   }, [currency])
@@ -786,7 +786,7 @@ export function TransactionForm({
     return getExchangeRate(currency, mainCurrency, defaultRates)
   }, [currency, mainCurrency, rateOverride, defaultRates])
 
-  // True when neither a per-transaction override, a travel default, nor the
+  // True when neither a per-transaction override, a space default, nor the
   // hardcoded table has a real rate for this pair — effectiveRate is a blind
   // 1.0 fallback and totalAmountMain will be wrong unless the user notices.
   const rateIsUnknown = rateOverride === null && !hasExchangeRate(currency, mainCurrency, defaultRates)
@@ -832,7 +832,7 @@ export function TransactionForm({
   // Mark dirty on any field change. We wrap setters for key fields.
   const markDirty = useCallback(() => { if (!isDirty) setIsDirty(true) }, [isDirty])
 
-  // --- Solo travel: keep splits silently in sync with totalAmount ---
+  // --- Solo space: keep splits silently in sync with totalAmount ---
   useEffect(() => {
     if (!isSolo) return
     const soloSplit: Split[] = [{ travelMemberId: myTravelMemberId, amount: totalAmount }]
@@ -966,7 +966,7 @@ export function TransactionForm({
 
 
     const total = parseFloat(amountStr)
-    // Exchange rate: use user override if set, otherwise travel default, otherwise hardcoded fallback.
+    // Exchange rate: use user override if set, otherwise space default, otherwise hardcoded fallback.
     const exchangeRate = effectiveRate
     const totalAmountMain = Math.round(total * exchangeRate * 100) / 100
 
@@ -978,17 +978,17 @@ export function TransactionForm({
       else txName = 'Transaction'
     }
 
-    // Sync country/city to travel document (expense only)
+    // Sync country/city to space document (expense only)
     if (txType === 'expense') {
       const countryToSync = trackLocation && country ? country : undefined
       const cityToSync = trackLocation && city ? city : undefined
       if (countryToSync || cityToSync) {
         syncTransactionLocation(
-          travelId,
+          spaceId,
           countryToSync,
           cityToSync,
-          travelCountries ?? [],
-          travelCities ?? [],
+          spaceCountries ?? [],
+          spaceCities ?? [],
         ).then(({ newCountry, newCity }) => {
           if (onLocationAdded && (newCountry || newCity)) {
             onLocationAdded(newCountry, newCity)
@@ -1022,10 +1022,10 @@ export function TransactionForm({
     }
 
     if (isEdit) {
-      updateTransaction(travelId, initialValues!.txId, sharedData)
+      updateTransaction(spaceId, initialValues!.txId, sharedData)
       onSuccess(initialValues!.txId)
     } else {
-      const newTxId = createTransaction(travelId, {
+      const newTxId = createTransaction(spaceId, {
         ...sharedData,
         createdBy: { type: 'user' as const, uid: user.uid },
       })
@@ -1202,11 +1202,11 @@ export function TransactionForm({
                 <SmartCurrencySelect
                   value={currency}
                   onChange={(c) => { setCurrency(c); markDirty() }}
-                  travelId={travelId}
+                  spaceId={spaceId}
                   orderedCurrencies={orderedCurrencies}
                   onCurrencyAdded={(code) => {
-                    const next = [...(travelCurrencies ?? []), code]
-                    updateTravelCurrencies(travelId, next).catch(console.error)
+                    const next = [...(spaceCurrencies ?? []), code]
+                    updateSpaceCurrencies(spaceId, next).catch(console.error)
                   }}
                 />
               </div>
@@ -1218,7 +1218,7 @@ export function TransactionForm({
                 </p>
               )}
 
-              {/* Unknown-rate warning — no travel default or hardcoded rate exists for
+              {/* Unknown-rate warning — no space default or hardcoded rate exists for
                   this pair, so the amount below is not actually converted (1:1 fallback). */}
               {currency !== mainCurrency && rateIsUnknown && (
                 <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
@@ -1293,12 +1293,12 @@ export function TransactionForm({
                         </p>
                       )}
                       <div className="flex items-center gap-2">
-                        {/* Save as new travel default */}
+                        {/* Save as new space default */}
                         {rateOverride !== null && rateOverride !== getExchangeRate(currency, mainCurrency, defaultRates) && (
                           <button
                             type="button"
                             onClick={() => {
-                              updateTravelDefaultRate(travelId, currency, rateOverride).catch(console.error)
+                              updateSpaceDefaultRate(spaceId, currency, rateOverride).catch(console.error)
                               onDefaultRateChanged?.(currency, rateOverride)
                             }}
                             className="text-[10px] text-primary hover:underline"
@@ -1393,10 +1393,10 @@ export function TransactionForm({
           {fieldVisible('split') && (
             <>
               {isSolo ? (
-                /* Solo travel CTA — saves the transaction first, then navigates to Parameters */
+                /* Solo space CTA — saves the transaction first, then navigates to Parameters */
                 <div className="rounded-lg border border-dashed border-primary/30 bg-primary/5 px-4 py-3">
                   <p className="text-xs text-muted-foreground">
-                    👥 Share this expense with your friends? Add them to this travel.
+                    👥 Share this expense with your friends? Add them to this space.
                   </p>
                   {onNavigateToParameters && (
                     <button
@@ -1482,11 +1482,11 @@ export function TransactionForm({
                   <SmartCountrySelect
                     value={country}
                     onChange={(v) => { setCountry(v); markDirty() }}
-                    travelId={travelId}
+                    spaceId={spaceId}
                     orderedCountries={orderedCountries}
                     onCountryAdded={(name, flag) => {
-                      const next = [...(travelCountries ?? []), { id: `country-${Date.now()}`, label: name, emoji: flag }]
-                      updateTravelList(travelId, 'countries', next).catch(console.error)
+                      const next = [...(spaceCountries ?? []), { id: `country-${Date.now()}`, label: name, emoji: flag }]
+                      updateSpaceList(spaceId, 'countries', next).catch(console.error)
                     }}
                   />
                 </div>
@@ -1517,8 +1517,8 @@ export function TransactionForm({
                     items={effectiveCategories}
                     onAddNew={(label) => {
                       const newItem: LabeledItem = { id: `cat-${Date.now()}`, label }
-                      const updatedList = [...(travelCategories ?? []), newItem]
-                      updateTravelList(travelId, 'categories', updatedList).catch(console.error)
+                      const updatedList = [...(spaceCategories ?? []), newItem]
+                      updateSpaceList(spaceId, 'categories', updatedList).catch(console.error)
                       onCategoryAdded?.(newItem)
                     }}
                   />
@@ -1534,8 +1534,8 @@ export function TransactionForm({
                     required={txType === 'withdrawal' || txType === 'adjustment'}
                     onAddNew={(label) => {
                       const newItem: LabeledItem = { id: `pm-${Date.now()}`, label }
-                      const updatedList = [...(travelPaymentMethods ?? []), newItem]
-                      updateTravelList(travelId, 'paymentMethods', updatedList).catch(console.error)
+                      const updatedList = [...(spacePaymentMethods ?? []), newItem]
+                      updateSpaceList(spaceId, 'paymentMethods', updatedList).catch(console.error)
                       onPaymentMethodAdded?.(newItem)
                     }}
                   />

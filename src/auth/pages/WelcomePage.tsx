@@ -30,7 +30,7 @@ function isInstalledPWA(): boolean {
 export function WelcomePage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const redirectTo = new URLSearchParams(location.search).get('redirect') || '/travels'
+  const redirectTo = new URLSearchParams(location.search).get('redirect') || '/spaces'
 
   // If user is already authenticated, skip welcome and go straight to the app.
   const { currentUser, isAuthReady } = useAuthStore()
@@ -76,13 +76,13 @@ export function WelcomePage() {
   }
 
   // Build redirect query string to forward to login/register pages
-  const redirectQuery = redirectTo !== '/travels'
+  const redirectQuery = redirectTo !== '/spaces'
     ? `?redirect=${encodeURIComponent(redirectTo)}`
     : ''
 
   // Feature highlights shown below the hero
   const features = [
-    { icon: Plane, title: 'Multi-currency travels', description: 'Track expenses in any currency with automatic conversion' },
+    { icon: Plane, title: 'Multi-currency spaces', description: 'Track expenses in any currency with automatic conversion' },
     { icon: Users, title: 'Split with friends', description: 'Share costs and settle balances effortlessly' },
     { icon: Wallet, title: 'Cash tracker', description: 'Monitor withdrawals and wallet balances on the go' },
     { icon: WifiOff, title: 'Works offline', description: 'Use it anywhere in the world, even without network. Transactions sync with your friends when back online.' },
@@ -108,13 +108,13 @@ export function WelcomePage() {
           GlobeExpenses
         </h1>
         <p className="mb-10 max-w-xs text-center text-muted-foreground">
-          The simplest way to track and split travel expenses with friends.
+          The simplest way to track and split space expenses with friends.
         </p>
 
         {/* Getting started steps */}
         <div className="mb-10 w-full max-w-sm space-y-4">
           <p className="text-center text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-            Empower your travel in just 5 steps
+            Empower your space in just 5 steps
           </p>
 
           {/* Step cards */}
@@ -133,7 +133,7 @@ export function WelcomePage() {
               <span className="text-2xl">🚀</span>
               <div>
                 <p className="text-xs font-semibold text-purple-600">Step 2</p>
-                <p className="text-sm font-medium text-foreground">Create your first travel</p>
+                <p className="text-sm font-medium text-foreground">Create your first space</p>
               </div>
             </div>
 
