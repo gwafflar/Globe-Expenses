@@ -3,13 +3,16 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { nanoid } from 'nanoid'
-import type { LabeledItem, Space, SpaceMember } from '@/spaces/types'
+import type { LabeledItem, Space, SpaceConfig, SpaceMember } from '@/spaces/types'
 import { getSpaceMainCurrency } from '@/spaces/types'
+import { getSpaceConfig } from '@/spaces/config'
+import { FieldsEditor } from '@/spaces/components/FieldsEditor'
 import {
   updateSpaceCurrencies,
   updateSpaceList,
   updateSpaceMeta,
   updateSpaceDefaultRate,
+  updateSpaceConfig,
   addUnclaimedMember,
   renameSpaceMember,
   claimSpaceMember,
@@ -90,7 +93,7 @@ function CollapsiblePicker({
 // CurrencyPicker — searchable checklist
 // ---------------------------------------------------------------------------
 
-function CurrencyPicker({
+export function CurrencyPicker({
   selected,
   onChange,
   lockedCurrency,
@@ -374,7 +377,7 @@ function CountryPicker({
 // EmojiInput
 // ---------------------------------------------------------------------------
 
-function EmojiInput({ value, onChange, onBlur, ariaLabel }: { value: string; onChange: (v: string) => void; onBlur?: () => void; ariaLabel: string }) {
+export function EmojiInput({ value, onChange, onBlur, ariaLabel }: { value: string; onChange: (v: string) => void; onBlur?: () => void; ariaLabel: string }) {
   return (
     <input
       type="text"
@@ -1782,6 +1785,48 @@ export function ParametersTab({ space, transactions, onSpaceChange }: Parameters
   }
 
   // ---------------------------------------------------------------------------
+  // Fields / config (Phase 3) — read every gate through getSpaceConfig(), never
+  // space.config directly, so legacy spaces (no config) resolve to travel-mode
+  // defaults and every section stays visible exactly as before this refactor.
+  // ---------------------------------------------------------------------------
+
+  const spaceConfig = getSpaceConfig(space)
+  const spaceMainCurrency = getSpaceMainCurrency(space)
+  const foreignCurrencyTxCount = transactions.filter((tx) => tx.currency !== spaceMainCurrency).length
+
+  // Toggles write immediately; free-text edits inside customFields (a field's label,
+  // an option's label) are debounced ~500ms so typing doesn't fire one Firestore
+  // write per keystroke. A ref timer is used (not state) so the cleanup effect
+  // below can clear it on unmount without depending on render — otherwise a
+  // component unmounted mid-typing would fire a write against a stale closure.
+  const configWriteTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    return () => { if (configWriteTimer.current) clearTimeout(configWriteTimer.current) }
+  }, [])
+
+  // Optimistic local update first (consistent with the rest of this tab). The
+  // Firestore write is immediate for builtInFields/features toggles, and
+  // debounced when only customFields changed (covers label/option typing).
+  // FieldsEditor already normalises `next` before calling this.
+  function handleConfigChange(next: SpaceConfig) {
+    onSpaceChange({ config: next })
+
+    const togglesChanged =
+      JSON.stringify(next.builtInFields) !== JSON.stringify(spaceConfig.builtInFields) ||
+      JSON.stringify(next.features) !== JSON.stringify(spaceConfig.features)
+
+    if (configWriteTimer.current) clearTimeout(configWriteTimer.current)
+
+    if (togglesChanged) {
+      updateSpaceConfig(space.spaceId, next).catch(console.error)
+    } else {
+      configWriteTimer.current = setTimeout(() => {
+        updateSpaceConfig(space.spaceId, next).catch(console.error)
+      }, 500)
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Archive / Leave / Delete logic
   // ---------------------------------------------------------------------------
 
@@ -1869,34 +1914,51 @@ export function ParametersTab({ space, transactions, onSpaceChange }: Parameters
         <MembersSection space={space} onSpaceChange={onSpaceChange} />
       </Section>
 
-      {/* Currencies */}
-      <Section title="Currencies">
-        {/* Read-only main currency display — locked after creation (editable + recompute is v2). */}
-        {(() => {
-          const mc = getSpaceMainCurrency(space)
-          const match = ALL_CURRENCIES.find(([code]) => code === mc)
-          const label = match ? `${mc} (${match[1]}) — ${match[2]}` : mc
-          return (
-            <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-3 py-2">
-              <div>
-                <p className="text-sm font-medium">Main currency</p>
-                <p className="text-xs text-muted-foreground">{label}</p>
-              </div>
-              <span className="rounded-full border px-2 py-0.5 text-[10px] text-muted-foreground">
-                set at creation — cannot be modified
-              </span>
-            </div>
-          )
-        })()}
-        <CurrencyPicker
-          selected={space.currencies ?? []}
-          onChange={handleCurrenciesChange}
-          lockedCurrency={getSpaceMainCurrency(space)}
+      {/* Fields — built-in toggles, feature toggles, custom field editor. Hiding a
+          section below never deletes its stored list; re-enabling the field
+          brings the section back with its contents intact. */}
+      <Section title="Fields">
+        <FieldsEditor
+          config={spaceConfig}
+          onConfigChange={handleConfigChange}
+          presetOrigin={space.presetOrigin}
+          showPresetSection
+          canDisableMultiCurrency={foreignCurrencyTxCount === 0}
+          foreignCurrencyTxCount={foreignCurrencyTxCount}
         />
       </Section>
 
-      {/* Exchange Rates — editable default rates for each currency vs mainCurrency */}
-      {(() => {
+      {/* Currencies — hidden when multiCurrency is off */}
+      {spaceConfig.features.multiCurrency && (
+        <Section title="Currencies">
+          {/* Read-only main currency display — locked after creation (editable + recompute is v2). */}
+          {(() => {
+            const mc = getSpaceMainCurrency(space)
+            const match = ALL_CURRENCIES.find(([code]) => code === mc)
+            const label = match ? `${mc} (${match[1]}) — ${match[2]}` : mc
+            return (
+              <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-3 py-2">
+                <div>
+                  <p className="text-sm font-medium">Main currency</p>
+                  <p className="text-xs text-muted-foreground">{label}</p>
+                </div>
+                <span className="rounded-full border px-2 py-0.5 text-[10px] text-muted-foreground">
+                  set at creation — cannot be modified
+                </span>
+              </div>
+            )
+          })()}
+          <CurrencyPicker
+            selected={space.currencies ?? []}
+            onChange={handleCurrenciesChange}
+            lockedCurrency={getSpaceMainCurrency(space)}
+          />
+        </Section>
+      )}
+
+      {/* Exchange Rates — editable default rates for each currency vs mainCurrency.
+          Hidden when multiCurrency is off. */}
+      {spaceConfig.features.multiCurrency && (() => {
         const mc = getSpaceMainCurrency(space)
         // Show all currencies in the space's list except the main currency.
         const currenciesWithRates = (space.currencies ?? []).filter((c) => c !== mc)
@@ -1932,48 +1994,56 @@ export function ParametersTab({ space, transactions, onSpaceChange }: Parameters
         )
       })()}
 
-      {/* Categories */}
-      <Section title="Categories">
-        <EditableLabeledList
-          items={space.categories ?? []}
-          spaceId={space.spaceId}
-          field="categories"
-          placeholder="Category name…"
-          onItemsChange={handleListChange('categories')}
-        />
-      </Section>
+      {/* Categories — hidden when builtInFields.category is off */}
+      {spaceConfig.builtInFields.category && (
+        <Section title="Categories">
+          <EditableLabeledList
+            items={space.categories ?? []}
+            spaceId={space.spaceId}
+            field="categories"
+            placeholder="Category name…"
+            onItemsChange={handleListChange('categories')}
+          />
+        </Section>
+      )}
 
-      {/* Payment methods */}
-      <Section title="Payment methods">
-        <EditableLabeledList
-          items={space.paymentMethods ?? []}
-          spaceId={space.spaceId}
-          field="paymentMethods"
-          placeholder="Payment method…"
-          onItemsChange={handleListChange('paymentMethods')}
-        />
-      </Section>
+      {/* Payment methods — hidden when builtInFields.paymentMethod is off */}
+      {spaceConfig.builtInFields.paymentMethod && (
+        <Section title="Payment methods">
+          <EditableLabeledList
+            items={space.paymentMethods ?? []}
+            spaceId={space.spaceId}
+            field="paymentMethods"
+            placeholder="Payment method…"
+            onItemsChange={handleListChange('paymentMethods')}
+          />
+        </Section>
+      )}
 
-      {/* Countries — CountryPicker replaces EditableLabeledList */}
-      <Section title="Countries">
-        <CountryPicker
-          selected={space.countries ?? []}
-          spaceId={space.spaceId}
-          onSelectedChange={handleListChange('countries')}
-        />
-      </Section>
+      {/* Countries — hidden when builtInFields.country is off */}
+      {spaceConfig.builtInFields.country && (
+        <Section title="Countries">
+          <CountryPicker
+            selected={space.countries ?? []}
+            spaceId={space.spaceId}
+            onSelectedChange={handleListChange('countries')}
+          />
+        </Section>
+      )}
 
-      {/* Cities — still editable list, auto-seeded from transactions */}
-      <Section title="Cities">
-        <EditableLabeledList
-          items={effectiveCities}
-          spaceId={space.spaceId}
-          field="cities"
-          placeholder="City name…"
-          onItemsChange={handleListChange('cities')}
-          hideEmoji
-        />
-      </Section>
+      {/* Cities — hidden when builtInFields.city is off. Still auto-seeded from transactions. */}
+      {spaceConfig.builtInFields.city && (
+        <Section title="Cities">
+          <EditableLabeledList
+            items={effectiveCities}
+            spaceId={space.spaceId}
+            field="cities"
+            placeholder="City name…"
+            onItemsChange={handleListChange('cities')}
+            hideEmoji
+          />
+        </Section>
+      )}
 
       {/* Feedback — embedded form for quick beta feedback */}
       <Section title="Feedback">
