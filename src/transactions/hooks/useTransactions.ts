@@ -85,6 +85,9 @@ export function useTransactions(spaceId: string | undefined): UseTransactionsRes
             type: data.type as TransactionType | undefined,
             fees: data.fees as number | undefined,
             adjustmentMode: data.adjustmentMode as AdjustmentMode | undefined,
+            // Absent → leave undefined (do not default to {}, which would make
+            // every legacy transaction look dirty to future diffing).
+            custom: data.custom as Transaction['custom'],
             // hasPendingWrites is true when the write is queued locally but
             // not yet confirmed by the Firestore server.
             isPending: docSnapshot.metadata.hasPendingWrites,

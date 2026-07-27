@@ -73,6 +73,9 @@ export function useSpaces(userId: string | undefined): UseSpacesResult {
             mainCurrency: data.mainCurrency as string | undefined,
             defaultRates: data.defaultRates as Record<string, number> | undefined,
             settings: data.settings,
+            // Absent on legacy docs — getSpaceConfig() resolves the fallback.
+            config: data.config,
+            presetOrigin: data.presetOrigin,
             // Per-space lists — default to [] for older documents that pre-date this field
             categories: data.categories ?? [],
             paymentMethods: data.paymentMethods ?? [],

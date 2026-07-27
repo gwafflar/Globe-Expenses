@@ -3,6 +3,7 @@
 import { collection, doc, setDoc, updateDoc, deleteDoc, deleteField, serverTimestamp } from 'firebase/firestore'
 import { db } from '@/services/firebase'
 import type { Transaction, Split, TransactionType, AdjustmentMode } from '@/transactions/types'
+import type { CustomValue } from '@/spaces/types'
 
 /**
  * Creates a new transaction document and returns its ID immediately.
@@ -75,6 +76,7 @@ export type UpdateTransactionData = {
   type?: TransactionType          // Transaction purpose (undefined = 'expense')
   fees?: number                   // Withdrawal fees (same currency)
   adjustmentMode?: AdjustmentMode // Only meaningful when type === 'adjustment'
+  custom?: Record<string, CustomValue> // Keyed by CustomFieldDef.id
 }
 
 /**
@@ -111,6 +113,10 @@ export function updateTransaction(
     type: data.type ?? deleteField(),
     fees: data.fees ?? deleteField(),
     adjustmentMode: data.adjustmentMode ?? deleteField(),
+    // Whole-map replacement, not dot-notation — the form always submits the
+    // complete set of custom values, so a partial merge would silently keep
+    // values for fields the user just cleared.
+    custom: data.custom ?? deleteField(),
     lastModifiedAt: serverTimestamp(),
   }).catch((err: unknown) => {
     console.error('[transactionService] updateDoc failed:', err)

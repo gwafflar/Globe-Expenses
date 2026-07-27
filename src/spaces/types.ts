@@ -49,6 +49,53 @@ export interface SpaceSettings {
   trackLocation: boolean
 }
 
+// ---------------------------------------------------------------------------
+// SpaceConfig — see docs/SPACE_REFACTOR_SPEC.md §4.
+// ---------------------------------------------------------------------------
+
+/** A user-defined field. `id` is a stable nanoid, NEVER derived from the label,
+ *  so renaming a field or one of its options never orphans stored values. */
+export interface CustomFieldDef {
+  id: string
+  label: string
+  emoji?: string
+  type: CustomFieldType
+  /** For type === 'select' only. Reuses the existing LabeledItem shape,
+   *  so the existing list-editing UI can be reused in Phase 3. */
+  options?: LabeledItem[]
+  /** Soft-disable: hides the field everywhere without deleting the definition
+   *  or any stored transaction value. */
+  enabled: boolean
+}
+
+export type CustomFieldType = 'select' | 'text' | 'boolean'
+
+/** Value stored in Transaction.custom. The matching CustomFieldDef.type tells
+ *  you which variant to expect, so read-time parsing is deterministic. */
+export type CustomValue = string | boolean
+
+export interface SpaceConfig {
+  builtInFields: {
+    country: boolean
+    city: boolean
+    category: boolean
+    paymentMethod: boolean
+    notes: boolean
+  }
+  features: {
+    /** Withdrawal + adjustment transaction types, wallet dashboard card,
+     *  reconciliation dialog. Requires builtInFields.paymentMethod — see
+     *  normaliseSpaceConfig(). */
+    wallets: boolean
+    /** Sticky flag. Auto-upgrades to true on first foreign-currency use and
+     *  never auto-downgrades. See SPEC §6.2. */
+    multiCurrency: boolean
+  }
+  customFields: CustomFieldDef[]
+}
+
+export type PresetId = 'travel' | 'solo' | 'group' | 'custom'
+
 // A list item with an optional emoji prefix (e.g. { label: 'Food', emoji: '🍽️' })
 export interface LabeledItem {
   id: string      // client-generated uuid — stable key for Firestore array updates
@@ -81,6 +128,15 @@ export interface Space {
   // Absent on legacy docs — consumers fall back to hardcoded EXCHANGE_RATES.
   defaultRates?: Record<string, number>
   settings?: SpaceSettings
+
+  /** Absent on legacy documents. NEVER read directly — always go through
+   *  getSpaceConfig(). */
+  config?: SpaceConfig
+
+  /** DISPLAY ONLY: which preset this space was created from, used for the list
+   *  badge and the "reset to preset" section in Parameters.
+   *  ⚠️ No behaviour may branch on this field. Behaviour reads config. */
+  presetOrigin?: PresetId
 
   // Per-space lists (v1 extension).
   // Absent on older space documents — read as [] (backward compatible).

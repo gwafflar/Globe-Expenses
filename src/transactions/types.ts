@@ -1,4 +1,5 @@
 import type { Timestamp } from 'firebase/firestore'
+import type { CustomValue } from '@/spaces/types'
 
 export interface Split {
   /** Stable nanoid identifying a SpaceMember.
@@ -50,4 +51,8 @@ export interface Transaction {
   type?: TransactionType  // Optional for backward compat — undefined treated as 'expense'
   fees?: number           // Withdrawal fees (same currency). Deducted from wallet balance (user received totalAmount - fees).
   adjustmentMode?: AdjustmentMode  // Only meaningful when type === 'adjustment'
+  /** Keyed by CustomFieldDef.id. Absent when the space has no custom fields or
+   *  none were filled. For 'select' fields the value is the OPTION ID, never
+   *  the label — renaming an option updates every transaction for free. */
+  custom?: Record<string, CustomValue>
 }

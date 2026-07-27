@@ -17,9 +17,11 @@ import {
 } from 'firebase/firestore'
 import { nanoid } from 'nanoid'
 import { db } from '@/services/firebase'
-import type { LabeledItem, SpaceMember, SpaceSettings } from '@/spaces/types'
+import type { CustomFieldDef, LabeledItem, PresetId, SpaceConfig, SpaceMember, SpaceSettings } from '@/spaces/types'
 import { getFlagForCountry } from '@/shared/data/pickerData'
 import { buildDefaultRates } from '@/shared/utils/exchangeRates'
+import { configFromPreset } from '@/spaces/presets'
+import { normaliseSpaceConfig } from '@/spaces/config'
 
 // ---------------------------------------------------------------------------
 // serialiseMember — strips undefined field values before writing to Firestore.
@@ -42,6 +44,33 @@ function serialiseMember(m: SpaceMember): Record<string, unknown> {
 }
 
 // ---------------------------------------------------------------------------
+// serialiseCustomFieldDef — strips undefined field values before writing.
+//
+// Firestore rejects `undefined` values. emoji and options are optional and
+// commonly absent, so every config write path must go through this first.
+// ---------------------------------------------------------------------------
+
+function serialiseCustomFieldDef(f: CustomFieldDef): Record<string, unknown> {
+  const obj: Record<string, unknown> = {
+    id: f.id,
+    label: f.label,
+    type: f.type,
+    enabled: f.enabled,
+  }
+  if (f.emoji !== undefined) obj.emoji = f.emoji
+  if (f.options !== undefined) obj.options = f.options
+  return obj
+}
+
+function serialiseSpaceConfig(config: SpaceConfig): Record<string, unknown> {
+  return {
+    builtInFields: { ...config.builtInFields },
+    features: { ...config.features },
+    customFields: config.customFields.map(serialiseCustomFieldDef),
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Create
 // ---------------------------------------------------------------------------
 
@@ -52,10 +81,13 @@ interface CreateSpaceInput {
   emoji?: string
   description?: string
   mainCurrency: string  // ISO 4217 — the reference currency for all exchange rate conversions
+  // Defaults to 'travel' so callers not yet updated to the Phase 4 creation
+  // flow keep creating spaces with the pre-refactor behaviour.
+  presetId?: PresetId
 }
 
 export async function createSpace(input: CreateSpaceInput): Promise<string> {
-  const { uid, displayName, name, emoji, description, mainCurrency } = input
+  const { uid, displayName, name, emoji, description, mainCurrency, presetId = 'travel' } = input
 
   // Collection name stays `travels` — Firestore path frozen as legacy.
   const spacesRef = collection(db, 'travels')
@@ -85,6 +117,8 @@ export async function createSpace(input: CreateSpaceInput): Promise<string> {
     paymentMethods: [],
     countries: [],
     cities: [],
+    config: serialiseSpaceConfig(normaliseSpaceConfig(configFromPreset(presetId))),
+    presetOrigin: presetId,
   }
 
   if (emoji?.trim()) docData.emoji = emoji.trim()
@@ -119,6 +153,35 @@ export async function updateSpaceSettings(
 ): Promise<void> {
   const ref = doc(db, 'travels', spaceId)
   await updateDoc(ref, { settings })
+}
+
+// ---------------------------------------------------------------------------
+// Update the space's SpaceConfig (Fields editor — Phase 3).
+// Whole-object write: the Fields editor always submits the complete config.
+// ---------------------------------------------------------------------------
+
+export async function updateSpaceConfig(spaceId: string, config: SpaceConfig): Promise<void> {
+  const ref = doc(db, 'travels', spaceId)
+  await updateDoc(ref, { config: serialiseSpaceConfig(normaliseSpaceConfig(config)) })
+}
+
+/** Updates the display-only preset badge. Never drives behaviour. */
+export async function updateSpacePresetOrigin(spaceId: string, presetId: PresetId): Promise<void> {
+  const ref = doc(db, 'travels', spaceId)
+  await updateDoc(ref, { presetOrigin: presetId })
+}
+
+/**
+ * Sticky multi-currency upgrade (SPEC §6.2). Fire-and-forget, same pattern as
+ * syncTransactionLocation(): safe offline, replayed on reconnect.
+ * No-op when already true. Wired into the transaction form in Phase 5.
+ */
+export function ensureMultiCurrency(spaceId: string, config: SpaceConfig): void {
+  if (config.features.multiCurrency) return
+  const ref = doc(db, 'travels', spaceId)
+  updateDoc(ref, { 'config.features.multiCurrency': true }).catch((err: unknown) => {
+    console.error('[spaceService] ensureMultiCurrency failed:', err)
+  })
 }
 
 // ---------------------------------------------------------------------------
