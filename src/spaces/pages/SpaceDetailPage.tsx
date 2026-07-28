@@ -11,6 +11,7 @@ import { doc, onSnapshot } from 'firebase/firestore'
 import { db } from '@/services/firebase'
 import type { LabeledItem, Space } from '@/spaces/types'
 import { getSpaceMainCurrency } from '@/spaces/types'
+import { getSpaceConfig } from '@/spaces/config'
 import { useAuthStore } from '@/auth/store/useAuthStore'
 import { usePendingInvites } from '@/friends/hooks/usePendingInvites'
 import { ChevronLeft, WifiOff } from 'lucide-react'
@@ -655,11 +656,8 @@ export function SpaceDetailPage() {
         <TransactionForm
           key={formKey}
           spaceId={spaceId!}
+          space={space}
           members={space.members}
-          spaceSettings={space.settings}
-          spaceCategories={space.categories}
-          spacePaymentMethods={space.paymentMethods}
-          spaceCurrencies={space.currencies}
           mainCurrency={mainCurrency}
           defaultRates={space.defaultRates}
           onDefaultRateChanged={(code, rate) => {
@@ -669,8 +667,14 @@ export function SpaceDetailPage() {
               defaultRates: { ...(prev.defaultRates ?? {}), [code]: rate },
             } : prev)
           }}
-          spaceCountries={space.countries}
-          spaceCities={space.cities}
+          onMultiCurrencyUpgraded={() => {
+            // Optimistic local update — same pattern as onDefaultRateChanged above.
+            // The Firestore write itself is fire-and-forget (ensureMultiCurrency()).
+            setSpace((prev) => prev ? {
+              ...prev,
+              config: { ...getSpaceConfig(prev), features: { ...getSpaceConfig(prev).features, multiCurrency: true } },
+            } : prev)
+          }}
           existingTransactions={transactions}
           initialValues={editingTx ?? undefined}
           initialType={formInitialType}

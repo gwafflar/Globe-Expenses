@@ -130,6 +130,10 @@ export interface Space {
   settings?: SpaceSettings
 
   /** Optional trip dates, ISO "YYYY-MM-DD" (native <input type="date"> format).
+   *  ⚠️ This format DIFFERS from Transaction.date ("DD-MM-YYYY") — ISO sorts
+   *  lexicographically the same as chronologically, which DD-MM-YYYY does not.
+   *  Never compare these to a Transaction.date string directly; go through an
+   *  explicit parse helper (e.g. parseTxDate() in dashboardHelpers.ts) first.
    *  Set only for the `travel` preset's optional "Set trip dates" extra.
    *  Display only — nothing currently computes off these (getTripDurationDays()
    *  derives duration from transaction dates instead). Absent on most spaces. */

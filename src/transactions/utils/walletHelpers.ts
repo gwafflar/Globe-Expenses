@@ -9,6 +9,7 @@
 
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
 import type { TransactionType, AdjustmentMode } from '@/transactions/types'
+import type { SpaceConfig } from '@/spaces/types'
 
 // ---------------------------------------------------------------------------
 // Transaction type helpers
@@ -65,6 +66,44 @@ export function affectsBalance(tx: { type?: TransactionType; adjustmentMode?: Ad
   if (t === 'transfer') return true
   if (t === 'adjustment' && tx.adjustmentMode === 'expense') return true
   return false
+}
+
+// ---------------------------------------------------------------------------
+// Transaction type availability (Space refactor Phase 5, §2)
+// ---------------------------------------------------------------------------
+
+/** Order the type selector renders in — stable regardless of config. */
+const TYPE_ORDER: TransactionType[] = ['expense', 'transfer', 'withdrawal', 'adjustment']
+
+/**
+ * Which transaction types can be CREATED in this space right now.
+ * - 'expense'    always
+ * - 'transfer'   requires >= 2 members (a transfer needs someone to transfer to)
+ * - 'withdrawal' and 'adjustment' require features.wallets
+ * Order is stable and matches the type selector's pill order.
+ *
+ * @param currentType When editing an existing transaction, pass its type so it
+ *   stays available even if the config no longer offers it for creation (e.g.
+ *   wallets turned off after a withdrawal was recorded). The transaction must
+ *   remain editable without silently coercing its type — that would corrupt
+ *   wallet history. Omit when creating a new transaction.
+ */
+export function availableTransactionTypes(
+  config: SpaceConfig,
+  memberCount: number,
+  currentType?: TransactionType,
+): TransactionType[] {
+  const types = TYPE_ORDER.filter((t) => {
+    if (t === 'transfer') return memberCount >= 2
+    if (t === 'withdrawal' || t === 'adjustment') return config.features.wallets
+    return true
+  })
+  if (currentType && !types.includes(currentType)) {
+    // Insert at its stable position rather than appending, so the pill order
+    // never depends on whether this is an edit.
+    return TYPE_ORDER.filter((t) => types.includes(t) || t === currentType)
+  }
+  return types
 }
 
 // ---------------------------------------------------------------------------

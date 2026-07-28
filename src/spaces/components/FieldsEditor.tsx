@@ -18,6 +18,7 @@ import {
 import type { CustomFieldDef, CustomFieldType, LabeledItem, PresetId, SpaceConfig } from '@/spaces/types'
 import { normaliseSpaceConfig } from '@/spaces/config'
 import { PRESETS, matchesPreset, applyPreset } from '@/spaces/presets'
+import { Switch } from '@/shared/components/Switch'
 import { Button } from '@/components/ui/button'
 import {
   AlertDialog,
@@ -56,28 +57,6 @@ const CUSTOM_TYPES: { id: CustomFieldType; label: string }[] = [
 // ---------------------------------------------------------------------------
 // Small building blocks
 // ---------------------------------------------------------------------------
-
-function Switch({ checked, onChange, disabled, label }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean; label: string }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      disabled={disabled}
-      onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
-        checked ? 'bg-primary' : 'bg-muted'
-      } ${disabled ? 'opacity-40' : ''}`}
-    >
-      <span
-        className={`inline-block h-5 w-5 transform rounded-full bg-background shadow transition-transform ${
-          checked ? 'translate-x-5' : 'translate-x-1'
-        }`}
-      />
-    </button>
-  )
-}
 
 function ToggleRow({
   icon: Icon, label, hint, checked, onChange, disabled, note,

@@ -29,7 +29,11 @@ export type AdjustmentMode = 'expense' | 'balance_only'
 
 export interface Transaction {
   txId: string
-  date: string // date string "DD-MM-YYYY"
+  /** Date string "DD-MM-YYYY". ⚠️ This format DIFFERS from Space.startDate/endDate
+   *  (ISO "YYYY-MM-DD") — it does not sort lexicographically by chronology, unlike
+   *  ISO. Never compare against a Space date string directly; parse both explicitly
+   *  first (e.g. via parseTxDate() in dashboardHelpers.ts). */
+  date: string
   country?: string   // Stored as plain strings. Country includes the flag emoji prefix (e.g. "🇯🇵 Japan").
   city?: string   // City flag emoji deferred to v2 (requires country→city mapping).
   name: string

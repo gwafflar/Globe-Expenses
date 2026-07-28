@@ -64,3 +64,52 @@ export function resolveOptionLabel(def: CustomFieldDef, value: CustomValue): str
   const option = def.options?.find((o) => o.id === value)
   return option?.label ?? String(value)
 }
+
+// ---------------------------------------------------------------------------
+// Custom field value builders — Space refactor Phase 5, §4.
+// ---------------------------------------------------------------------------
+
+/** Builds the Transaction.custom map from raw form state.
+ *  Omits empty values entirely: '' for select/text, and false for boolean.
+ *  So `custom` contains only meaningful entries, and consumers must treat an
+ *  absent boolean key as false. Returns undefined when nothing is set, so the
+ *  field is absent from the document rather than an empty object.
+ *  `defs` should be the currently ENABLED definitions only — a disabled
+ *  field's value is never rebuilt from form state (it isn't rendered, so it
+ *  isn't in `values`); see mergeCustomPayload() for how it survives an edit. */
+export function buildCustomPayload(
+  values: Record<string, CustomValue>,
+  defs: CustomFieldDef[],
+): Record<string, CustomValue> | undefined {
+  const result: Record<string, CustomValue> = {}
+  for (const def of defs) {
+    const v = values[def.id]
+    if (v === undefined) continue
+    if (def.type === 'boolean') {
+      if (v === true) result[def.id] = true
+    } else if (typeof v === 'string' && v !== '') {
+      result[def.id] = v
+    }
+  }
+  return Object.keys(result).length > 0 ? result : undefined
+}
+
+/** Merges freshly-built values for the ENABLED fields into a transaction's
+ *  existing `custom` map, leaving every other key untouched. This is the
+ *  write-path half of "disabling a field never deletes its stored value":
+ *  a field disabled after a transaction was saved isn't in `enabledDefs` (so
+ *  it isn't rendered and isn't in `values`), and this function never touches
+ *  a key it didn't itself just (re)compute. */
+export function mergeCustomPayload(
+  existingCustom: Record<string, CustomValue> | undefined,
+  values: Record<string, CustomValue>,
+  enabledDefs: CustomFieldDef[],
+): Record<string, CustomValue> | undefined {
+  const merged: Record<string, CustomValue> = { ...(existingCustom ?? {}) }
+  const built = buildCustomPayload(values, enabledDefs) ?? {}
+  for (const def of enabledDefs) {
+    if (built[def.id] !== undefined) merged[def.id] = built[def.id]
+    else delete merged[def.id]
+  }
+  return Object.keys(merged).length > 0 ? merged : undefined
+}

@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom'
 import { nanoid } from 'nanoid'
 import type { LabeledItem, Space, SpaceConfig, SpaceMember } from '@/spaces/types'
 import { getSpaceMainCurrency } from '@/spaces/types'
+import { InlineCurrencyControl } from '@/shared/components/CurrencySelect'
 import { getSpaceConfig } from '@/spaces/config'
 import { FieldsEditor } from '@/spaces/components/FieldsEditor'
 import {
@@ -1928,7 +1929,31 @@ export function ParametersTab({ space, transactions, onSpaceChange }: Parameters
         />
       </Section>
 
-      {/* Currencies — hidden when multiCurrency is off */}
+      {/* Currencies — collapsed to a single discreet trigger when multiCurrency is
+          off (SPEC §6.2, second trigger). Picking a second currency here flips the
+          sticky flag on and reveals the full section, same as the form's inline
+          control. */}
+      {!spaceConfig.features.multiCurrency && (
+        <Section title="Currencies">
+          <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-3 py-2">
+            <div>
+              <p className="text-sm font-medium">Main currency</p>
+              <p className="text-xs text-muted-foreground">{spaceMainCurrency}</p>
+            </div>
+            <InlineCurrencyControl
+              mainCurrency={spaceMainCurrency}
+              onChange={(code) => {
+                if (code === spaceMainCurrency) return
+                handleConfigChange({ ...spaceConfig, features: { ...spaceConfig.features, multiCurrency: true } })
+                if (!(space.currencies ?? []).includes(code)) {
+                  handleCurrenciesChange([...(space.currencies ?? []), code]).catch(console.error)
+                }
+              }}
+            />
+          </div>
+        </Section>
+      )}
+
       {spaceConfig.features.multiCurrency && (
         <Section title="Currencies">
           {/* Read-only main currency display — locked after creation (editable + recompute is v2). */}

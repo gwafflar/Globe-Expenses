@@ -17,12 +17,16 @@ import { getExchangeRate, hasExchangeRate } from '@/shared/utils/exchangeRates'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import type { LabeledItem, SpaceMember, SpaceSettings } from '@/spaces/types'
-import { updateSpaceCurrencies, updateSpaceList, updateSpaceDefaultRate, syncTransactionLocation } from '@/spaces/services/spaceService'
-import { ALL_CURRENCIES, ALL_COUNTRIES } from '@/shared/data/pickerData'
+import type { CustomFieldDef, CustomValue, LabeledItem, Space, SpaceMember } from '@/spaces/types'
+import { updateSpaceCurrencies, updateSpaceList, updateSpaceDefaultRate, syncTransactionLocation, ensureMultiCurrency } from '@/spaces/services/spaceService'
+import { getSpaceConfig, enabledCustomFields, mergeCustomPayload } from '@/spaces/config'
+import { ALL_COUNTRIES } from '@/shared/data/pickerData'
 import type { Split, TransactionType } from '@/transactions/types'
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
-import { getTransactionType } from '@/transactions/utils/walletHelpers'
+import { getTransactionType, availableTransactionTypes } from '@/transactions/utils/walletHelpers'
+import { LocationSelect, getPreviousValues } from '@/shared/components/LocationSelect'
+import { SmartCurrencySelect, InlineCurrencyControl } from '@/shared/components/CurrencySelect'
+import { Switch } from '@/shared/components/Switch'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -92,190 +96,6 @@ const FIELD_TYPES: Record<FieldName, TransactionType[]> = {
   notes:          ['expense', 'transfer', 'withdrawal', 'adjustment'],
   split:          ['expense', 'transfer'],
   adjustmentMode: ['adjustment'],
-}
-
-// ---------------------------------------------------------------------------
-// Location dropdown helpers
-// ---------------------------------------------------------------------------
-
-const OTHER_VALUE = 'Other'
-
-function getPreviousValues(
-  transactions: TransactionWithStatus[],
-  field: 'country' | 'city',
-): string[] {
-  const seen = new Map<string, number>()
-  transactions.forEach((tx, index) => {
-    const val = tx[field]
-    if (val && val !== OTHER_VALUE && !seen.has(val)) {
-      seen.set(val, index)
-    }
-  })
-  return [...seen.entries()]
-    .sort((a, b) => a[1] - b[1])
-    .map(([val]) => val)
-}
-
-// ---------------------------------------------------------------------------
-// LocationSelect — dropdown for country or city
-// ---------------------------------------------------------------------------
-
-interface LocationSelectProps {
-  label: string
-  value: string
-  onChange: (val: string) => void
-  previousValues: string[]
-  placeholder: string
-}
-
-function LocationSelect({ label, value, onChange, previousValues, placeholder }: LocationSelectProps) {
-  const [addingNew, setAddingNew] = useState(false)
-  const [newInput, setNewInput] = useState('')
-
-  const isCustomValue = value !== '' && value !== OTHER_VALUE && !previousValues.includes(value)
-
-  function handleSelectChange(e: React.ChangeEvent<HTMLSelectElement>) {
-    const selected = e.target.value
-    if (selected === '__add_new__') {
-      setAddingNew(true)
-      setNewInput('')
-    } else {
-      setAddingNew(false)
-      onChange(selected)
-    }
-  }
-
-  function handleNewInputConfirm() {
-    const trimmed = newInput.trim()
-    if (trimmed) onChange(trimmed)
-    setAddingNew(false)
-  }
-
-  function handleNewInputKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === 'Enter') handleNewInputConfirm()
-    if (e.key === 'Escape') setAddingNew(false)
-  }
-
-  return (
-    <div className="flex flex-col gap-1">
-      <label className="text-xs font-medium text-muted-foreground">{label}</label>
-      {addingNew ? (
-        <div className="flex gap-2">
-          <Input
-            autoFocus
-            type="text"
-            placeholder={`Enter ${label.toLowerCase()}…`}
-            value={newInput}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewInput(e.target.value)}
-            onKeyDown={handleNewInputKeyDown}
-          />
-          <Button type="button" size="sm" onClick={handleNewInputConfirm}>OK</Button>
-          <Button type="button" size="sm" variant="outline" onClick={() => setAddingNew(false)}>✕</Button>
-        </div>
-      ) : (
-        <select
-          className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-          value={isCustomValue ? value : value}
-          onChange={handleSelectChange}
-        >
-          <option value="">{placeholder}</option>
-          {isCustomValue && <option value={value}>{value}</option>}
-          {previousValues.map((v) => (
-            <option key={v} value={v}>{v}</option>
-          ))}
-          <option value={OTHER_VALUE}>Other</option>
-          <option value="__add_new__">+ Add new…</option>
-        </select>
-      )}
-      {value === OTHER_VALUE && !addingNew && (
-        <p className="text-xs text-muted-foreground">Saved as "Other". Use "Add new…" to enter a specific name.</p>
-      )}
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// SmartCurrencySelect — prominent pill-style selector
-// ---------------------------------------------------------------------------
-
-interface SmartCurrencySelectProps {
-  value: string
-  onChange: (code: string) => void
-  spaceId: string
-  orderedCurrencies: string[]
-  onCurrencyAdded: (code: string) => void
-}
-
-export function SmartCurrencySelect({ value, onChange, onCurrencyAdded }: SmartCurrencySelectProps) {
-  const [pickerOpen, setPickerOpen] = useState(false)
-  const [search, setSearch] = useState('')
-  const searchRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    if (pickerOpen && searchRef.current) searchRef.current.focus()
-  }, [pickerOpen])
-
-  const filtered = ALL_CURRENCIES.filter(([code, , name]) => {
-    const q = search.toLowerCase()
-    return code.toLowerCase().includes(q) || name.toLowerCase().includes(q)
-  })
-
-  // Resolve the currency symbol for the current value
-  const currencySymbol = ALL_CURRENCIES.find(([code]) => code === value)?.[1] ?? value
-
-  if (pickerOpen) {
-    return (
-      <div className="flex flex-col gap-1">
-        <div className="flex flex-col gap-1 rounded-md border bg-background p-2 shadow-md">
-          <input
-            ref={searchRef}
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search…"
-            className="rounded border px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
-          />
-          <div className="max-h-40 overflow-y-auto">
-            {filtered.map(([code, symbol, name]) => (
-              <button
-                key={code}
-                type="button"
-                onClick={() => {
-                  onChange(code)
-                  onCurrencyAdded(code)
-                  setPickerOpen(false)
-                  setSearch('')
-                }}
-                className="flex w-full gap-2 rounded px-2 py-1 text-left text-xs hover:bg-accent/40"
-              >
-                <span className="font-medium w-10 shrink-0">{code}</span>
-                <span className="text-muted-foreground">({symbol})</span>
-                <span className="truncate text-muted-foreground">{name}</span>
-              </button>
-            ))}
-          </div>
-          <button type="button" onClick={() => { setPickerOpen(false); setSearch('') }}
-            className="text-xs text-muted-foreground hover:text-foreground text-right">
-            Cancel
-          </button>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    // Prominent pill button — shows code + symbol, tapping opens the picker.
-    // Visually distinct from a standard dropdown so users notice it immediately.
-    <button
-      type="button"
-      onClick={() => setPickerOpen(true)}
-      className="flex h-9 items-center gap-1.5 rounded-full border-2 border-primary/30 bg-primary/5 px-4 text-sm font-semibold text-primary transition-colors hover:bg-primary/10"
-    >
-      <span>{value}</span>
-      <span className="text-primary/60">{currencySymbol}</span>
-      <span className="text-xs text-primary/40">▾</span>
-    </button>
-  )
 }
 
 // ---------------------------------------------------------------------------
@@ -498,13 +318,19 @@ const TYPE_CONFIG: { type: TransactionType; label: string; emoji: string }[] = [
 function TypeSelector({
   value,
   onChange,
+  availableTypes,
 }: {
   value: TransactionType
   onChange: (t: TransactionType) => void
+  availableTypes: TransactionType[]
 }) {
+  // Hidden entirely when only one type is available (e.g. solo space, wallets off) —
+  // a single dead pill would just be noise. See availableTransactionTypes().
+  if (availableTypes.length <= 1) return null
+
   return (
     <div className="flex gap-1">
-      {TYPE_CONFIG.map(({ type, label, emoji }) => (
+      {TYPE_CONFIG.filter(({ type }) => availableTypes.includes(type)).map(({ type, label, emoji }) => (
         <button
           key={type}
           type="button"
@@ -558,6 +384,67 @@ function TransferSenderPicker({
 }
 
 // ---------------------------------------------------------------------------
+// CustomFieldRow — generic input for a Tier-3 custom field (Space refactor
+// Phase 5, §4). Behaviour is generic by design — a field that needs bespoke
+// logic gets promoted to a Tier-2 built-in instead (SPEC §3).
+// ---------------------------------------------------------------------------
+
+function CustomFieldRow({
+  def,
+  value,
+  onChange,
+}: {
+  def: CustomFieldDef
+  value: CustomValue | undefined
+  onChange: (v: CustomValue) => void
+}) {
+  const label = def.emoji ? `${def.emoji} ${def.label}` : def.label
+
+  if (def.type === 'boolean') {
+    const checked = value === true
+    return (
+      <div className="flex items-center justify-between rounded-lg border px-3 py-2">
+        <span className="text-sm font-medium">{label}</span>
+        <Switch checked={checked} onChange={(v) => onChange(v)} label={label} />
+      </div>
+    )
+  }
+
+  if (def.type === 'select') {
+    // No custom field is ever required in v1 — always include a clear/empty choice.
+    return (
+      <div className="flex flex-col gap-1">
+        <label className="text-xs font-medium text-muted-foreground">{label}</label>
+        <select
+          className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+          value={typeof value === 'string' ? value : ''}
+          onChange={(e) => onChange(e.target.value)}
+        >
+          <option value="">— optional —</option>
+          {(def.options ?? []).map((opt) => (
+            <option key={opt.id} value={opt.id}>
+              {opt.emoji ? `${opt.emoji} ${opt.label}` : opt.label}
+            </option>
+          ))}
+        </select>
+      </div>
+    )
+  }
+
+  // 'text'
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-xs font-medium text-muted-foreground">{label}</label>
+      <Input
+        type="text"
+        value={typeof value === 'string' ? value : ''}
+        onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
+      />
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
@@ -571,19 +458,22 @@ export interface TransferPrefill {
 
 interface TransactionFormProps {
   spaceId: string
+  // Full space document — read via getSpaceConfig() (resolved once, useMemo) for
+  // field visibility, available transaction types and custom field definitions.
+  // Legacy spaces (no space.config) resolve to travel-mode defaults, so this is
+  // the ONLY thing that needs to change to make the form config-driven.
+  space: Space
   members: SpaceMember[]
-  spaceSettings?: SpaceSettings
-  spaceCategories?: LabeledItem[]
-  spacePaymentMethods?: LabeledItem[]
-  spaceCurrencies?: string[]
   // The space's reference currency for exchange rate computation.
   mainCurrency: string
   // Per-space default exchange rates (relative to mainCurrency). Falls back to hardcoded rates.
   defaultRates?: Record<string, number>
   /** Called when user saves a custom rate as the new space default. */
   onDefaultRateChanged?: (code: string, rate: number) => void
-  spaceCountries?: LabeledItem[]
-  spaceCities?: LabeledItem[]
+  /** Called when the sticky multiCurrency flag flips on — see §6.2. Lets the
+   *  parent optimistically update local space state without waiting for the
+   *  Firestore write to round-trip. */
+  onMultiCurrencyUpgraded?: () => void
   existingTransactions: TransactionWithStatus[]
   initialValues?: TransactionWithStatus
   /** Pre-set the type when opening for a new transaction (e.g. 'withdrawal' from DashboardTab). */
@@ -607,16 +497,12 @@ interface TransactionFormProps {
 
 export function TransactionForm({
   spaceId,
+  space,
   members,
-  spaceSettings,
-  spaceCategories,
-  spacePaymentMethods,
-  spaceCurrencies,
   mainCurrency,
   defaultRates,
   onDefaultRateChanged,
-  spaceCountries,
-  spaceCities,
+  onMultiCurrencyUpgraded,
   existingTransactions,
   initialValues,
   initialType,
@@ -631,6 +517,18 @@ export function TransactionForm({
 }: TransactionFormProps) {
   const isEdit = !!initialValues
   const { currentUser, userProfile } = useAuthStore()
+
+  // Per-space lists, aliased for minimal churn against the rest of this file.
+  const spaceCategories = space.categories
+  const spacePaymentMethods = space.paymentMethods
+  const spaceCurrencies = space.currencies
+  const spaceCountries = space.countries
+  const spaceCities = space.cities
+
+  // Resolved once per space change — never call getSpaceConfig() in a nested
+  // component, always read this. Legacy spaces (no space.config) resolve to
+  // travel-mode defaults, so field visibility is unchanged for them.
+  const config = useMemo(() => getSpaceConfig(space), [space])
 
   if (!currentUser || !userProfile) {
     return (
@@ -652,14 +550,28 @@ export function TransactionForm({
     isEdit ? getTransactionType(initialValues!) : (initialType ?? 'expense')
   )
 
-  // Helper: check if a field is visible for the current transaction type + settings
+  // Which types can be created right now (config + member count). When editing,
+  // the transaction's own type is always included even if config no longer
+  // offers it for creation — see availableTransactionTypes() doc comment.
+  const availableTypes = useMemo(
+    () => availableTransactionTypes(config, members.length, isEdit ? getTransactionType(initialValues!) : undefined),
+    [config, members.length, isEdit, initialValues],
+  )
+
+  // Helper: check if a field is visible for the current transaction type + config.
+  // Visibility is the conjunction of FIELD_TYPES (which types show this field)
+  // AND the space config gate (built-in fields are individually toggleable).
   const fieldVisible = useCallback((field: FieldName): boolean => {
     if (!FIELD_TYPES[field].includes(txType)) return false
-    // SpaceSettings gates
-    const trackLocation = spaceSettings?.trackLocation ?? true
-    if (field === 'country' || field === 'city') return trackLocation
-    return true
-  }, [txType, spaceSettings])
+    switch (field) {
+      case 'country': return config.builtInFields.country
+      case 'city': return config.builtInFields.city
+      case 'category': return config.builtInFields.category
+      case 'paymentMethod': return config.builtInFields.paymentMethod
+      case 'notes': return config.builtInFields.notes
+      default: return true
+    }
+  }, [txType, config])
 
   // --- Formula mode ---
   const [formulaMode, setFormulaMode] = useState(isEdit && !!initialValues?.amountFormula)
@@ -706,7 +618,6 @@ export function TransactionForm({
     ]
   }, [spaceCountries, existingTransactions])
 
-  const trackLocation = spaceSettings?.trackLocation ?? true
   const previousCities = useMemo(
     () => getPreviousValues(existingTransactions, 'city'),
     [existingTransactions],
@@ -740,10 +651,10 @@ export function TransactionForm({
     isEdit ? (initialValues!.paymentMethod ?? '') : ''
   )
   const [country, setCountry] = useState<string>(
-    isEdit ? (initialValues!.country ?? '') : (trackLocation ? lastCountry : '')
+    isEdit ? (initialValues!.country ?? '') : (config.builtInFields.country ? lastCountry : '')
   )
   const [city, setCity] = useState<string>(
-    isEdit ? (initialValues!.city ?? '') : (trackLocation ? lastCity : '')
+    isEdit ? (initialValues!.city ?? '') : (config.builtInFields.city ? lastCity : '')
   )
   const [notes, setNotes] = useState<string>(
     isEdit ? (initialValues!.notes ?? '') : ''
@@ -754,6 +665,29 @@ export function TransactionForm({
   const [adjustmentMode, setAdjustmentMode] = useState<'expense' | 'balance_only'>(
     isEdit ? (initialValues!.adjustmentMode ?? 'balance_only') : 'balance_only'
   )
+
+  // --- Custom fields (Tier 3, §4) ---
+  // Enabled definitions only, in definition order — a disabled field is neither
+  // rendered nor present in this list, so it's never rebuilt from form state.
+  const customFieldDefs = useMemo(() => enabledCustomFields(config), [config])
+  const [customValues, setCustomValues] = useState<Record<string, CustomValue>>(() => {
+    const initial: Record<string, CustomValue> = {}
+    for (const def of customFieldDefs) {
+      if (isEdit) {
+        const existing = initialValues!.custom?.[def.id]
+        if (existing !== undefined) initial[def.id] = existing
+        continue
+      }
+      // Pre-fill: 'select' from the most recent transaction with a value for
+      // this field. 'text' and 'boolean' never pre-fill — see SPEC §4 (a
+      // pre-filled boolean would silently mark transactions the user never chose).
+      if (def.type === 'select') {
+        const recent = existingTransactions.find((tx) => tx.custom?.[def.id] !== undefined)
+        if (recent) initial[def.id] = recent.custom![def.id]
+      }
+    }
+    return initial
+  })
 
   // --- Exchange rate override ---
   // null = use the default rate; a number = user has manually set this transaction's rate.
@@ -980,8 +914,8 @@ export function TransactionForm({
 
     // Sync country/city to space document (expense only)
     if (txType === 'expense') {
-      const countryToSync = trackLocation && country ? country : undefined
-      const cityToSync = trackLocation && city ? city : undefined
+      const countryToSync = config.builtInFields.country && country ? country : undefined
+      const cityToSync = config.builtInFields.city && city ? city : undefined
       if (countryToSync || cityToSync) {
         syncTransactionLocation(
           spaceId,
@@ -1019,6 +953,9 @@ export function TransactionForm({
       type: txType === 'expense' ? undefined : txType,
       fees: txType === 'withdrawal' ? (feesStr.trim() ? parseFloat(feesStr) : undefined) : undefined,
       adjustmentMode: txType === 'adjustment' ? adjustmentMode : undefined,
+      // Merge onto the transaction's existing custom map — a field disabled after
+      // this transaction was saved keeps its stored value untouched (§4).
+      custom: mergeCustomPayload(isEdit ? initialValues!.custom : undefined, customValues, customFieldDefs),
     }
 
     if (isEdit) {
@@ -1047,14 +984,101 @@ export function TransactionForm({
     : txType === 'withdrawal' ? 'Withdraw amount'
     : 'Amount'
 
-  // Solo + transfer: the form only shows the type selector + CTA.
-  // All other fields and action buttons are hidden.
-  const soloTransfer = isSolo && txType === 'transfer'
-
   // --- Form title ---
   const formTitle = isEdit
     ? `Edit ${txType === 'expense' ? 'expense' : txType}`
     : `New ${txType === 'expense' ? 'expense' : txType}`
+
+  // Sticky multiCurrency upgrade (SPEC §6.2): the moment the user picks a
+  // non-main currency while multiCurrency is off, flip the space's flag on
+  // (fire-and-forget) and let the parent optimistically upgrade local state so
+  // the full currency UI appears immediately, without waiting for the write.
+  function handleCurrencyChange(code: string) {
+    setCurrency(code)
+    markDirty()
+    if (code !== mainCurrency && !config.features.multiCurrency) {
+      ensureMultiCurrency(spaceId, config)
+      onMultiCurrencyUpgraded?.()
+    }
+  }
+
+  // --- Optional built-in fields, flowed into the 2-column grid below ---
+  const optionalFieldNodes: { key: string; node: React.ReactNode }[] = []
+  if (fieldVisible('country')) {
+    optionalFieldNodes.push({
+      key: 'country',
+      node: (
+        <SmartCountrySelect
+          value={country}
+          onChange={(v) => { setCountry(v); markDirty() }}
+          spaceId={spaceId}
+          orderedCountries={orderedCountries}
+          onCountryAdded={(name, flag) => {
+            const next = [...(spaceCountries ?? []), { id: `country-${Date.now()}`, label: name, emoji: flag }]
+            updateSpaceList(spaceId, 'countries', next).catch(console.error)
+          }}
+        />
+      ),
+    })
+  }
+  if (fieldVisible('city')) {
+    optionalFieldNodes.push({
+      key: 'city',
+      node: (
+        <LocationSelect
+          label="City"
+          value={city}
+          onChange={(v) => { setCity(v); markDirty() }}
+          previousValues={previousCities}
+          placeholder="— optional —"
+        />
+      ),
+    })
+  }
+  if (fieldVisible('category')) {
+    optionalFieldNodes.push({
+      key: 'category',
+      node: (
+        <SmartLabeledItemSelect
+          label="Category"
+          value={category}
+          onChange={(v) => { setCategory(v); markDirty() }}
+          items={effectiveCategories}
+          onAddNew={(label) => {
+            const newItem: LabeledItem = { id: `cat-${Date.now()}`, label }
+            const updatedList = [...(spaceCategories ?? []), newItem]
+            updateSpaceList(spaceId, 'categories', updatedList).catch(console.error)
+            onCategoryAdded?.(newItem)
+          }}
+        />
+      ),
+    })
+  }
+  if (fieldVisible('paymentMethod')) {
+    optionalFieldNodes.push({
+      key: 'paymentMethod',
+      node: (
+        <>
+          <SmartLabeledItemSelect
+            label={txType === 'withdrawal' ? 'Top up' : 'Payment Method'}
+            value={paymentMethod}
+            onChange={(v) => { setPaymentMethod(v); markDirty() }}
+            items={effectivePaymentMethods}
+            required={txType === 'withdrawal' || txType === 'adjustment'}
+            onAddNew={(label) => {
+              const newItem: LabeledItem = { id: `pm-${Date.now()}`, label }
+              const updatedList = [...(spacePaymentMethods ?? []), newItem]
+              updateSpaceList(spaceId, 'paymentMethods', updatedList).catch(console.error)
+              onPaymentMethodAdded?.(newItem)
+            }}
+          />
+          {submitted && errors.paymentMethod && (
+            <p className="text-xs text-destructive">{errors.paymentMethod}</p>
+          )}
+        </>
+      ),
+    })
+  }
 
   // ---------------------------------------------------------------------------
   // Render — full-screen overlay
@@ -1076,7 +1100,6 @@ export function TransactionForm({
         <Button
           type="button"
           size="sm"
-          disabled={soloTransfer}
           className={`min-w-[60px] transition-colors ${saveFlash ? 'bg-destructive text-destructive-foreground hover:bg-destructive' : ''}`}
           onClick={handleSave}
         >
@@ -1089,10 +1112,10 @@ export function TransactionForm({
         <div className="mx-auto flex max-w-lg flex-col gap-4">
 
           {/* ── Type selector ── */}
-          <TypeSelector value={txType} onChange={(t) => { setTxType(t); markDirty() }} />
+          <TypeSelector value={txType} onChange={(t) => { setTxType(t); markDirty() }} availableTypes={availableTypes} />
 
           {/* ── Name ── */}
-          {!soloTransfer && fieldVisible('name') && (
+          {fieldVisible('name') && (
             <div className="flex flex-col gap-1">
               <Input
                 type="text"
@@ -1112,7 +1135,7 @@ export function TransactionForm({
           )}
 
           {/* ── Date ── */}
-          {!soloTransfer && fieldVisible('date') && (
+          {fieldVisible('date') && (
             <div className="flex flex-col gap-1">
               <input
                 type="date"
@@ -1128,7 +1151,7 @@ export function TransactionForm({
           )}
 
           {/* ── Amount + Currency row ── */}
-          {!soloTransfer && fieldVisible('amount') && (
+          {fieldVisible('amount') && (
             <div className="flex flex-col gap-2">
 
               {/* Formula bar (when active) */}
@@ -1198,17 +1221,33 @@ export function TransactionForm({
                   )}
                 </div>
 
-                {/* Currency pill */}
-                <SmartCurrencySelect
-                  value={currency}
-                  onChange={(c) => { setCurrency(c); markDirty() }}
-                  spaceId={spaceId}
-                  orderedCurrencies={orderedCurrencies}
-                  onCurrencyAdded={(code) => {
-                    const next = [...(spaceCurrencies ?? []), code]
-                    updateSpaceCurrencies(spaceId, next).catch(console.error)
-                  }}
-                />
+                {/* Currency pill — full picker once multiCurrency is on, otherwise a
+                    discreet inline control that upgrades the space on first foreign use. */}
+                {config.features.multiCurrency ? (
+                  <SmartCurrencySelect
+                    value={currency}
+                    onChange={handleCurrencyChange}
+                    spaceId={spaceId}
+                    orderedCurrencies={orderedCurrencies}
+                    onCurrencyAdded={(code) => {
+                      const next = [...(spaceCurrencies ?? []), code]
+                      updateSpaceCurrencies(spaceId, next).catch(console.error)
+                    }}
+                  />
+                ) : (
+                  <div className="flex h-9 items-center">
+                    <InlineCurrencyControl
+                      mainCurrency={mainCurrency}
+                      onChange={(code) => {
+                        handleCurrencyChange(code)
+                        if (!(spaceCurrencies ?? []).includes(code)) {
+                          const next = [...(spaceCurrencies ?? []), code]
+                          updateSpaceCurrencies(spaceId, next).catch(console.error)
+                        }
+                      }}
+                    />
+                  </div>
+                )}
               </div>
 
               {/* Cost in main currency — shown when currency differs from mainCurrency */}
@@ -1332,7 +1371,7 @@ export function TransactionForm({
           )}
 
           {/* ── Fees (withdrawal only) ── */}
-          {!soloTransfer && fieldVisible('fees') && (
+          {fieldVisible('fees') && (
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-muted-foreground">Fees (optional)</label>
               <Input
@@ -1354,7 +1393,7 @@ export function TransactionForm({
           )}
 
           {/* ── Adjustment mode ── */}
-          {!soloTransfer && fieldVisible('adjustmentMode') && (
+          {fieldVisible('adjustmentMode') && (
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-muted-foreground">Adjustment mode</label>
               <div className="flex gap-2">
@@ -1471,84 +1510,35 @@ export function TransactionForm({
             </>
           )}
 
-          {/* ── Optional fields in 2-column grid ── */}
-          {/* Hidden entirely when solo + transfer (only the CTA matters) */}
-
-          {/* Row 1: Country + City */}
-          {!soloTransfer &&(fieldVisible('country') || fieldVisible('city')) && (
+          {/* ── Optional built-in fields, flowed into a 2-column grid ── */}
+          {/* Any subset of country/city/category/paymentMethod can be enabled per
+              space config, so fields are flowed rather than hard-coded into pairs —
+              the last item in an odd-length list spans both columns. */}
+          {optionalFieldNodes.length > 0 && (
             <div className="grid grid-cols-2 gap-3">
-              {fieldVisible('country') && (
-                <div className={!fieldVisible('city') ? 'col-span-2' : ''}>
-                  <SmartCountrySelect
-                    value={country}
-                    onChange={(v) => { setCountry(v); markDirty() }}
-                    spaceId={spaceId}
-                    orderedCountries={orderedCountries}
-                    onCountryAdded={(name, flag) => {
-                      const next = [...(spaceCountries ?? []), { id: `country-${Date.now()}`, label: name, emoji: flag }]
-                      updateSpaceList(spaceId, 'countries', next).catch(console.error)
-                    }}
-                  />
-                </div>
-              )}
-              {fieldVisible('city') && (
-                <div className={!fieldVisible('country') ? 'col-span-2' : ''}>
-                  <LocationSelect
-                    label="City"
-                    value={city}
-                    onChange={(v) => { setCity(v); markDirty() }}
-                    previousValues={previousCities}
-                    placeholder="— optional —"
-                  />
-                </div>
-              )}
+              {optionalFieldNodes.map((f, i) => {
+                const spansFull = i === optionalFieldNodes.length - 1 && optionalFieldNodes.length % 2 === 1
+                return (
+                  <div key={f.key} className={spansFull ? 'col-span-2' : ''}>
+                    {f.node}
+                  </div>
+                )
+              })}
             </div>
           )}
 
-          {/* Row 2: Category + Payment Method */}
-          {!soloTransfer &&(fieldVisible('category') || fieldVisible('paymentMethod')) && (
-            <div className="grid grid-cols-2 gap-3">
-              {fieldVisible('category') && (
-                <div className={!fieldVisible('paymentMethod') ? 'col-span-2' : ''}>
-                  <SmartLabeledItemSelect
-                    label="Category"
-                    value={category}
-                    onChange={(v) => { setCategory(v); markDirty() }}
-                    items={effectiveCategories}
-                    onAddNew={(label) => {
-                      const newItem: LabeledItem = { id: `cat-${Date.now()}`, label }
-                      const updatedList = [...(spaceCategories ?? []), newItem]
-                      updateSpaceList(spaceId, 'categories', updatedList).catch(console.error)
-                      onCategoryAdded?.(newItem)
-                    }}
-                  />
-                </div>
-              )}
-              {fieldVisible('paymentMethod') && (
-                <div className={!fieldVisible('category') ? 'col-span-2' : ''}>
-                  <SmartLabeledItemSelect
-                    label={txType === 'withdrawal' ? 'Top up' : 'Payment Method'}
-                    value={paymentMethod}
-                    onChange={(v) => { setPaymentMethod(v); markDirty() }}
-                    items={effectivePaymentMethods}
-                    required={txType === 'withdrawal' || txType === 'adjustment'}
-                    onAddNew={(label) => {
-                      const newItem: LabeledItem = { id: `pm-${Date.now()}`, label }
-                      const updatedList = [...(spacePaymentMethods ?? []), newItem]
-                      updateSpaceList(spaceId, 'paymentMethods', updatedList).catch(console.error)
-                      onPaymentMethodAdded?.(newItem)
-                    }}
-                  />
-                  {submitted && errors.paymentMethod && (
-                    <p className="text-xs text-destructive">{errors.paymentMethod}</p>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
+          {/* ── Custom fields (Tier 3), definition order, after built-ins before Notes ── */}
+          {customFieldDefs.map((def) => (
+            <CustomFieldRow
+              key={def.id}
+              def={def}
+              value={customValues[def.id]}
+              onChange={(v) => { setCustomValues((prev) => ({ ...prev, [def.id]: v })); markDirty() }}
+            />
+          ))}
 
           {/* ── Notes (full width) ── */}
-          {!soloTransfer &&fieldVisible('notes') && (
+          {fieldVisible('notes') && (
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-muted-foreground">Notes</label>
               <Textarea
@@ -1575,33 +1565,31 @@ export function TransactionForm({
           )}
 
           {/* Bottom action bar — duplicates top Save for easy thumb reach */}
-          {!soloTransfer && (
-            <div className="flex flex-col gap-2 pt-2">
-              <div className="flex gap-2">
-                <Button type="button" variant="outline" className="flex-1" onClick={handleClose}>
-                  Close
-                </Button>
-                <Button
-                  type="button"
-                  className={`flex-1 transition-colors ${saveFlash ? 'bg-destructive text-destructive-foreground hover:bg-destructive' : ''}`}
-                  onClick={handleSave}
-                >
-                  Save
-                </Button>
-              </div>
-              {/* Delete button — only in edit mode */}
-              {isEdit && onDelete && (
-                <Button
-                  type="button"
-                  variant="destructive"
-                  className="w-full"
-                  onClick={() => onDelete(initialValues!.txId)}
-                >
-                  Delete
-                </Button>
-              )}
+          <div className="flex flex-col gap-2 pt-2">
+            <div className="flex gap-2">
+              <Button type="button" variant="outline" className="flex-1" onClick={handleClose}>
+                Close
+              </Button>
+              <Button
+                type="button"
+                className={`flex-1 transition-colors ${saveFlash ? 'bg-destructive text-destructive-foreground hover:bg-destructive' : ''}`}
+                onClick={handleSave}
+              >
+                Save
+              </Button>
             </div>
-          )}
+            {/* Delete button — only in edit mode */}
+            {isEdit && onDelete && (
+              <Button
+                type="button"
+                variant="destructive"
+                className="w-full"
+                onClick={() => onDelete(initialValues!.txId)}
+              >
+                Delete
+              </Button>
+            )}
+          </div>
 
         </div>
       </div>

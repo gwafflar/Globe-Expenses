@@ -15,6 +15,8 @@ import { normalizeTransactionSplits, parseTxDate } from '@/spaces/components/tab
 import { useTransactionFilters } from '@/transactions/hooks/useTransactionFilters'
 import { FilterPanel } from '@/transactions/components/FilterPanel'
 import { getTransactionType, countsAsSpending, isTransfer } from '@/transactions/utils/walletHelpers'
+import type { CustomFieldDef } from '@/spaces/types'
+import { getSpaceConfig, enabledCustomFields, resolveOptionLabel } from '@/spaces/config'
 
 // ---------------------------------------------------------------------------
 // Currency symbol helpers
@@ -381,6 +383,7 @@ function TransactionDetail({
   currentUserUid,
   isSolo,
   mainCurrency,
+  customFieldDefs,
   onEdit,
   onDelete,
 }: {
@@ -389,6 +392,7 @@ function TransactionDetail({
   currentUserUid: string
   isSolo: boolean
   mainCurrency: string
+  customFieldDefs: CustomFieldDef[]
   onEdit: () => void
   onDelete: () => void
 }) {
@@ -477,6 +481,23 @@ function TransactionDetail({
           <span className="text-muted-foreground">{transaction.notes}</span>
         </div>
       )}
+
+      {/* Custom fields — one row per filled, enabled field. 'select' resolves the
+          option id to its label (falling back to the raw id if the option was
+          deleted); 'boolean' shows only when true; empty values are hidden. */}
+      {customFieldDefs.map((def) => {
+        const value = transaction.custom?.[def.id]
+        if (value === undefined) return null
+        if (def.type === 'boolean' && value !== true) return null
+        const label = def.emoji ? `${def.emoji} ${def.label}` : def.label
+        const display = def.type === 'boolean' ? 'Yes' : def.type === 'select' ? resolveOptionLabel(def, value) : String(value)
+        return (
+          <div key={def.id} className="text-xs">
+            <span className="font-medium text-foreground">{label}: </span>
+            <span className="text-muted-foreground">{display}</span>
+          </div>
+        )
+      })}
 
       {/* Paid by / Split — hidden in solo space (only one member, no split info needed).
           Transfers use "From" / "To" labels instead of "Paid by" / "Split". */}
@@ -569,6 +590,7 @@ function DayGroupSection({
   currentUserUid,
   isSolo,
   mainCurrency,
+  customFieldDefs,
   expandedTxId,
   onToggle,
   onEditTransaction,
@@ -581,6 +603,7 @@ function DayGroupSection({
   currentUserUid: string
   isSolo: boolean
   mainCurrency: string
+  customFieldDefs: CustomFieldDef[]
   expandedTxId: string | null
   onToggle: (txId: string) => void
   onEditTransaction: (txId: string) => void
@@ -608,6 +631,7 @@ function DayGroupSection({
                 currentUserUid={currentUserUid}
                 isSolo={isSolo}
                 mainCurrency={mainCurrency}
+                customFieldDefs={customFieldDefs}
                 onEdit={() => onEditTransaction(tx.txId)}
                 onDelete={() => onDeleteTransaction(tx.txId)}
               />
@@ -711,6 +735,10 @@ export function TransactionsTab({
     () => space.members.find((m) => m.userId === currentUserUid)?.travelMemberId ?? '',
     [space.members, currentUserUid],
   )
+
+  // Resolved once, passed down to TransactionDetail — never call getSpaceConfig()
+  // in a nested component (Phase 5, §1).
+  const customFieldDefs = useMemo(() => enabledCustomFields(getSpaceConfig(space)), [space])
 
   // Accordion state — only one card open at a time; null = all collapsed
   const [expandedTxId, setExpandedTxId] = useState<string | null>(null)
@@ -873,6 +901,7 @@ export function TransactionsTab({
               currentUserUid={currentUserUid}
               isSolo={isSolo}
               mainCurrency={mainCurrency}
+              customFieldDefs={customFieldDefs}
               expandedTxId={expandedTxId}
               onToggle={handleToggle}
               onEditTransaction={onEditTransaction}

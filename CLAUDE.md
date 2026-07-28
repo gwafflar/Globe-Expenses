@@ -19,6 +19,7 @@ At the start of every session, before doing anything else, read all files in `do
 - Firestore paths and field keys are frozen as legacy (`travels/`, `travelMemberId`, `memberUids`) even though the code says Space — see `docs/SPACE_REFACTOR_SPEC.md` §2.1
 - No behaviour may branch on `presetOrigin`; behaviour reads `config` via `getSpaceConfig()`
 - When stripping fields before a Firestore write, test `v !== undefined` explicitly. Never filter by truthiness — `false`, `0` and `''` are all valid stored values and dropping them produces partial documents that resolvers silently paper over.
+- Firestore documents are mapped to domain objects in exactly one place per collection (`mapSpaceDoc()` for `travels/`). Never hand-roll a second mapping — optional fields make an omission type-check, and the value is silently `undefined` rather than a compile error.
 
 ## Development style
 

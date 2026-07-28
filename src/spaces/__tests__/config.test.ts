@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Timestamp } from 'firebase/firestore'
-import { enabledCustomFields, getSpaceConfig, normaliseSpaceConfig, resolveOptionLabel } from '@/spaces/config'
+import { buildCustomPayload, enabledCustomFields, getSpaceConfig, mergeCustomPayload, normaliseSpaceConfig, resolveOptionLabel } from '@/spaces/config'
 import type { CustomFieldDef, Space, SpaceConfig } from '@/spaces/types'
 
 function makeSpace(overrides: Partial<Space> = {}): Space {
@@ -123,5 +123,57 @@ describe('resolveOptionLabel', () => {
 
   it('falls back to the raw value when the option was deleted', () => {
     expect(resolveOptionLabel(def, 'opt2')).toBe('opt2')
+  })
+})
+
+describe('buildCustomPayload', () => {
+  const defs: CustomFieldDef[] = [
+    { id: 'mood', label: 'Mood', type: 'select', enabled: true, options: [{ id: 'happy', label: 'Happy' }] },
+    { id: 'notes2', label: 'Notes 2', type: 'text', enabled: true },
+    { id: 'reimbursable', label: 'Reimbursable', type: 'boolean', enabled: true },
+  ]
+
+  it('omits empty strings for select/text and false for boolean', () => {
+    expect(buildCustomPayload({ mood: '', notes2: '', reimbursable: false }, defs)).toBeUndefined()
+  })
+
+  it('returns undefined when everything is empty', () => {
+    expect(buildCustomPayload({}, defs)).toBeUndefined()
+  })
+
+  it('keeps true and non-empty strings', () => {
+    const payload = buildCustomPayload({ mood: 'happy', notes2: 'hello', reimbursable: true }, defs)
+    expect(payload).toEqual({ mood: 'happy', notes2: 'hello', reimbursable: true })
+  })
+
+  it('includes only definitions passed in (the enabled set)', () => {
+    const enabledOnly = defs.filter((d) => d.id !== 'notes2')
+    const payload = buildCustomPayload({ mood: 'happy', notes2: 'should be ignored', reimbursable: true }, enabledOnly)
+    expect(payload).toEqual({ mood: 'happy', reimbursable: true })
+  })
+})
+
+describe('mergeCustomPayload', () => {
+  const defs: CustomFieldDef[] = [
+    { id: 'mood', label: 'Mood', type: 'select', enabled: true, options: [{ id: 'happy', label: 'Happy' }] },
+  ]
+
+  it('a value for a now-disabled field survives an edit that touches other fields', () => {
+    // Simulates: transaction was saved with `region` filled while it was enabled;
+    // `region` was then disabled, so it is absent from `enabledDefs` and never
+    // rendered — but editing the transaction (changing `mood`) must not drop it.
+    const existing = { region: 'north', mood: 'happy' }
+    const merged = mergeCustomPayload(existing, { mood: 'happy' }, defs)
+    expect(merged).toEqual({ region: 'north', mood: 'happy' })
+  })
+
+  it('clears an enabled field whose value was removed in the form', () => {
+    const existing = { mood: 'happy' }
+    const merged = mergeCustomPayload(existing, { mood: '' }, defs)
+    expect(merged).toBeUndefined()
+  })
+
+  it('returns undefined for a brand new transaction with no custom values', () => {
+    expect(mergeCustomPayload(undefined, {}, defs)).toBeUndefined()
   })
 })
