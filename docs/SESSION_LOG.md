@@ -2325,3 +2325,84 @@ Full suite: 230/230 passing. `tsc --noEmit` and `pnpm build` clean.
 
 - **Denormalize `memberUids` onto transaction documents** (carry-forward). The real fix for Bug 3 is to stop the `transactions` subcollection rule from doing a per-read `get()` on the parent space document at all — copy `memberUids` onto each transaction at write time and rewrite the rule to check the query constraint directly. This removes the creation race entirely (no parent-existence dependency) and eliminates the per-read `get()` cost already flagged as a scalability concern. It needs a security-rules change plus a backfill of every existing transaction document, so it should be scheduled alongside the `batchUpdateTransactions` work (chunked `writeBatch`, 500 docs/batch) already on the roadmap, rather than done piecemeal. Until then, the bounded retry in `useTransactions()` is the mitigation.
 - Manual browser verification of the online/offline creation flows (§Verification in the 04.2 prompt) was not performed — no Firebase login session available in this environment. Automated coverage (tests above) verifies the logic; a real click-through is still recommended before treating this as fully closed.
+## ♻️ Working Session 023 — 1 August 2026
+
+**Type**: Refactor — Space refactor Phase 6 (config-driven transactions list and filters)
+**Tools used**: Claude Code (claude-code CLI)
+
+### Context
+
+Phase 5 made the transaction *form* config-driven. This session did the same for the *list*: the filter panel, the day headers and the row/detail display stop assuming country/city/category/paymentMethod exist, and enabled custom fields become filterable. See `docs/SPACE_REFACTOR_SPEC.md` §3 (field tiers) and the Phase 6 prompt.
+
+### New pure module — `src/transactions/utils/filterDimensions.ts`
+
+The panel used to hard-code one section per dimension. It now renders generically over a descriptor list:
+
+- `FilterDimension` — `{ key, label, emoji, source, control, options, optionsAreClosed }`. `control` is `'multi'` (core, built-ins, custom select) or `'triState'` (custom boolean: any/yes/no).
+- `filterDimensions(space, config, observed?)` — the **config-gated** dimensions: enabled built-ins (category, country, city, paymentMethod) then enabled custom select/boolean fields in definition order. Custom `text` fields are deliberately absent.
+- `allFilterDimensions(space, config, isSolo, observed?)` — everything the panel renders, i.e. the above plus the **core** dimensions interleaved in the historical display order: `type, category, currency, country, city, paymentMethod, paidBy, beneficiaries, …custom`.
+- `dimensionValues(tx, dim)` / `matchesDimension(tx, dim, selected)` — the single mapping from a transaction onto a dimension. It drives filtering *and* cross-filtered availability, so custom fields get the grey-out behaviour for free.
+- `reconcileFilters(filters, dimensions)` — stale-filter purge (§3). Returns the **same reference** when nothing changed.
+- `searchableCustomFieldIds(config)` — enabled `text` fields, which feed the search box instead of the panel.
+
+### Three descriptor `source` values, not two
+
+The spec's sketch had `source: 'builtIn' | 'custom'`. A third value, `'core'`, was added for `type`, `currency`, `paidBy` and `beneficiaries`. These are not Tier-2 toggleable fields, but they are still *conditional*:
+
+| Dimension | Condition | Rationale |
+|---|---|---|
+| `currency` | `features.multiCurrency` | Same visibility rule as the form's currency pill (SPEC §6.2). This is what removes the currency filter from a solo space. |
+| `paidBy` / `beneficiaries` | `!isSolo` | Pre-existing rule, unchanged. |
+| `type` | always | Deliberately **not** gated on `features.wallets`: existing withdrawals/adjustments stay visible and filterable in a space where wallets were later turned off (SPEC §6.1). |
+
+Without `'core'` these four would have had to be special-cased inside the generic renderer, which is exactly what this phase was meant to eliminate.
+
+### Built-in options stay observation-derived (deliberate divergence from the prompt)
+
+The prompt described built-in `options` as coming from "the space's own list order". That was **not** implemented, because it would have broken legacy parity in two ways: a legacy space with empty per-space lists (which fall back to the user's global profile lists) would offer no filter options at all, and a value stored on transactions but since deleted from the space list would become unfilterable.
+
+Built-in and core options therefore remain derived from the transaction list, exactly as before, with the `UNDEFINED_FILTER` sentinel appended. Custom-field options come from the definition. The difference is made explicit on the descriptor as `optionsAreClosed`, and `reconcileFilters()` only prunes selections on closed dimensions — so a category that momentarily has no transactions never silently clears the user's filter, while a genuinely deleted custom option does.
+
+### Stale filters (§3)
+
+`reconcileFilters()` is applied as a **pure derivation first** (so a filter on a just-disabled field never narrows the current render's results) and the result is then written back to state via the *adjust-state-during-render* pattern rather than a `useEffect`:
+
+```ts
+const effectiveFilters = useMemo(() => reconcileFilters(filters, dimensions), [filters, dimensions])
+if (effectiveFilters !== filters) setFilters(effectiveFilters)
+```
+
+Safe because it is identity-guarded and `reconcileFilters` is idempotent, so it converges after one extra render pass. A `useEffect` here would also have tripped `react-hooks/set-state-in-effect` (the new eslint-plugin-react-hooks v7 rule).
+
+### Display gating (§5)
+
+- `DayGroupHeader` takes `showCountry` / `showCity` (gated **independently**, so a space tracking cities but not countries still gets its city line — the prompt's "date and total only" wording assumes both go together, which the presets do but the toggles don't enforce).
+- `TransactionRow`: the leading emoji is `null` for an expense when `category` is off (the emoji is sourced from a hidden field), and the category pill is gated. Flex `gap` means the row closes up with no leftover space.
+- `TransactionDetail`: each meta-grid cell (Category / Payment / Country / City) and the Notes line are gated on their built-in.
+- Custom field values still do **not** appear in list rows — only in the expanded detail, as built in Phase 5.
+
+### Search (§4)
+
+Enabled custom `text` field values were added to the free-text search. ⚠️ For the record: the search covers **transaction name** + **amount** (exact or prefix, on both `totalAmount` and `totalAmountMain`) + now custom text. It does **not** cover `notes`, and never has — adding it would have been a legacy behaviour change, so it was left alone.
+
+### Tests added
+
+- `src/transactions/utils/__tests__/filterDimensions.test.ts` (34 tests) — legacy space yields today's four built-ins; solo/group presets; custom select + boolean in definition order; text fields absent; disabled fields absent; select options carry **ids not labels**; select matches on option id and *not* on label; boolean *no* matches explicit `false`, an absent key **and** an absent `custom` map; boolean *yes* matches only `true`; reconcile drops a disabled dimension, drops a deleted option while siblings survive, keeps an unobserved built-in selection, survives an option **rename**, and returns the same reference when unchanged.
+- `src/spaces/components/tabs/__tests__/TransactionsTab.test.tsx` (15 tests, new file) — legacy space renders the exact historical chip list and order; solo space offers no country/city/currency and drops the day-header flags; category pill positive control + hidden when disabled; a custom select narrows the list; boolean yes/no incl. pre-field-existence rows; custom text hits the search box but is not a dimension; disabling a field mid-filter clears the chip and widens the results; deleting a filtered option keeps siblings; renaming an option keeps the filter working and shows the new label; empty result shows the no-match state with a working clear action.
+
+Full suite: 308/308 passing (was 259). `tsc --noEmit`, `pnpm build` clean. `pnpm lint` introduces no new problems (the 4 remaining in `TransactionsTab.tsx` are pre-existing: 3 × `react-refresh/only-export-components` on the `currencySymbol`/`formatAmount`/`groupByDay` exports, 1 × `set-state-in-effect` in `PendingBadge`).
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `src/transactions/utils/filterDimensions.ts` | **New** — descriptors, value extraction, reconciliation |
+| `src/transactions/hooks/useTransactionFilters.ts` | Generic over `dimensions`; string-keyed filter state; custom-text search; reconciliation; `availableOptions` now `Record<string, Set<string>>` |
+| `src/transactions/components/FilterPanel.tsx` | Renders generically over descriptors; tri-state control; chips carry `aria-label` |
+| `src/spaces/components/tabs/TransactionsTab.tsx` | `getSpaceConfig()` resolved once; day-header / row / detail gating; new FilterPanel props |
+
+### Not done / still open
+
+- Manual browser verification (prompt §Verification items 2, 9, 10 — legacy click-through, day-header layout with country disabled, 375px with several chips) was **not** performed: no Firebase login session in this environment. Legacy parity is covered by the component tests above, but a real click-through is still recommended before treating Phase 6 as closed.
+- Custom `select` filters offer no "Undefined" option (built-ins do). Not requested; worth deciding before Phase 7 reuses these descriptors for dashboard breakdowns.
+- Out of scope by prompt §7: grouping/sorting by a custom dimension (Phase 7), bulk selection, filter persistence across sessions.

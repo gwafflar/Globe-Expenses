@@ -3,46 +3,46 @@
 // All filtering happens in-memory on the already-loaded transaction array.
 // No extra Firestore reads needed — this is pure JS filtering via useMemo.
 //
-// Filter dimensions:
-//   category, currency, country, city, paymentMethod
-//   + paidBy, beneficiaries (multi-user spaces only)
+// Which dimensions exist is decided by the space's config, not by this file:
+// see filterDimensions.ts (Space refactor Phase 6, §1). Core dimensions (type,
+// currency, paidBy, beneficiaries), enabled built-ins (category, country, city,
+// paymentMethod) and enabled custom select/boolean fields all arrive as the
+// same descriptor shape, so everything below is generic over `dimensions`.
 //
-// Search: fuzzy match on transaction name (case-insensitive substring),
-//         or exact match on amount (if the search term is a number).
+// Search: substring match on transaction name, exact/prefix match on amount,
+//         and substring match on enabled custom 'text' field values.
 
 import { useMemo, useState, useCallback } from 'react'
 import type { TransactionWithStatus } from './useTransactions'
 import type { Space } from '@/spaces/types'
+import { getSpaceConfig } from '@/spaces/config'
 import { getTransactionType } from '@/transactions/utils/walletHelpers'
+import {
+  UNDEFINED_FILTER,
+  allFilterDimensions,
+  dimensionValues,
+  matchesDimension,
+  reconcileFilters,
+  searchableCustomFieldIds,
+  type FilterDimension,
+  type FilterState,
+  type ObservedValues,
+} from '@/transactions/utils/filterDimensions'
 
-// Sentinel value representing transactions where the field is undefined/empty.
-// Stored in the filter Set and options array; the UI renders it as "Undefined".
-export const UNDEFINED_FILTER = '__undefined__'
+export {
+  UNDEFINED_FILTER,
+  BOOL_TRUE,
+  BOOL_FALSE,
+  type FilterDimension,
+  type FilterState,
+} from '@/transactions/utils/filterDimensions'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-/** The filter dimensions that can be active. Each maps to a Set of selected values. */
-export type FilterDimension =
-  | 'type'
-  | 'category'
-  | 'currency'
-  | 'country'
-  | 'city'
-  | 'paymentMethod'
-  | 'paidBy'
-  | 'beneficiaries'
-
-/** State for all active filters: dimension → set of selected values. */
-export type FilterState = Partial<Record<FilterDimension, Set<string>>>
-
-/** Unique values available for each filter dimension, extracted from the transaction list. */
-export type FilterOptions = Record<FilterDimension, string[]>
-
-// ---------------------------------------------------------------------------
-// Hook
-// ---------------------------------------------------------------------------
+/** Value ids still reachable for each dimension, keyed by dimension key. */
+export type AvailableOptions = Record<string, Set<string>>
 
 export interface UseTransactionFiltersResult {
   /** The transaction list after applying all active filters + search. */
@@ -51,65 +51,43 @@ export interface UseTransactionFiltersResult {
   searchQuery: string
   /** Update the search query. */
   setSearchQuery: (q: string) => void
-  /** Current filter state (dimension → selected values). */
+  /** The dimensions this space can currently filter on, in display order. */
+  dimensions: FilterDimension[]
+  /** Current filter state, already reconciled against `dimensions` (§3): it
+   *  never contains a dimension or option that no longer exists. */
   filters: FilterState
   /** Toggle a single value within a dimension (add if absent, remove if present). */
-  toggleFilter: (dimension: FilterDimension, value: string) => void
+  toggleFilter: (key: string, value: string) => void
+  /** Select exactly one value for a dimension, or clear it with null.
+   *  Used by tri-state (boolean) controls, where the choices are exclusive. */
+  setExclusiveFilter: (key: string, value: string | null) => void
   /** Clear all selected values for one dimension. */
-  clearDimension: (dimension: FilterDimension) => void
+  clearDimension: (key: string) => void
   /** Clear ALL filters and search in one action. */
   clearAll: () => void
   /** Whether any filter or search is currently active. */
   hasActiveFilters: boolean
-  /** Available unique values for each dimension (derived from the full, unfiltered list). */
-  options: FilterOptions
-  /** Cross-filtered availability: for each dimension, which values would produce results
-   *  given all OTHER active filters. Values NOT in this set should be greyed out. */
-  availableOptions: FilterOptions
+  /** Cross-filtered availability: for each dimension, which values would still
+   *  produce results given all OTHER active filters. Values outside this set
+   *  should be greyed out. */
+  availableOptions: AvailableOptions
   /** Number of results after filtering. */
   resultCount: number
 }
 
 // ---------------------------------------------------------------------------
-// Helpers — extracted so they can be reused for cross-filtering
+// Search
 // ---------------------------------------------------------------------------
 
-/** Check if a transaction matches one dimension's filter. */
-function matchesDimension(
+/** Check if a transaction matches the search query.
+ *  `textFieldIds` are the enabled custom 'text' fields (§4) — disabled fields
+ *  are never searched, so hiding a field also hides it from search results. */
+function matchesSearch(
   tx: TransactionWithStatus,
-  dim: FilterDimension,
-  selected: Set<string>,
+  q: string,
+  searchAsNumber: number,
+  textFieldIds: string[],
 ): boolean {
-  switch (dim) {
-    case 'type':
-      return selected.has(getTransactionType(tx))
-    case 'category': {
-      const val = tx.category
-      return val ? selected.has(val) : selected.has(UNDEFINED_FILTER)
-    }
-    case 'currency':
-      return selected.has(tx.currency)
-    case 'country': {
-      const val = tx.country
-      return val ? selected.has(val) : selected.has(UNDEFINED_FILTER)
-    }
-    case 'city': {
-      const val = tx.city
-      return val ? selected.has(val) : selected.has(UNDEFINED_FILTER)
-    }
-    case 'paymentMethod': {
-      const val = tx.paymentMethod
-      return val ? selected.has(val) : selected.has(UNDEFINED_FILTER)
-    }
-    case 'paidBy':
-      return tx.paidBy.some((s) => selected.has(s.travelMemberId))
-    case 'beneficiaries':
-      return tx.beneficiaries.some((s) => selected.has(s.travelMemberId))
-  }
-}
-
-/** Check if a transaction matches the search query. */
-function matchesSearch(tx: TransactionWithStatus, q: string, searchAsNumber: number): boolean {
   if (!q) return true
   const nameMatch = tx.name.toLowerCase().includes(q)
   const amountMatch = !isNaN(searchAsNumber) && (
@@ -118,43 +96,35 @@ function matchesSearch(tx: TransactionWithStatus, q: string, searchAsNumber: num
     tx.totalAmount.toString().startsWith(searchAsNumber.toString()) ||
     tx.totalAmountMain.toString().startsWith(searchAsNumber.toString())
   )
-  return nameMatch || amountMatch
+  const customMatch = textFieldIds.some((id) => {
+    const v = tx.custom?.[id]
+    return typeof v === 'string' && v.toLowerCase().includes(q)
+  })
+  return nameMatch || amountMatch || customMatch
 }
 
-/** Extract the value(s) a transaction contributes to a given dimension. */
-function extractDimensionValues(tx: TransactionWithStatus, dim: FilterDimension): string[] {
-  switch (dim) {
-    case 'type':
-      return [getTransactionType(tx)]
-    case 'category':
-      return [tx.category ?? UNDEFINED_FILTER]
-    case 'currency':
-      return [tx.currency]
-    case 'country':
-      return [tx.country ?? UNDEFINED_FILTER]
-    case 'city':
-      return [tx.city ?? UNDEFINED_FILTER]
-    case 'paymentMethod':
-      return [tx.paymentMethod ?? UNDEFINED_FILTER]
-    case 'paidBy':
-      return tx.paidBy.map((s) => s.travelMemberId)
-    case 'beneficiaries':
-      return tx.beneficiaries.map((s) => s.travelMemberId)
-  }
-}
+// ---------------------------------------------------------------------------
+// Hook
+// ---------------------------------------------------------------------------
 
 export function useTransactionFilters(
   transactions: TransactionWithStatus[],
   space: Space,
-  _isSolo: boolean,
+  isSolo: boolean,
 ): UseTransactionFiltersResult {
   // -- State --
   const [filters, setFilters] = useState<FilterState>({})
   const [searchQuery, setSearchQuery] = useState('')
 
-  // -- Derive available options from the FULL transaction list (not filtered) --
-  // This ensures all options remain visible even when some filters are active.
-  const options = useMemo<FilterOptions>(() => {
+  // Legacy spaces (no space.config) resolve to travel-mode defaults, so the
+  // dimension list below is identical to the old hard-coded one.
+  const config = useMemo(() => getSpaceConfig(space), [space])
+
+  // -- Observed values for the core + built-in dimensions --
+  // Derived from the FULL transaction list (not the filtered one) so options
+  // stay visible while filters are active. Custom fields don't appear here:
+  // their options come from the field definition, not from the data.
+  const observed = useMemo<ObservedValues>(() => {
     const types = new Set<string>()
     const cats = new Set<string>()
     const currencies = new Set<string>()
@@ -164,8 +134,8 @@ export function useTransactionFilters(
     const payers = new Set<string>()
     const beneficiaries = new Set<string>()
 
-    // Track whether any transaction is missing a value for optional fields.
-    // If so, we add the UNDEFINED_FILTER sentinel so users can filter for "no value".
+    // Track whether any transaction is missing a value for an optional field.
+    // If so, the UNDEFINED_FILTER sentinel is appended so "no value" is filterable.
     let hasUndefinedCat = false
     let hasUndefinedCountry = false
     let hasUndefinedCity = false
@@ -178,14 +148,16 @@ export function useTransactionFilters(
       if (tx.country) countries.add(tx.country); else hasUndefinedCountry = true
       if (tx.city) cities.add(tx.city); else hasUndefinedCity = true
       if (tx.paymentMethod) methods.add(tx.paymentMethod); else hasUndefinedMethod = true
-      // For paidBy/beneficiaries, use displayName resolved from space.members
+      // Member dimensions store travelMemberId; only known members are offered.
       for (const s of tx.paidBy) {
-        const m = space.members.find((mem) => mem.travelMemberId === s.travelMemberId)
-        if (m) payers.add(m.travelMemberId)
+        if (space.members.some((mem) => mem.travelMemberId === s.travelMemberId)) {
+          payers.add(s.travelMemberId)
+        }
       }
       for (const s of tx.beneficiaries) {
-        const m = space.members.find((mem) => mem.travelMemberId === s.travelMemberId)
-        if (m) beneficiaries.add(m.travelMemberId)
+        if (space.members.some((mem) => mem.travelMemberId === s.travelMemberId)) {
+          beneficiaries.add(s.travelMemberId)
+        }
       }
     }
 
@@ -207,38 +179,67 @@ export function useTransactionFilters(
       country: countryList,
       city: cityList,
       paymentMethod: methodList,
-      // For member-based filters, store travelMemberId. UI resolves displayName.
       paidBy: Array.from(payers),
       beneficiaries: Array.from(beneficiaries),
     }
   }, [transactions, space.members])
 
+  // -- The dimension list this space can filter on --
+  const dimensions = useMemo(
+    () => allFilterDimensions(space, config, isSolo, observed),
+    [space, config, isSolo, observed],
+  )
+
+  // Enabled custom 'text' fields feed the search box rather than the panel (§4).
+  const textFieldIds = useMemo(() => searchableCustomFieldIds(config), [config])
+
+  // -- Stale filter reconciliation (§3) --
+  // Applied as a pure derivation first, so a filter on a just-disabled field
+  // never narrows THIS render's results, then written back to state so the
+  // stale selection is really gone (re-enabling a field must not resurrect it).
+  //
+  // React pattern note: this is the "adjust state during render" escape hatch,
+  // not an effect. Calling setState during the render of the *same* component
+  // makes React discard this render and immediately re-run it with the new
+  // state — no extra commit, no flash of stale UI, and no cascading-render
+  // lint warning. It is safe only because it is guarded by an identity check
+  // and reconcileFilters() is idempotent (reconciling an already-clean state
+  // returns the very same object), so this converges after one extra pass.
+  const effectiveFilters = useMemo(
+    () => reconcileFilters(filters, dimensions),
+    [filters, dimensions],
+  )
+  if (effectiveFilters !== filters) setFilters(effectiveFilters)
+
   // -- Actions --
 
-  const toggleFilter = useCallback((dimension: FilterDimension, value: string) => {
+  const toggleFilter = useCallback((key: string, value: string) => {
     setFilters((prev) => {
-      const current = prev[dimension] ?? new Set<string>()
+      const current = prev[key] ?? new Set<string>()
       const next = new Set(current)
-      if (next.has(value)) {
-        next.delete(value)
-      } else {
-        next.add(value)
-      }
-      // If the set is now empty, remove the dimension key entirely
+      if (next.has(value)) next.delete(value)
+      else next.add(value)
+      // An empty set means "no filter" — remove the key entirely
       const updated = { ...prev }
-      if (next.size === 0) {
-        delete updated[dimension]
-      } else {
-        updated[dimension] = next
-      }
+      if (next.size === 0) delete updated[key]
+      else updated[key] = next
       return updated
     })
   }, [])
 
-  const clearDimension = useCallback((dimension: FilterDimension) => {
+  const setExclusiveFilter = useCallback((key: string, value: string | null) => {
     setFilters((prev) => {
       const updated = { ...prev }
-      delete updated[dimension]
+      if (value === null) delete updated[key]
+      else updated[key] = new Set([value])
+      return updated
+    })
+  }, [])
+
+  const clearDimension = useCallback((key: string) => {
+    setFilters((prev) => {
+      const updated = { ...prev }
+      delete updated[key]
       return updated
     })
   }, [])
@@ -253,59 +254,55 @@ export function useTransactionFilters(
   const q = searchQuery.trim().toLowerCase()
   const searchAsNumber = q ? parseFloat(q.replace(',', '.')) : NaN
 
-  // Active dimension keys (for iteration)
+  /** Active filters paired with their descriptor. Built from `dimensions`, so a
+   *  filter whose dimension disappeared simply isn't here. */
   const activeDims = useMemo(
-    () => (Object.entries(filters) as [FilterDimension, Set<string>][])
-      .filter(([, s]) => s && s.size > 0),
-    [filters],
+    () => dimensions
+      .map((dim) => [dim, effectiveFilters[dim.key]] as const)
+      .filter((entry): entry is readonly [FilterDimension, Set<string>] =>
+        entry[1] !== undefined && entry[1].size > 0),
+    [dimensions, effectiveFilters],
   )
 
   const filtered = useMemo(() => {
     return transactions.filter((tx) => {
-      if (!matchesSearch(tx, q, searchAsNumber)) return false
+      if (!matchesSearch(tx, q, searchAsNumber, textFieldIds)) return false
       // Each active dimension is OR within, AND across.
       for (const [dim, selected] of activeDims) {
         if (!matchesDimension(tx, dim, selected)) return false
       }
       return true
     })
-  }, [transactions, activeDims, q, searchAsNumber])
+  }, [transactions, activeDims, q, searchAsNumber, textFieldIds])
 
   // -- Cross-filtered availability --
-  // For each dimension, apply all OTHER filters + search, then collect which values
-  // still appear. Values not in this set get greyed out in the UI.
-  const ALL_DIMS: FilterDimension[] = [
-    'type', 'category', 'currency', 'country', 'city', 'paymentMethod', 'paidBy', 'beneficiaries',
-  ]
+  // For each dimension, apply all OTHER filters + search, then collect which
+  // values still appear. Values not in this set get greyed out in the UI.
+  const availableOptions = useMemo<AvailableOptions>(() => {
+    const result: AvailableOptions = {}
 
-  const availableOptions = useMemo<FilterOptions>(() => {
-    // If no filters are active, everything is available — shortcut to avoid N full scans
-    if (activeDims.length === 0 && !q) return options
+    // Shortcut: with nothing active every option is reachable.
+    if (activeDims.length === 0 && !q) {
+      for (const dim of dimensions) result[dim.key] = new Set(dim.options.map((o) => o.id))
+      return result
+    }
 
-    const result = {} as FilterOptions
-    for (const targetDim of ALL_DIMS) {
-      // Build the list of filters to apply = all active dims EXCEPT targetDim
-      const otherDims = activeDims.filter(([dim]) => dim !== targetDim)
-
-      // Collect values that appear in transactions matching all other filters + search
+    for (const target of dimensions) {
+      const otherDims = activeDims.filter(([dim]) => dim.key !== target.key)
       const available = new Set<string>()
       for (const tx of transactions) {
-        if (!matchesSearch(tx, q, searchAsNumber)) continue
+        if (!matchesSearch(tx, q, searchAsNumber, textFieldIds)) continue
         let passesOthers = true
         for (const [dim, selected] of otherDims) {
           if (!matchesDimension(tx, dim, selected)) { passesOthers = false; break }
         }
         if (!passesOthers) continue
-        // This transaction passes all other filters — its values for targetDim are available
-        for (const val of extractDimensionValues(tx, targetDim)) {
-          available.add(val)
-        }
+        for (const val of dimensionValues(tx, target)) available.add(val)
       }
-      // Intersect with the full options list (preserve ordering, only include known options)
-      result[targetDim] = options[targetDim].filter((v) => available.has(v))
+      result[target.key] = available
     }
     return result
-  }, [transactions, activeDims, options, q, searchAsNumber])
+  }, [transactions, dimensions, activeDims, q, searchAsNumber, textFieldIds])
 
   // -- Derived --
 
@@ -315,12 +312,13 @@ export function useTransactionFilters(
     filtered,
     searchQuery,
     setSearchQuery,
-    filters,
+    dimensions,
+    filters: effectiveFilters,
     toggleFilter,
+    setExclusiveFilter,
     clearDimension,
     clearAll,
     hasActiveFilters,
-    options,
     availableOptions,
     resultCount: filtered.length,
   }

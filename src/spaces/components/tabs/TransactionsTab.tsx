@@ -15,7 +15,7 @@ import { normalizeTransactionSplits, parseTxDate } from '@/spaces/components/tab
 import { useTransactionFilters } from '@/transactions/hooks/useTransactionFilters'
 import { FilterPanel } from '@/transactions/components/FilterPanel'
 import { getTransactionType, countsAsSpending, isTransfer } from '@/transactions/utils/walletHelpers'
-import type { CustomFieldDef } from '@/spaces/types'
+import type { CustomFieldDef, SpaceConfig } from '@/spaces/types'
 import { getSpaceConfig, enabledCustomFields, resolveOptionLabel } from '@/spaces/config'
 
 // ---------------------------------------------------------------------------
@@ -200,32 +200,41 @@ function DayGroupHeader({
   date,
   transactions,
   mainCurrency,
+  showCountry,
+  showCity,
 }: {
   date: string
   transactions: TransactionWithStatus[]
   mainCurrency: string
+  /** config.builtInFields.country — with country off the header drops the flags. */
+  showCountry: boolean
+  /** config.builtInFields.city — gated independently so a space that tracks
+   *  cities but not countries still gets its city line. */
+  showCity: boolean
 }) {
   const dateLabel = formatDateLabel(date)
 
   // Collect up to 3 unique country emojis from this day's transactions
   const countryEmojis = useMemo(() => {
+    if (!showCountry) return []
     const seen = new Set<string>()
     for (const tx of transactions) {
       if (tx.country) seen.add(extractCountryEmoji(tx.country))
       if (seen.size >= 3) break
     }
     return Array.from(seen)
-  }, [transactions])
+  }, [transactions, showCountry])
 
   // Collect up to 3 unique city names from this day's transactions
   const cities = useMemo(() => {
+    if (!showCity) return []
     const seen = new Set<string>()
     for (const tx of transactions) {
       if (tx.city) seen.add(tx.city)
       if (seen.size >= 3) break
     }
     return Array.from(seen)
-  }, [transactions])
+  }, [transactions, showCity])
 
   // Sum of spending transactions only (excludes withdrawals and balance-only adjustments)
   const dayTotal = useMemo(
@@ -261,6 +270,7 @@ function TransactionRow({
   currentUserTravelMemberId,
   isSolo,
   mainCurrency,
+  showCategory,
   onToggle,
 }: {
   transaction: TransactionWithStatus
@@ -269,18 +279,22 @@ function TransactionRow({
   currentUserTravelMemberId: string
   isSolo: boolean
   mainCurrency: string
+  /** config.builtInFields.category — gates the leading emoji and the pill. */
+  showCategory: boolean
   onToggle: () => void
 }) {
   // Transaction type determines the leading emoji:
   // - transfer  → 🤝 (person-to-person)
   // - withdrawal → 🏧 (ATM/top-up)
   // - adjustment → ⚖️ (reconciliation)
-  // - expense → category emoji (default)
+  // - expense → category emoji (default), or nothing when category is disabled:
+  //   the emoji is sourced from a hidden field, so the row closes up instead.
   const txType = getTransactionType(transaction)
-  const categoryEmoji = txType === 'transfer' ? '🤝'
+  const leadingEmoji = txType === 'transfer' ? '🤝'
     : txType === 'withdrawal' ? '🏧'
     : txType === 'adjustment' ? '⚖️'
-    : getCategoryEmoji(transaction.category, categories)
+    : showCategory ? getCategoryEmoji(transaction.category, categories)
+    : null
 
   // Beneficiary avatars — show up to 3, overlapping
   const beneficiaryAvatars = useMemo(() => {
@@ -307,7 +321,9 @@ function TransactionRow({
     >
       {/* Left: emoji + name + category pill + avatars */}
       <div className="flex min-w-0 items-start gap-2">
-        <span className="mt-0.5 shrink-0 text-base leading-none">{categoryEmoji}</span>
+        {leadingEmoji && (
+          <span className="mt-0.5 shrink-0 text-base leading-none">{leadingEmoji}</span>
+        )}
         <div className="min-w-0">
           {/* Transaction name + pending badge */}
           <div className="flex flex-wrap items-center gap-1">
@@ -331,7 +347,7 @@ function TransactionRow({
                 Adjustment
               </span>
             )}
-            {transaction.category && (
+            {showCategory && transaction.category && (
               <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                 {transaction.category}
               </span>
@@ -383,6 +399,7 @@ function TransactionDetail({
   currentUserUid,
   isSolo,
   mainCurrency,
+  builtIns,
   customFieldDefs,
   onEdit,
   onDelete,
@@ -392,6 +409,8 @@ function TransactionDetail({
   currentUserUid: string
   isSolo: boolean
   mainCurrency: string
+  /** config.builtInFields — a row sourced from a disabled field is not rendered. */
+  builtIns: SpaceConfig['builtInFields']
   customFieldDefs: CustomFieldDef[]
   onEdit: () => void
   onDelete: () => void
@@ -447,16 +466,21 @@ function TransactionDetail({
         </div>
       </div>
 
-      {/* Meta grid — 2 columns */}
+      {/* Meta grid — 2 columns. Each cell is gated on its built-in field:
+          a disabled field's row is not rendered and the grid closes up. */}
       <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-        <div>
-          <span className="text-muted-foreground">Category </span>
-          <span>{transaction.category ?? '—'}</span>
-        </div>
-        <div>
-          <span className="text-muted-foreground">Payment </span>
-          <span>{transaction.paymentMethod ?? '—'}</span>
-        </div>
+        {builtIns.category && (
+          <div>
+            <span className="text-muted-foreground">Category </span>
+            <span>{transaction.category ?? '—'}</span>
+          </div>
+        )}
+        {builtIns.paymentMethod && (
+          <div>
+            <span className="text-muted-foreground">Payment </span>
+            <span>{transaction.paymentMethod ?? '—'}</span>
+          </div>
+        )}
         {/* Fees — only shown on withdrawal transactions */}
         {transaction.fees != null && transaction.fees > 0 && (
           <div>
@@ -464,18 +488,22 @@ function TransactionDetail({
             <span>{formatAmount(transaction.fees, transaction.currency)}</span>
           </div>
         )}
-        <div>
-          <span className="text-muted-foreground">Country </span>
-          <span>{transaction.country ?? '—'}</span>
-        </div>
-        <div>
-          <span className="text-muted-foreground">City </span>
-          <span>{transaction.city ?? '—'}</span>
-        </div>
+        {builtIns.country && (
+          <div>
+            <span className="text-muted-foreground">Country </span>
+            <span>{transaction.country ?? '—'}</span>
+          </div>
+        )}
+        {builtIns.city && (
+          <div>
+            <span className="text-muted-foreground">City </span>
+            <span>{transaction.city ?? '—'}</span>
+          </div>
+        )}
       </div>
 
-      {/* Notes — only when present */}
-      {transaction.notes && (
+      {/* Notes — only when present and the field is enabled */}
+      {builtIns.notes && transaction.notes && (
         <div className="text-xs">
           <span className="font-medium text-foreground">Notes: </span>
           <span className="text-muted-foreground">{transaction.notes}</span>
@@ -590,6 +618,7 @@ function DayGroupSection({
   currentUserUid,
   isSolo,
   mainCurrency,
+  builtIns,
   customFieldDefs,
   expandedTxId,
   onToggle,
@@ -603,6 +632,7 @@ function DayGroupSection({
   currentUserUid: string
   isSolo: boolean
   mainCurrency: string
+  builtIns: SpaceConfig['builtInFields']
   customFieldDefs: CustomFieldDef[]
   expandedTxId: string | null
   onToggle: (txId: string) => void
@@ -611,7 +641,13 @@ function DayGroupSection({
 }) {
   return (
     <div>
-      <DayGroupHeader date={group.date} transactions={group.transactions} mainCurrency={mainCurrency} />
+      <DayGroupHeader
+        date={group.date}
+        transactions={group.transactions}
+        mainCurrency={mainCurrency}
+        showCountry={builtIns.country}
+        showCity={builtIns.city}
+      />
       <div className="mt-1 space-y-1">
         {group.transactions.map((tx) => (
           <Card key={tx.txId} className="overflow-hidden p-0">
@@ -622,6 +658,7 @@ function DayGroupSection({
               currentUserTravelMemberId={currentUserTravelMemberId}
               isSolo={isSolo}
               mainCurrency={mainCurrency}
+              showCategory={builtIns.category}
               onToggle={() => onToggle(tx.txId)}
             />
             {expandedTxId === tx.txId && (
@@ -631,6 +668,7 @@ function DayGroupSection({
                 currentUserUid={currentUserUid}
                 isSolo={isSolo}
                 mainCurrency={mainCurrency}
+                builtIns={builtIns}
                 customFieldDefs={customFieldDefs}
                 onEdit={() => onEditTransaction(tx.txId)}
                 onDelete={() => onDeleteTransaction(tx.txId)}
@@ -736,9 +774,11 @@ export function TransactionsTab({
     [space.members, currentUserUid],
   )
 
-  // Resolved once, passed down to TransactionDetail — never call getSpaceConfig()
-  // in a nested component (Phase 5, §1).
-  const customFieldDefs = useMemo(() => enabledCustomFields(getSpaceConfig(space)), [space])
+  // Resolved once, passed down — never call getSpaceConfig() in a nested
+  // component (Phase 5, §1). Legacy spaces resolve to travel-mode defaults, so
+  // every gate below is `true` and the list looks exactly as it did before.
+  const config = useMemo(() => getSpaceConfig(space), [space])
+  const customFieldDefs = useMemo(() => enabledCustomFields(config), [config])
 
   // Accordion state — only one card open at a time; null = all collapsed
   const [expandedTxId, setExpandedTxId] = useState<string | null>(null)
@@ -759,12 +799,13 @@ export function TransactionsTab({
     filtered: filteredTransactions,
     searchQuery,
     setSearchQuery,
+    dimensions,
     filters,
     toggleFilter,
+    setExclusiveFilter,
     clearDimension,
     clearAll,
     hasActiveFilters,
-    options,
     availableOptions,
     resultCount,
   } = useTransactionFilters(normalizedTransactions, space, isSolo)
@@ -854,17 +895,16 @@ export function TransactionsTab({
         <FilterPanel
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
+          dimensions={dimensions}
           filters={filters}
-          options={options}
           availableOptions={availableOptions}
           onToggleFilter={toggleFilter}
+          onSetExclusiveFilter={setExclusiveFilter}
           onClearDimension={clearDimension}
           onClearAll={clearAll}
           hasActiveFilters={hasActiveFilters}
           resultCount={resultCount}
           totalCount={normalizedTransactions.length}
-          space={space}
-          isSolo={isSolo}
         />
       )}
 
@@ -901,6 +941,7 @@ export function TransactionsTab({
               currentUserUid={currentUserUid}
               isSolo={isSolo}
               mainCurrency={mainCurrency}
+              builtIns={config.builtInFields}
               customFieldDefs={customFieldDefs}
               expandedTxId={expandedTxId}
               onToggle={handleToggle}
