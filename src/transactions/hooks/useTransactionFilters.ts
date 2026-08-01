@@ -9,8 +9,8 @@
 // paymentMethod) and enabled custom select/boolean fields all arrive as the
 // same descriptor shape, so everything below is generic over `dimensions`.
 //
-// Search: substring match on transaction name, exact/prefix match on amount,
-//         and substring match on enabled custom 'text' field values.
+// Search: substring match on transaction name and notes, exact/prefix match on
+//         amount, and substring match on enabled custom 'text' field values.
 
 import { useMemo, useState, useCallback } from 'react'
 import type { TransactionWithStatus } from './useTransactions'
@@ -80,16 +80,20 @@ export interface UseTransactionFiltersResult {
 // ---------------------------------------------------------------------------
 
 /** Check if a transaction matches the search query.
- *  `textFieldIds` are the enabled custom 'text' fields (§4) — disabled fields
- *  are never searched, so hiding a field also hides it from search results. */
+ *  Every free-text field the space currently has enabled is searched: a
+ *  disabled field is hidden everywhere else, so it must not produce search
+ *  hits either. `searchNotes` is config.builtInFields.notes; `textFieldIds`
+ *  are the enabled custom 'text' fields (§4). */
 function matchesSearch(
   tx: TransactionWithStatus,
   q: string,
   searchAsNumber: number,
+  searchNotes: boolean,
   textFieldIds: string[],
 ): boolean {
   if (!q) return true
   const nameMatch = tx.name.toLowerCase().includes(q)
+  const notesMatch = searchNotes && (tx.notes?.toLowerCase().includes(q) ?? false)
   const amountMatch = !isNaN(searchAsNumber) && (
     tx.totalAmount === searchAsNumber ||
     tx.totalAmountMain === searchAsNumber ||
@@ -100,7 +104,7 @@ function matchesSearch(
     const v = tx.custom?.[id]
     return typeof v === 'string' && v.toLowerCase().includes(q)
   })
-  return nameMatch || amountMatch || customMatch
+  return nameMatch || notesMatch || amountMatch || customMatch
 }
 
 // ---------------------------------------------------------------------------
@@ -193,6 +197,9 @@ export function useTransactionFilters(
   // Enabled custom 'text' fields feed the search box rather than the panel (§4).
   const textFieldIds = useMemo(() => searchableCustomFieldIds(config), [config])
 
+  // Notes is a toggleable built-in, so it is searched only while enabled.
+  const searchNotes = config.builtInFields.notes
+
   // -- Stale filter reconciliation (§3) --
   // Applied as a pure derivation first, so a filter on a just-disabled field
   // never narrows THIS render's results, then written back to state so the
@@ -266,14 +273,14 @@ export function useTransactionFilters(
 
   const filtered = useMemo(() => {
     return transactions.filter((tx) => {
-      if (!matchesSearch(tx, q, searchAsNumber, textFieldIds)) return false
+      if (!matchesSearch(tx, q, searchAsNumber, searchNotes, textFieldIds)) return false
       // Each active dimension is OR within, AND across.
       for (const [dim, selected] of activeDims) {
         if (!matchesDimension(tx, dim, selected)) return false
       }
       return true
     })
-  }, [transactions, activeDims, q, searchAsNumber, textFieldIds])
+  }, [transactions, activeDims, q, searchAsNumber, searchNotes, textFieldIds])
 
   // -- Cross-filtered availability --
   // For each dimension, apply all OTHER filters + search, then collect which
@@ -291,7 +298,7 @@ export function useTransactionFilters(
       const otherDims = activeDims.filter(([dim]) => dim.key !== target.key)
       const available = new Set<string>()
       for (const tx of transactions) {
-        if (!matchesSearch(tx, q, searchAsNumber, textFieldIds)) continue
+        if (!matchesSearch(tx, q, searchAsNumber, searchNotes, textFieldIds)) continue
         let passesOthers = true
         for (const [dim, selected] of otherDims) {
           if (!matchesDimension(tx, dim, selected)) { passesOthers = false; break }
@@ -302,7 +309,7 @@ export function useTransactionFilters(
       result[target.key] = available
     }
     return result
-  }, [transactions, dimensions, activeDims, q, searchAsNumber, textFieldIds])
+  }, [transactions, dimensions, activeDims, q, searchAsNumber, searchNotes, textFieldIds])
 
   // -- Derived --
 

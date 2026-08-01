@@ -92,7 +92,7 @@ export function FilterPanel({
       <div className="relative">
         <Input
           type="text"
-          placeholder="Search name or amount…"
+          placeholder="Search name, notes or amount…"
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
           className="h-8 pl-8 text-sm"

@@ -238,6 +238,35 @@ describe('TransactionsTab — custom boolean filter (absent means false)', () =>
   })
 })
 
+describe('TransactionsTab — notes are searchable', () => {
+  it('matches on the notes field', () => {
+    renderTab(makeSpace(), [
+      makeTx('t1', { name: 'Hotel', notes: 'paid by Bob at reception' }),
+      makeTx('t2', { name: 'Taxi' }),
+    ])
+    openFilters()
+    fireEvent.change(screen.getByPlaceholderText(/Search/), { target: { value: 'reception' } })
+
+    expect(screen.getByText('Hotel')).toBeInTheDocument()
+    expect(screen.queryByText('Taxi')).not.toBeInTheDocument()
+  })
+
+  it('does not search notes while the notes field is disabled', () => {
+    const config: SpaceConfig = {
+      ...configFromPreset('group'),
+      builtInFields: { ...configFromPreset('group').builtInFields, notes: false },
+    }
+    renderTab(makeSpace(config), [
+      makeTx('t1', { name: 'Hotel', notes: 'paid by Bob at reception' }),
+      makeTx('t2', { name: 'Taxi' }),
+    ])
+    openFilters()
+    fireEvent.change(screen.getByPlaceholderText(/Search/), { target: { value: 'reception' } })
+
+    expect(screen.getByText(/No transactions match your filters/)).toBeInTheDocument()
+  })
+})
+
 describe('TransactionsTab — custom text fields feed the search box', () => {
   const config: SpaceConfig = {
     ...configFromPreset('travel'),
