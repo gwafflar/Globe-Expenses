@@ -76,15 +76,22 @@ export type FilterState = Partial<Record<string, Set<string>>>
  * Applying it REPLACES every existing filter and the search query. The user
  * tapped a number and expects to see exactly the transactions behind it.
  */
+export interface FilterSelection {
+  /** A FilterDimension.key. */
+  dimensionKey: string
+  /** Value ids to select. Several at once for a collapsed "Other" row. */
+  values: string[]
+}
+
 export interface FilterRequest {
   /** Changes on every request. Required because the same dimension/value pair
    *  can legitimately be requested twice in a row (tap a row, clear filters,
    *  tap the same row again) and the payload alone would look unchanged. */
   nonce: number
-  /** A FilterDimension.key. */
-  dimensionKey: string
-  /** Value ids to select. Several at once for a collapsed "Other" row. */
-  values: string[]
+  /** One entry for a 1D breakdown row, two for a 2D pivot cell (Phase 7b).
+   *  Entries are ANDed, which is what the filter state already does across
+   *  dimensions — so this is a shape change, not a behaviour change. */
+  selections: FilterSelection[]
   /** ⚠️ Carried deliberately: without the dashboard's date range the drilled
    *  list would not sum to the number the user tapped. */
   range: DateRange

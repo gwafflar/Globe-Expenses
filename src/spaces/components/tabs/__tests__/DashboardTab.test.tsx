@@ -544,8 +544,8 @@ describe('DashboardTab — drill-down', () => {
 
       expect(onDrillDown).toHaveBeenCalledTimes(1)
       const payload = onDrillDown.mock.calls[0][0]
-      expect(payload.dimensionKey).toBe('category')
-      expect(payload.values).toEqual(['Food'])
+      // Phase 7b: one selection for a 1D row, two for a pivot cell.
+      expect(payload.selections).toEqual([{ dimensionKey: 'category', values: ['Food'] }])
       // Without the range, the filtered list would not sum to the tapped number.
       expect(payload.range.preset).toBe('month')
       expect(payload.range.from).toEqual(new Date(2026, 5, 1))
@@ -574,8 +574,8 @@ describe('DashboardTab — drill-down', () => {
     )
 
     const payload = onDrillDown.mock.calls[0][0]
-    expect(Object.keys(payload).sort()).toEqual(['dimensionKey', 'range', 'values'])
-    expect(payload.dimensionKey).toBe('category')
+    expect(Object.keys(payload).sort()).toEqual(['range', 'selections'])
+    expect(payload.selections[0].dimensionKey).toBe('category')
   })
 
   it('an Other row drills into every collapsed value at once', () => {
@@ -588,7 +588,7 @@ describe('DashboardTab — drill-down', () => {
     fireEvent.click(
       within(card('By category')).getByRole('button', { name: /Show transactions for Other/ }),
     )
-    expect(onDrillDown.mock.calls[0][0].values.sort()).toEqual(['F', 'G'])
+    expect(onDrillDown.mock.calls[0][0].selections[0].values.sort()).toEqual(['F', 'G'])
   })
 })
 
@@ -654,5 +654,230 @@ describe('DashboardTab — card builder', () => {
     expect(within(dialog).getByRole('button', { name: 'Category' })).toBeInTheDocument()
     expect(within(dialog).queryByRole('button', { name: 'Reference' })).toBeNull()
     expect(within(dialog).queryByRole('button', { name: 'Paid by' })).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Pivot cards (Space refactor Phase 7b)
+// ---------------------------------------------------------------------------
+
+describe('DashboardTab — pivot cards', () => {
+  /** A space whose only card is the country × category pivot. */
+  function pivotSpace(cards?: DashboardCardDef[]): Space {
+    return makeSpace({
+      ...configFromPreset('travel'),
+      dashboardCards: cards ?? [{ id: 'p1', dimensions: ['country', 'category'] }],
+    })
+  }
+
+  /** JP 160 (Food 100 + Hotel 60), FR 40 (Food 40). */
+  const pivotTxs = [
+    makeTx('t1', { country: 'JP', category: 'Food', totalAmountMain: 100 }),
+    makeTx('t2', { country: 'JP', category: 'Hotel', totalAmountMain: 60 }),
+    makeTx('t3', { country: 'FR', category: 'Food', totalAmountMain: 40 }),
+  ]
+
+  const PIVOT_TITLE = 'Country × category'
+
+  it('renders as a nested list with only the FIRST section expanded', () => {
+    renderDashboard(pivotSpace(), pivotTxs)
+    const pivot = card(PIVOT_TITLE)
+
+    // Both sections present…
+    expect(within(pivot).getByRole('button', { name: 'Collapse JP' })).toBeInTheDocument()
+    expect(within(pivot).getByRole('button', { name: 'Expand FR' })).toBeInTheDocument()
+    // …but only JP's rows are rendered. Opening to a wall of rows is exactly
+    // what the collapsed default exists to avoid.
+    expect(within(pivot).getByRole('button', { name: 'Show transactions for Hotel' }))
+      .toBeInTheDocument()
+    expect(within(pivot).getAllByRole('button', { name: 'Show transactions for Food' }))
+      .toHaveLength(1)
+  })
+
+  it('tapping a row drills down with BOTH filters plus the range', () => {
+    const onDrillDown = vi.fn()
+    renderDashboard(pivotSpace(), pivotTxs, { onDrillDown })
+
+    fireEvent.click(
+      within(card(PIVOT_TITLE)).getByRole('button', { name: 'Show transactions for Hotel' }),
+    )
+
+    const payload = onDrillDown.mock.calls[0][0]
+    expect(payload.selections).toEqual([
+      { dimensionKey: 'country', values: ['JP'] },
+      { dimensionKey: 'category', values: ['Hotel'] },
+    ])
+    // Same asymmetry as 1D: the range travels, the member selection does not.
+    expect(Object.keys(payload).sort()).toEqual(['range', 'selections'])
+  })
+
+  it('tapping a section total drills down with the PRIMARY filter only', () => {
+    const onDrillDown = vi.fn()
+    renderDashboard(pivotSpace(), pivotTxs, { onDrillDown })
+
+    fireEvent.click(
+      within(card(PIVOT_TITLE)).getByRole('button', { name: 'Show transactions for JP' }),
+    )
+
+    // The same result as the equivalent 1D country card row, reached from
+    // inside the pivot.
+    expect(onDrillDown.mock.calls[0][0].selections).toEqual([
+      { dimensionKey: 'country', values: ['JP'] },
+    ])
+  })
+
+  it('tapping the chevron collapses without navigating', () => {
+    const onDrillDown = vi.fn()
+    renderDashboard(pivotSpace(), pivotTxs, { onDrillDown })
+    const pivot = card(PIVOT_TITLE)
+
+    fireEvent.click(within(pivot).getByRole('button', { name: 'Collapse JP' }))
+
+    expect(onDrillDown).not.toHaveBeenCalled()
+    expect(within(pivot).queryByRole('button', { name: 'Show transactions for Hotel' })).toBeNull()
+    // …and the section total stays reachable while collapsed.
+    expect(within(pivot).getByRole('button', { name: 'Show transactions for JP' }))
+      .toBeInTheDocument()
+    // Re-opening brings the rows back.
+    fireEvent.click(within(pivot).getByRole('button', { name: 'Expand JP' }))
+    expect(within(pivot).getByRole('button', { name: 'Show transactions for Hotel' }))
+      .toBeInTheDocument()
+  })
+
+  it('tapping an Other row drills into the whole collapsed key set', () => {
+    // One country, 7 categories → 5 rows + "Other · 2 values".
+    const txs = ['c1', 'c2', 'c3', 'c4', 'c5', 'c6', 'c7'].map((c, i) =>
+      makeTx(`t${i}`, { country: 'JP', category: c, totalAmountMain: 100 - i }),
+    )
+    const onDrillDown = vi.fn()
+    renderDashboard(pivotSpace(), txs, { onDrillDown })
+
+    fireEvent.click(
+      within(card(PIVOT_TITLE)).getByRole('button', { name: /Show transactions for Other/ }),
+    )
+
+    expect(onDrillDown.mock.calls[0][0].selections).toEqual([
+      { dimensionKey: 'country', values: ['JP'] },
+      { dimensionKey: 'category', values: ['c6', 'c7'] },
+    ])
+  })
+
+  it('hides the card when ONE dimension is disabled, without deleting it', () => {
+    const cards: DashboardCardDef[] = [{ id: 'p1', dimensions: ['country', 'category'] }]
+    // group preset: country off, category on.
+    const config: SpaceConfig = { ...configFromPreset('group'), dashboardCards: cards }
+    renderDashboard(makeSpace(config), pivotTxs)
+
+    // Not degraded to a 1D category card — hidden outright.
+    expect(cardTitles()).not.toContain(PIVOT_TITLE)
+    expect(cardTitles()).not.toContain('By category')
+    // Nothing was written: the card is still stored and comes back intact.
+    expect(updateSpaceDashboardCards).not.toHaveBeenCalled()
+    expect(config.dashboardCards).toEqual(cards)
+  })
+
+  it('saves a pivot with the dimensions in the picked order', () => {
+    renderDashboard(pivotSpace([{ id: 'x', dimensions: ['city'] }]), pivotTxs)
+
+    fireEvent.click(screen.getByRole('button', { name: '+ Add card' }))
+    const dialog = screen.getByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Country' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '+ Add a second dimension' }))
+    // The second picker is the one whose Category chip is not already active.
+    const pickers = within(dialog).getAllByRole('button', { name: 'Category' })
+    fireEvent.click(pickers[pickers.length - 1])
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add card' }))
+
+    const cards = updateSpaceDashboardCards.mock.calls[0][1]
+    expect(cards[cards.length - 1].dimensions).toEqual(['country', 'category'])
+  })
+
+  it('swaps the pair and updates the title live', () => {
+    renderDashboard(pivotSpace(), pivotTxs)
+    fireEvent.click(screen.getByRole('button', { name: 'Edit cards' }))
+    fireEvent.click(within(card(PIVOT_TITLE)).getByRole('button', { name: 'Edit card' }))
+
+    // The derived title appears beside the swap control AND on the preview.
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).getAllByText('Country × category').length).toBeGreaterThan(0)
+    fireEvent.click(within(dialog).getByRole('button', { name: '⇄ Swap order' }))
+    expect(within(dialog).queryByText('Country × category')).toBeNull()
+    expect(within(dialog).getAllByText('Category × country').length).toBeGreaterThan(0)
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    const cards = updateSpaceDashboardCards.mock.calls[0][1]
+    expect(cards[0].dimensions).toEqual(['category', 'country'])
+  })
+
+  it('disables second-dimension options that would complete an existing pair, and leaves the reverse order available', () => {
+    renderDashboard(pivotSpace(), pivotTxs)
+
+    fireEvent.click(screen.getByRole('button', { name: '+ Add card' }))
+    const dialog = screen.getByRole('dialog')
+    // Start a pivot on country — legal, even though [country] is free here.
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Country' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '+ Add a second dimension' }))
+
+    // country|category already exists → Category is greyed out in the second picker.
+    const categoryChips = within(dialog).getAllByRole('button', { name: 'Category' })
+    expect(categoryChips[categoryChips.length - 1]).toBeDisabled()
+    expect(categoryChips[categoryChips.length - 1]).toHaveAttribute(
+      'title',
+      'Already on your dashboard',
+    )
+
+    // The REVERSE order is a different card and stays available: pick Category
+    // as the primary, and Country is offerable as the secondary.
+    fireEvent.click(categoryChips[0])
+    const countryChips = within(dialog).getAllByRole('button', { name: 'Country' })
+    expect(countryChips[countryChips.length - 1]).not.toBeDisabled()
+  })
+
+  it('disables the swap control when the swapped card already exists', () => {
+    // BOTH orders are stored; editing one must not be swappable into the other.
+    renderDashboard(
+      pivotSpace([
+        { id: 'p1', dimensions: ['country', 'category'] },
+        { id: 'p2', dimensions: ['category', 'country'] },
+      ]),
+      pivotTxs,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Edit cards' }))
+    fireEvent.click(within(card(PIVOT_TITLE)).getByRole('button', { name: 'Edit card' }))
+
+    const swap = within(screen.getByRole('dialog')).getByRole('button', { name: '⇄ Swap order' })
+    expect(swap).toBeDisabled()
+    expect(swap).toHaveAttribute('title', 'Already on your dashboard')
+  })
+
+  it('treats a dimension used only by a HIDDEN card as used', () => {
+    // A card whose dimension is disabled is hidden but NOT deleted, so its
+    // combination stays taken. The risk this pins: creating a second card on
+    // the same dimension while it is hidden, which would silently collide the
+    // moment the field is re-enabled.
+    const stored: DashboardCardDef[] = [{ id: 'h', dimensions: ['paymentMethod'] }]
+    const disabled: SpaceConfig = {
+      ...configFromPreset('travel'),
+      builtInFields: { ...configFromPreset('travel').builtInFields, paymentMethod: false },
+      features: { ...configFromPreset('travel').features, wallets: false },
+      dashboardCards: stored,
+    }
+    const { unmount } = renderDashboard(makeSpace(disabled), pivotTxs)
+    // Hidden while disabled, and nothing was written away.
+    expect(cardTitles()).not.toContain('By payment')
+    expect(updateSpaceDashboardCards).not.toHaveBeenCalled()
+    expect(disabled.dashboardCards).toEqual(stored)
+    unmount()
+
+    // Re-enabled: the same stored array makes Payment a taken combination.
+    const reEnabled: SpaceConfig = { ...configFromPreset('travel'), dashboardCards: stored }
+    renderDashboard(makeSpace(reEnabled), pivotTxs)
+    fireEvent.click(screen.getByRole('button', { name: '+ Add card' }))
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).getByRole('button', { name: 'Payment' })).toBeDisabled()
+    expect(within(dialog).getByRole('button', { name: 'Payment' })).toHaveAttribute(
+      'title',
+      'Already on your dashboard',
+    )
   })
 })

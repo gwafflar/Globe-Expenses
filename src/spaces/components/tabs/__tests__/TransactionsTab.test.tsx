@@ -424,12 +424,12 @@ describe('TransactionsTab — drill-down from the dashboard', () => {
     makeTx('other-cat', { date: '10-06-2026', category: 'Transport', name: 'June transport' }),
   ]
 
-  /** A request shaped as SpaceDetailPage mints it. */
+  /** A request shaped as SpaceDetailPage mints it. Phase 7b: `selections` is a
+   *  LIST — one entry for a 1D breakdown row, two for a pivot cell. */
   function request(overrides: Partial<FilterRequest> = {}): FilterRequest {
     return {
       nonce: 1,
-      dimensionKey: 'category',
-      values: ['Food'],
+      selections: [{ dimensionKey: 'category', values: ['Food'] }],
       range: resolveRange('custom', { from: new Date(2026, 5, 1), to: new Date(2026, 5, 30) }),
       ...overrides,
     }
@@ -469,15 +469,55 @@ describe('TransactionsTab — drill-down from the dashboard', () => {
     expect(screen.getByRole('button', { name: 'Remove date range filter' })).toBeInTheDocument()
   })
 
+  it('ANDs the two selections of a pivot cell', () => {
+    // A pivot cell carries primary AND secondary. Only the transaction that
+    // satisfies both may survive, or the drilled list would not sum to the
+    // number the user tapped.
+    renderWithRequest(
+      request({
+        selections: [
+          { dimensionKey: 'category', values: ['Food'] },
+          { dimensionKey: 'country', values: ['🇯🇵 Japan'] },
+        ],
+        range: ALL_TIME,
+      }),
+    )
+    expect(screen.getByText('June food')).toBeInTheDocument()
+    expect(screen.getByText('May food')).toBeInTheDocument()
+    // Same country, different category — excluded by the second selection.
+    expect(screen.queryByText('June transport')).not.toBeInTheDocument()
+  })
+
+  it('yields nothing for a cell whose two values never co-occur', () => {
+    renderWithRequest(
+      request({
+        selections: [
+          { dimensionKey: 'category', values: ['Transport'] },
+          { dimensionKey: 'country', values: ['🇫🇷 France'] },
+        ],
+        range: ALL_TIME,
+      }),
+    )
+    expect(screen.queryByText('June transport')).not.toBeInTheDocument()
+    expect(screen.queryByText('June food')).not.toBeInTheDocument()
+  })
+
   it('drills into several values at once (a collapsed "Other" row)', () => {
-    renderWithRequest(request({ values: ['Food', 'Transport'] }))
+    renderWithRequest(
+      request({ selections: [{ dimensionKey: 'category', values: ['Food', 'Transport'] }] }),
+    )
     expect(screen.getByText('June food')).toBeInTheDocument()
     expect(screen.getByText('June transport')).toBeInTheDocument()
     expect(screen.queryByText('May food')).not.toBeInTheDocument()
   })
 
   it('REPLACES any prior filters rather than merging with them', () => {
-    const { rerender } = renderWithRequest(request({ values: ['Transport'], range: ALL_TIME }))
+    const { rerender } = renderWithRequest(
+      request({
+        selections: [{ dimensionKey: 'category', values: ['Transport'] }],
+        range: ALL_TIME,
+      }),
+    )
     expect(screen.getByText('June transport')).toBeInTheDocument()
 
     // A second drill-down on a different value must not intersect with the first.
@@ -493,7 +533,7 @@ describe('TransactionsTab — drill-down from the dashboard', () => {
         onAddExpense={vi.fn()}
         onEditTransaction={vi.fn()}
         onDeleteTransaction={vi.fn()}
-        filterRequest={request({ nonce: 2, values: ['Food'], range: ALL_TIME })}
+        filterRequest={request({ nonce: 2, selections: [{ dimensionKey: 'category', values: ['Food'] }], range: ALL_TIME })}
       />,
     )
     expect(screen.getByText('June food')).toBeInTheDocument()

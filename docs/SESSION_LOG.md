@@ -2493,3 +2493,118 @@ The spec asked for all-time on travel-shaped spaces and this-month elsewhere, bu
 - Lint across the whole project: 90 problems (84 errors, 6 warnings). 9 fall in files this session touched, **all pre-existing, 0 new** (4 of them are named verbatim in Session 023's entry, written before Phase 7a existed).
 - Manual browser verification not performed (no Firebase session in this environment): legacy click-through, You-mode agreement with the Balance tab in the real app, 375px layout.
 - Phase 7b (out of scope by §7): 2D pivot cards, a month dimension, per-member dashboards, persisting range/mode. `DashboardCardDef.dimensions` is already an array so 7b widens `[string]` → `[string, string]` without a stored-shape change. Expected friction: `computeBreakdown` returns a flat `BreakdownRow[]`; a separate `computePivot` is probably cleaner than overloading it.
+
+## ✨ Working Session 025 — 6 August 2026
+
+**Type**: Feature — Space refactor Phase 7b (2D pivot breakdown cards)
+**Tools used**: Claude Code (claude-code CLI)
+
+### Context
+
+Phase 7a shipped the scoped pipeline, the generic 1D breakdown card, the card builder and row-tap drill-down. 7b adds a **second grouping dimension**. The aggregation was a small extension; the layout and the duplicate rules were the actual work.
+
+### 1D regression — confirmed
+
+The 387 tests from Phase 7a all pass **unmodified in behaviour**. Nine of them were edited for the `FilterRequest` shape change only (see below) and one for `cardTitle`'s new signature — no assertion about a rendered number, row, or drill-down result changed. `BreakdownCard.tsx` was touched on exactly one line (`cardTitle(card, [dimension])`). A pivot is a new rendering mode, not a rewrite of the card.
+
+There is also a pure-function regression anchor: `computePivot(scoped, country, category)` section totals are asserted equal, key for key, to `computeBreakdown(scoped, country)` rows.
+
+### `computePivot` is a sibling, not a generalisation
+
+Deliberate, per the prompt's carry-in 0.1. The 1D function applies top-N once to a flat row list; a pivot applies it at **two** levels over a cell matrix. The two share only `optionLabel()` and the `OTHER_ROW` / `UNDEFINED_FILTER` sentinels. The mild duplication buys a shipped, tested code path that literally cannot regress.
+
+Rules, applied identically at both levels: only combinations that **exist** produce an entry (no empty cells, which is what keeps a sparse pivot readable); sort by total descending; top-N with an "Other · N values" entry; missing values pinned **last, after Other**.
+
+Two caps: `TOP_N = 5` rows per section (shared with 1D) and a new `SECTION_TOP_N = 8`.
+
+⚠️ **`SECTION_TOP_N = 8` is a known-unvalidated number.** It has never been seen against real data — no Firebase session in this environment. It was deliberately **not** retuned: swapping one guess for another buys nothing, and the builder's live preview exists precisely so real data settles it. Revisit after the first real high-cardinality pivot, not before.
+
+**The "Other" section is the one asymmetry.** It stands for several primary values, so it has no single secondary breakdown: `rows: []`, not expandable, drills straight through. Consequence to know: the "section total = Σ its rows" invariant holds for every *expandable* section, and the test asserts it that way. "Σ section totals = card total" holds unconditionally.
+
+The **missing-primary** section, by contrast, does break down normally — knowing *what* is missing a country is the whole reason to open it.
+
+### `FilterRequest` grew a selections list (carry-in 0.2)
+
+```ts
+selections: { dimensionKey: string; values: string[] }[]
+```
+
+One entry for a 1D row, two for a pivot cell, ANDed by the hook — which is what the filter state already does across dimensions, so this is a shape change and not a behaviour change. The 1D call site was migrated rather than left on the old shape, so there is only one shape in play. Replace-not-merge semantics unchanged.
+
+### Layout: nested list, not a grid
+
+A true matrix loses at 375px — ten countries × twelve categories needs horizontal scrolling inside a vertically-scrolling tab. So primary → collapsible sections, secondary → indented rows. Row chrome (label, amount, %) matches `BreakdownCard` so the two read as one feature. All sections start collapsed **except the first**; the state is component-local and not persisted, and the card is remounted (keyed on the joined dimensions) when the pair changes so it is re-derived rather than carried over.
+
+Row percentages are of the **section**, not the card: inside "Japan", what the user is comparing is Japan's own composition.
+
+### Two tap targets in a section header
+
+The chevron collapses; the **total** drills down to the primary value alone (the same result as the equivalent 1D card row). They are separate `<button>`s with an underline affordance on the total, because the total is the more valuable action and must stay reachable without expanding first — the test asserts it is still there while the section is collapsed.
+
+### Duplicate prevention — order is meaningful
+
+`usedCardKeys(cards, exceptId?)` keys on the **ordered** join, computed from the **full stored array**.
+
+| Case | Rule |
+|---|---|
+| `[country]` vs `[country, category]` | different cards, neither blocks the other |
+| `[country, category]` vs `[category, country]` | different cards, both legitimate |
+| first-dimension picker | disabled only when the exact card being built already exists |
+| second-dimension picker | disabled when it would complete an existing pair, or would pair a dimension with itself |
+| swap control | disabled when the swapped card already exists — the case most easily missed, since it collides without either picker being touched |
+| hidden cards | **counted**, or the user creates a card that silently collides when the field is re-enabled |
+
+Unavailable choices are greyed out with `title="Already on your dashboard"` rather than rejected after the fact. One further UX fix fell out of this: the builder now opens on the first dimension that is *not* already a 1D card, so it never starts on a combination it would refuse to save.
+
+### Disabled dimensions (§6)
+
+A pivot is hidden when **either** dimension is disabled, and never degraded to 1D — that would show a card whose title promises two dimensions and whose numbers are a different aggregation. `visibleDashboardCards()` now returns `dims: FilterDimension[]` and requires every key to resolve. Nothing is written, so re-enabling brings the card back with its title and order intact.
+
+### Tests added (+29 over Phase 7a's 387 → 416)
+
+- `dashboardCards.test.ts` (+13) — no empty cells; both sortings; row-level Other with `collapsedKeys`; section-level cap at 8 with a non-expandable Other; missing pinned last at both levels *after* Other; missing section still breaks down; both eyeball invariants with **both** caps engaged simultaneously; custom select resolved from the option **id** as a secondary; absent boolean key counts as No; 1D regression anchor; `cardTitle` order-sensitivity; `usedCardKeys` ordering/`exceptId`/hidden-card rules; pivot hidden on either dimension and restored intact.
+- `DashboardTab.test.tsx` (+10) — only the first section expanded; row drill-down carries both filters and the range and *not* the member; section-total drill-down carries the primary only; chevron collapses without navigating and leaves the total reachable; Other row drills the collapsed set; a one-disabled-dimension card is hidden and not written away; save preserves picked order; swap updates the title live and saves the swapped order; second picker greys out completing pairs while leaving the reverse available; swap disabled when the swapped card exists; a hidden card's dimension still counts once re-enabled.
+- `TransactionsTab.test.tsx` (+2) — two selections are ANDed; a cell whose values never co-occur yields nothing.
+
+`tsc --noEmit`, `pnpm test` (416/416), `pnpm build` clean. `pnpm lint` still 90 problems, **0 in the files this session touched** — unchanged from Session 024.
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `src/spaces/components/dashboard/PivotCard.tsx` | **New** — nested-list renderer, two-target section header |
+| `src/spaces/utils/dashboardCards.ts` | `computePivot`, `PivotSection`/`PivotRow`, `SECTION_TOP_N`, `drillValues`, `usedCardKeys`; `visibleDashboardCards` → `dims[]`; `cardTitle` takes the dimension list |
+| `src/spaces/components/dashboard/CardBuilder.tsx` | Second dimension, swap, duplicate greying, pivot preview, `DimensionPicker` extracted |
+| `src/spaces/components/dashboard/BreakdownCard.tsx` | One line — `cardTitle(card, [dimension])` |
+| `src/spaces/components/tabs/DashboardTab.tsx` | Renders `PivotCard` for a 2-dimension card; `selections[]` drill-down; passes `usedKeys` |
+| `src/spaces/types.ts` | `dimensions: [string] \| [string, string]` |
+| `src/transactions/utils/filterDimensions.ts` | `FilterSelection`; `FilterRequest.selections` |
+| `src/transactions/hooks/useTransactionFilters.ts` | Applies a list of selections |
+
+### Not done / still open
+
+- **Carry-in 0.3, deferred as instructed**: the "Day by day" card is an undeclared pivot — it groups by day outside the card system and overlaps with "Spending over time". Folding it in as an ordinary card definition needs the month/day **derived dimension** that is still out of scope, so it stays bespoke for now.
+- Manual browser verification not performed (no Firebase session in this environment): the real-space checks in the prompt's Verification §2–§9, including the 375px pass with a long section label. The 5/8 caps are logged above as known-unvalidated and deliberately left alone.
+- Out of scope by §7 and untouched: three or more dimensions, transposing a saved card in place, exporting a pivot.
+
+### Decided for the NEXT phase — the month dimension resolves to a range
+
+Agreed as the next thing after 7b, and the plumbing question raised during this session has a settled answer. Writing it down now so it is a **constraint in the prompt** rather than something discovered mid-implementation:
+
+> **A month is a display dimension that resolves to a date RANGE on drill-down.** It is not a `filterDimensions()` entry and it introduces no synthetic filter value.
+
+Tapping `March × Food` becomes:
+
+```
+range = [1 Mar, 31 Mar] ∩ globalRange   +   category = Food
+```
+
+Why this is the right shape:
+
+- The Transactions tab **already** filters on ranges, so nothing new has to be learnt by the filter model — no synthetic month value, no new filter concept, no reconciliation rule for a dimension whose options are unbounded and derived.
+- Intersecting with the global range falls out naturally, so the drilled list still sums to the tapped number without a special case.
+- It keeps `Transaction.date` (`"DD-MM-YYYY"`, parsed via `parseTxDate` — never compared lexicographically) as the only source of truth.
+
+⚠️ The consequence to carry into the prompt: month is **genuinely a different shape from every other dimension**. Every other dimension produces `FilterSelection` entries; this one produces a `range` override instead. `FilterRequest` already carries both `selections` and `range`, so the payload needs no change — but `computePivot`'s grouping key and the drill-down translation are no longer the same mechanism, and the design has to say so up front.
+
+Once it exists, the bespoke **"Day by day"** card (carry-in 0.3) and its overlap with "Spending over time" can finally fold into ordinary card definitions.

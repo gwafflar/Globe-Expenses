@@ -50,10 +50,12 @@ import {
 import { ReconciliationDialog } from '@/transactions/components/ReconciliationDialog'
 import { DashboardControls } from '@/spaces/components/dashboard/DashboardControls'
 import { BreakdownCard } from '@/spaces/components/dashboard/BreakdownCard'
+import { PivotCard } from '@/spaces/components/dashboard/PivotCard'
 import { CardBuilder } from '@/spaces/components/dashboard/CardBuilder'
 import {
   breakdownDimensions,
   resolveDashboardCards,
+  usedCardKeys,
   visibleDashboardCards,
 } from '@/spaces/utils/dashboardCards'
 import {
@@ -70,7 +72,7 @@ import {
   resolveRange,
   type DateRange,
 } from '@/shared/utils/dateRange'
-import type { FilterRequest } from '@/transactions/utils/filterDimensions'
+import type { FilterRequest, FilterSelection } from '@/transactions/utils/filterDimensions'
 
 // ---------------------------------------------------------------------------
 // Props
@@ -359,9 +361,12 @@ export function DashboardTab({
    *  transactions list has its own Paid-by / For filters, and a row tapped
    *  under "Marie" should show every transaction behind that number — Marie's
    *  share of a group dinner is not a transaction of its own, so pre-filtering
-   *  to her would hide the very rows the figure came from. */
-  function handleRowDrillDown(dimensionKey: string, values: string[]) {
-    onDrillDown?.({ dimensionKey, values, range })
+   *  to her would hide the very rows the figure came from.
+   *
+   *  Phase 7b: `selections` carries ONE entry for a 1D row, TWO for a pivot
+   *  cell (primary AND secondary). They are ANDed by the filter hook. */
+  function handleRowDrillDown(selections: FilterSelection[]) {
+    onDrillDown?.({ selections, range })
   }
 
   // ---------------------------------------------------------------------------
@@ -1181,46 +1186,62 @@ export function DashboardTab({
       {/* ================================================================ */}
       {/* Breakdown cards (§4) — one generic component per card definition */}
       {/* ================================================================ */}
-      {visibleCards.map(({ card, dimension }) => {
+      {visibleCards.map(({ card, dims }) => {
         // Position within the STORED list, so the arrows move a card past its
         // real neighbour even when a hidden card sits between them.
         const storedIndex = storedCards.findIndex((c) => c.id === card.id)
+        const actions = cardsEditMode ? (
+          <>
+            <CardActionButton
+              label="Move card up"
+              glyph="↑"
+              disabled={storedIndex <= 0}
+              onClick={() => handleMoveCard(card.id, -1)}
+            />
+            <CardActionButton
+              label="Move card down"
+              glyph="↓"
+              disabled={storedIndex >= storedCards.length - 1}
+              onClick={() => handleMoveCard(card.id, 1)}
+            />
+            <CardActionButton label="Edit card" glyph="✏️" onClick={() => openBuilder(card)} />
+            <CardActionButton
+              label="Delete card"
+              glyph="✕"
+              onClick={() => handleDeleteCard(card.id)}
+            />
+          </>
+        ) : undefined
+
+        // Two dimensions → the pivot renderer. One → the Phase 7a card,
+        // untouched: a pivot is a new rendering MODE, not a rewrite.
+        if (dims.length === 2) {
+          return (
+            <PivotCard
+              // Remount when the pair changes, so the collapsed state is
+              // re-derived (first section open) for the new structure.
+              key={`${card.id}:${card.dimensions.join('|')}`}
+              card={card}
+              dims={[dims[0], dims[1]]}
+              scoped={scoped}
+              mainCurrency={mainCurrency}
+              onDrillDown={handleRowDrillDown}
+              actions={actions}
+            />
+          )
+        }
+
         return (
           <BreakdownCard
             key={card.id}
             card={card}
-            dimension={dimension}
+            dimension={dims[0]}
             scoped={scoped}
             mainCurrency={mainCurrency}
-            onDrillDown={(values) => handleRowDrillDown(dimension.key, values)}
-            actions={
-              cardsEditMode ? (
-                <>
-                  <CardActionButton
-                    label="Move card up"
-                    glyph="↑"
-                    disabled={storedIndex <= 0}
-                    onClick={() => handleMoveCard(card.id, -1)}
-                  />
-                  <CardActionButton
-                    label="Move card down"
-                    glyph="↓"
-                    disabled={storedIndex >= storedCards.length - 1}
-                    onClick={() => handleMoveCard(card.id, 1)}
-                  />
-                  <CardActionButton
-                    label="Edit card"
-                    glyph="✏️"
-                    onClick={() => openBuilder(card)}
-                  />
-                  <CardActionButton
-                    label="Delete card"
-                    glyph="✕"
-                    onClick={() => handleDeleteCard(card.id)}
-                  />
-                </>
-              ) : undefined
+            onDrillDown={(values) =>
+              handleRowDrillDown([{ dimensionKey: dims[0].key, values }])
             }
+            actions={actions}
           />
         )
       })}
@@ -1582,6 +1603,9 @@ export function DashboardTab({
         scoped={scoped}
         mainCurrency={mainCurrency}
         editing={editingCard}
+        // From the STORED list, not the visible one: a card hidden behind a
+        // disabled field still occupies its dimension combination.
+        usedKeys={usedCardKeys(storedCards, editingCard?.id)}
         onSave={handleSaveCard}
       />
 

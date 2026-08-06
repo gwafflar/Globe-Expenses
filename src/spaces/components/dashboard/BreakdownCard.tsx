@@ -47,7 +47,9 @@ export function BreakdownCard({
     [scoped, dimension],
   )
 
-  const title = cardTitle(card, dimension)
+  // cardTitle() takes the dimension LIST since Phase 7b (a pivot title names
+  // both). A 1D card passes a single-element list and is otherwise unchanged.
+  const title = cardTitle(card, [dimension])
 
   const body =
     rows.length === 0 ? (

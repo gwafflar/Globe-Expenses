@@ -145,8 +145,11 @@ export function useTransactionFilters(
   if (request && request.nonce !== appliedNonce) {
     setAppliedNonce(request.nonce)
     // REPLACE, never merge: the user tapped a number and expects to see
-    // exactly the transactions behind it.
-    setFilters({ [request.dimensionKey]: new Set(request.values) })
+    // exactly the transactions behind it. Several selections (a 2D pivot cell)
+    // are ANDed, which is what the filter state does across dimensions anyway.
+    const next: FilterState = {}
+    for (const sel of request.selections) next[sel.dimensionKey] = new Set(sel.values)
+    setFilters(next)
     setDateRange(request.range)
     setSearchQuery('')
   }

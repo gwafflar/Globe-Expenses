@@ -77,10 +77,17 @@ export type CustomFieldType = 'select' | 'text' | 'boolean'
 export interface DashboardCardDef {
   /** nanoid. Stable across renames and reorders. */
   id: string
-  /** A FilterDimension.key: a built-in key ('category', 'country', …) or a
-   *  CustomFieldDef.id. Phase 7b will allow a SECOND entry for 2D pivots —
-   *  the array shape exists now so that addition needs no migration. */
-  dimensions: [string]
+  /** FilterDimension keys: a built-in key ('category', 'country', …) or a
+   *  CustomFieldDef.id.
+   *
+   *  One entry → a flat breakdown card (Phase 7a).
+   *  Two entries → a 2D pivot (Phase 7b), read as [primary, secondary].
+   *
+   *  ⚠️ ORDER IS MEANINGFUL for a pivot. `['country','category']` and
+   *  `['category','country']` hold the same numbers but answer different
+   *  questions, so they are two legitimate, distinct cards — the duplicate
+   *  check in the builder keys on the joined, ordered array. */
+  dimensions: [string] | [string, string]
   /** User override. When absent, the title is derived from the dimension label. */
   title?: string
 }

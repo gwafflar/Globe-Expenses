@@ -155,6 +155,223 @@ function optionLabel(dim: FilterDimension, value: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// computePivot — the 2D sibling (Phase 7b, §2)
+// ---------------------------------------------------------------------------
+//
+// ⚠️ Deliberately a SIBLING of computeBreakdown, not a generalisation of it.
+// The 1D function applies top-N once, to a flat row list; a pivot applies it at
+// two levels over a cell matrix. Forcing one function to serve both would
+// complicate the shipped, tested 1D path for no gain, so the two share only
+// `optionLabel()` and the sentinels.
+
+/** How many sections a pivot shows before the tail collapses into an "Other"
+ *  section. Two high-cardinality dimensions must not render 40 sections. */
+export const SECTION_TOP_N = 8
+
+export interface PivotRow {
+  /** A secondary dimension value id, UNDEFINED_FILTER, or OTHER_ROW. */
+  key: string
+  label: string
+  total: number
+  /** Transactions behind the row — shown on the Other row. */
+  count: number
+  /** For the collapsed tail only: the keys it stands for, needed by drill-down.
+   *  Absent on a normal row, where `key` is the only value to filter on. */
+  collapsedKeys?: string[]
+  isOther: boolean
+  isMissing: boolean
+}
+
+export interface PivotSection {
+  /** A primary dimension value id, UNDEFINED_FILTER, or OTHER_ROW. */
+  key: string
+  label: string
+  total: number
+  count: number
+  /** Secondary dimension, already sorted and top-N'd.
+   *  EMPTY on the collapsed "Other" section: it is not expandable and drills
+   *  straight through (§4), so it has no secondary breakdown to show. */
+  rows: PivotRow[]
+  /** For the collapsed tail section only — the primary keys it stands for. */
+  collapsedKeys?: string[]
+  isOther: boolean
+  isMissing: boolean
+}
+
+export interface Pivot {
+  sections: PivotSection[]
+  /** Σ over every section, including Other and the missing section. */
+  total: number
+}
+
+/** The dimension values a row or section drills into: its own key normally,
+ *  the whole collapsed set for an "Other" entry. One helper for both levels so
+ *  the two drill-down call sites cannot drift apart. */
+export function drillValues(entry: { key: string; collapsedKeys?: string[] }): string[] {
+  return entry.collapsedKeys ?? [entry.key]
+}
+
+/**
+ * Group scoped transactions by TWO dimensions, `[primary, secondary]`.
+ *
+ * The rules mirror computeBreakdown() exactly, so the two cards feel like one
+ * feature — applied at both levels:
+ *
+ *   - only combinations that EXIST produce a row. Empty cells are never
+ *     emitted, which is what keeps a sparse pivot readable.
+ *   - sections sorted by total descending; rows within a section likewise.
+ *   - top-N per section (5 rows) with an "Other · N values" row.
+ *   - top-N sections (8) with a trailing "Other · N values" SECTION.
+ *   - a missing value becomes "No {dimension}", pinned LAST at both levels
+ *     (after the Other entry, not before it).
+ *
+ * Section totals equal the sum of their own rows (Other row included), and the
+ * section totals sum to `total` — the two invariants a user checks by eye.
+ */
+export function computePivot(
+  scoped: ScopedTransaction[],
+  primary: FilterDimension,
+  secondary: FilterDimension,
+  rowTopN: number = TOP_N,
+  sectionTopN: number = SECTION_TOP_N,
+): Pivot {
+  // primary key → { amount, count, cells: secondary key → { amount, count } }
+  interface Group {
+    amount: number
+    count: number
+    cells: Map<string, { amount: number; count: number }>
+  }
+  const groups = new Map<string, Group>()
+  let total = 0
+
+  for (const { transaction, attributedAmount } of scoped) {
+    const pKey = firstValue(transaction, primary)
+    const sKey = firstValue(transaction, secondary)
+
+    const group = groups.get(pKey) ?? { amount: 0, count: 0, cells: new Map() }
+    group.amount += attributedAmount
+    group.count += 1
+
+    const cell = group.cells.get(sKey) ?? { amount: 0, count: 0 }
+    cell.amount += attributedAmount
+    cell.count += 1
+    group.cells.set(sKey, cell)
+
+    groups.set(pKey, group)
+    total += attributedAmount
+  }
+
+  // The missing-primary group is pinned, not ranked — pull it out before sorting.
+  const missingGroup = groups.get(UNDEFINED_FILTER)
+  groups.delete(UNDEFINED_FILTER)
+
+  const ranked = Array.from(groups.entries())
+    .map(([key, g]) => ({ key, label: optionLabel(primary, key), group: g }))
+    .sort((a, b) => b.group.amount - a.group.amount || a.label.localeCompare(b.label))
+
+  const sections: PivotSection[] = ranked.slice(0, sectionTopN).map(({ key, label, group }) => ({
+    key,
+    label,
+    total: group.amount,
+    count: group.count,
+    rows: buildPivotRows(group.cells, secondary, rowTopN),
+    isOther: false,
+    isMissing: false,
+  }))
+
+  const tail = ranked.slice(sectionTopN)
+  if (tail.length > 0) {
+    sections.push({
+      key: OTHER_ROW,
+      label: `Other · ${tail.length} value${tail.length === 1 ? '' : 's'}`,
+      total: tail.reduce((s, r) => s + r.group.amount, 0),
+      count: tail.reduce((s, r) => s + r.group.count, 0),
+      // Not expandable: tapping it drills straight through to every collapsed
+      // primary value at once, so there is no secondary breakdown to render.
+      rows: [],
+      collapsedKeys: tail.map((r) => r.key),
+      isOther: true,
+      isMissing: false,
+    })
+  }
+
+  if (missingGroup) {
+    sections.push({
+      key: UNDEFINED_FILTER,
+      label: `No ${primary.label.toLowerCase()}`,
+      total: missingGroup.amount,
+      count: missingGroup.count,
+      // A data-completeness bucket still breaks down normally — knowing WHAT
+      // is missing a country is the whole reason to open it.
+      rows: buildPivotRows(missingGroup.cells, secondary, rowTopN),
+      isOther: false,
+      isMissing: true,
+    })
+  }
+
+  return { sections, total }
+}
+
+/** One section's secondary rows: rank, top-N, Other, missing-last. Identical in
+ *  shape to computeBreakdown()'s row rules, applied per section. */
+function buildPivotRows(
+  cells: Map<string, { amount: number; count: number }>,
+  secondary: FilterDimension,
+  topN: number,
+): PivotRow[] {
+  const missing = cells.get(UNDEFINED_FILTER)
+
+  const ranked: PivotRow[] = Array.from(cells.entries())
+    .filter(([key]) => key !== UNDEFINED_FILTER)
+    .map(([key, c]) => ({
+      key,
+      label: optionLabel(secondary, key),
+      total: c.amount,
+      count: c.count,
+      isOther: false,
+      isMissing: false,
+    }))
+    .sort((a, b) => b.total - a.total || a.label.localeCompare(b.label))
+
+  const rows = ranked.slice(0, topN)
+  const tail = ranked.slice(topN)
+
+  if (tail.length > 0) {
+    rows.push({
+      key: OTHER_ROW,
+      label: `Other · ${tail.length} value${tail.length === 1 ? '' : 's'}`,
+      total: tail.reduce((s, r) => s + r.total, 0),
+      count: tail.reduce((s, r) => s + r.count, 0),
+      collapsedKeys: tail.map((r) => r.key),
+      isOther: true,
+      isMissing: false,
+    })
+  }
+
+  if (missing) {
+    rows.push({
+      key: UNDEFINED_FILTER,
+      label: `No ${secondary.label.toLowerCase()}`,
+      total: missing.amount,
+      count: missing.count,
+      isOther: false,
+      isMissing: true,
+    })
+  }
+
+  return rows
+}
+
+/** The single dimension value a transaction contributes, or the missing-value
+ *  sentinel. Same extraction rule computeBreakdown() uses — only single-valued
+ *  dimensions are offerable as cards, so `values[0]` is the whole story and no
+ *  transaction can be counted twice. */
+function firstValue(tx: ScopedTransaction['transaction'], dim: FilterDimension): string {
+  const values = dimensionValues(tx, dim)
+  return values.length > 0 ? values[0] : UNDEFINED_FILTER
+}
+
+// ---------------------------------------------------------------------------
 // Card definitions (§6)
 // ---------------------------------------------------------------------------
 
@@ -189,27 +406,59 @@ export function breakdownDimensions(space: Space, config: SpaceConfig): FilterDi
 }
 
 /**
- * Pair each stored card with its dimension descriptor, dropping cards whose
- * dimension is not currently available.
+ * Pair each stored card with its dimension descriptors, dropping cards whose
+ * dimensions are not currently all available.
  *
  * ⚠️ A card on a disabled field is HIDDEN, never deleted: unlike filters, cards
  * are persisted config, so re-enabling the field must bring the card back with
  * its title intact. Nothing here writes to config.dashboardCards.
+ *
+ * ⚠️ A pivot needs BOTH dimensions. It is deliberately NOT degraded to 1D when
+ * one of them is disabled: that would show a card whose title promises two
+ * dimensions and whose numbers are a different aggregation (§6).
  */
 export function visibleDashboardCards(
   cards: DashboardCardDef[],
   dimensions: FilterDimension[],
-): { card: DashboardCardDef; dimension: FilterDimension }[] {
+): { card: DashboardCardDef; dims: FilterDimension[] }[] {
   const byKey = new Map(dimensions.map((d) => [d.key, d]))
-  const out: { card: DashboardCardDef; dimension: FilterDimension }[] = []
+  const out: { card: DashboardCardDef; dims: FilterDimension[] }[] = []
   for (const card of cards) {
-    const dimension = byKey.get(card.dimensions[0])
-    if (dimension) out.push({ card, dimension })
+    const dims = card.dimensions.map((k) => byKey.get(k))
+    if (dims.every((d): d is FilterDimension => d !== undefined)) out.push({ card, dims })
   }
   return out
 }
 
-/** A card's heading: the user's override, else the dimension's own label. */
-export function cardTitle(card: DashboardCardDef, dim: FilterDimension): string {
-  return card.title?.trim() || `By ${dim.label.toLowerCase()}`
+/**
+ * The set of dimension combinations already on the dashboard, for the builder's
+ * duplicate check (§5).
+ *
+ * ⚠️ Computed from the FULL stored card array, not the visible one. A card whose
+ * dimension is currently disabled is hidden but still stored, so leaving it out
+ * would let the user create a second card that silently collides the moment the
+ * field is re-enabled.
+ *
+ * Keyed on the ORDERED join, because order is meaningful: `country|category`
+ * and `category|country` are two legitimate, distinct cards, and a 1D
+ * `category` card does not block a 2D `category|country` one.
+ *
+ * `exceptId` excludes the card being edited from its own duplicate check.
+ */
+export function usedCardKeys(cards: DashboardCardDef[], exceptId?: string): Set<string> {
+  return new Set(
+    cards.filter((c) => c.id !== exceptId).map((c) => c.dimensions.join('|')),
+  )
+}
+
+/** A card's heading: the user's override, else derived from the dimensions.
+ *
+ *  1D → "By category". 2D → "Category × country", which reads as the question
+ *  the card answers and makes the ORDER visible — swapping the pair produces a
+ *  visibly different title even though the total is unchanged. */
+export function cardTitle(card: DashboardCardDef, dims: FilterDimension[]): string {
+  const override = card.title?.trim()
+  if (override) return override
+  if (dims.length < 2) return `By ${dims[0]?.label.toLowerCase() ?? ''}`
+  return `${dims[0].label} × ${dims[1].label.toLowerCase()}`
 }
