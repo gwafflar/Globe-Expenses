@@ -2556,6 +2556,8 @@ The chevron collapses; the **total** drills down to the primary value alone (the
 
 Unavailable choices are greyed out with `title="Already on your dashboard"` rather than rejected after the fact. One further UX fix fell out of this: the builder now opens on the first dimension that is *not* already a 1D card, so it never starts on a combination it would refuse to save.
 
+**Post-review fix — the second-dimension row is permanent.** It was first built behind a `+ Add a second dimension` action. That hid the pivot option *and* the greying that depends on it: the first picker re-evaluates against the **pair** once a secondary exists (`[country]` being taken does not make `country × category` a duplicate), but with the row hidden the user never saw that ungreying happen. The row is now always rendered, with a leading **`None`** chip standing for a 1D card — which also replaces the old `Remove` link. `None` is greyed when the `[primary]` 1D card already exists, since dropping back to 1D can itself be the duplicate. Both rows offer identical chip labels, so each is wrapped in a `role="group"` with an `aria-label` — a screen reader has exactly the test's problem of telling two adjacent identically-named button groups apart.
+
 ### Disabled dimensions (§6)
 
 A pivot is hidden when **either** dimension is disabled, and never degraded to 1D — that would show a card whose title promises two dimensions and whose numbers are a different aggregation. `visibleDashboardCards()` now returns `dims: FilterDimension[]` and requires every key to resolve. Nothing is written, so re-enabling brings the card back with its title and order intact.
@@ -2586,6 +2588,36 @@ A pivot is hidden when **either** dimension is disabled, and never degraded to 1
 - **Carry-in 0.3, deferred as instructed**: the "Day by day" card is an undeclared pivot — it groups by day outside the card system and overlaps with "Spending over time". Folding it in as an ordinary card definition needs the month/day **derived dimension** that is still out of scope, so it stays bespoke for now.
 - Manual browser verification not performed (no Firebase session in this environment): the real-space checks in the prompt's Verification §2–§9, including the 375px pass with a long section label. The 5/8 caps are logged above as known-unvalidated and deliberately left alone.
 - Out of scope by §7 and untouched: three or more dimensions, transposing a saved card in place, exporting a pivot.
+
+### 🐛 Open bug — country values have no canonical form (investigated, NOT fixed)
+
+Reported against the dashboard: countries render inconsistently — sometimes the bare name, sometimes only a flag. Diagnosed this session, **deliberately deferred**. Three findings:
+
+**1. `Transaction.country` has no canonical stored form.** The form's country picker writes the **bare name** (`TransactionForm.tsx:186` uses `value={c.label}`); the flag lives separately on `space.countries[].emoji`. Other paths write **flag + name** (`"🇯🇵 Japan"`). That second shape is definitely in real data — `TransactionsTab.tsx:97` carries an `extractCountryEmoji()` helper whose only job is stripping a leading flag back off. XLSX import writes whatever the sheet cell holds, so a bare flag is possible too.
+
+**2. `getFlagForCountry()` is broken** (`pickerData.ts:366`). Entries are `[code, flag, name]`, but it destructures `([, n])` — binding the **flag** — and compares it to a country *name*, so it never matches; and on a match it would return `found[0]`, the ISO code, not the flag. Verified: it returns `'🌍'` for every input. Consequence: every country auto-added by `syncTransactionLocation()` or by XLSX import gets 🌍 instead of its flag. Only the form's picker produces a real flag, because it passes one directly.
+
+**3. The dashboard shows the raw value** because `breakdownDimensions()` calls `filterDimensions(space, config)` with no observed values, so built-in dimensions come back with `options: []` and `optionLabel()` falls through to the stored string.
+
+⚠️ **A display-only fix would make it worse.** The grouping key *is* the raw string, so `"Japan"` and `"🇯🇵 Japan"` are already two rows with split totals; normalising only the label would render two rows reading identically.
+
+**Agreed fix when picked up — canonicalise at the descriptor level, no data migration:**
+
+`dimensionValues()` is a **single funnel** — it drives `matchesDimension()`, the cross-filtered availability list, `computeBreakdown` *and* `computePivot`, all via `STATIC_BY_KEY.get(key).extract(tx)`. Canonicalising inside country's `extract` therefore propagates to all four for free, and drill-down needs no change: the requested value and the matcher canonicalise identically, so they agree by construction.
+
+| File | Change |
+|---|---|
+| `pickerData.ts` | Fix `getFlagForCountry`; add a name→flag index and `canonicalCountry(raw)` (strip flag prefix, resolve to canonical name) |
+| `filterDimensions.ts` | Country `extract` canonicalises; country `labelFor` renders flag + name; expose `labelFor` on `FilterDimension` |
+| `useTransactionFilters.ts` | The observed-values block (~line 185) hand-rolls extraction — the **one** path bypassing `dimensionValues` |
+| `dashboardCards.ts` | `optionLabel()` falls back to `dim.labelFor` when `options` is empty |
+| `TransactionsTab.tsx` | Row / detail / day-header country through the same helper; `extractCountryEmoji` likely deletes |
+
+**Design decision to take first**: the canonical key should be the **bare country name**, with the flag rendered at display time — the form already writes bare names, so most existing data is already canonical and few rows move, and it matches how categories work (label stored, emoji resolved from the list).
+
+Effort: ~60–80 lines of production code, ~10 new tests; only 6 country literals exist across the whole test suite, so fixture churn is trivial. Roughly half a session, low risk because of the single funnel.
+
+**What that fix would still leave**: `space.countries` entries already storing `'🌍'` keep showing 🌍 in the Parameters list editor (it renders the `LabeledItem`'s own emoji rather than looking it up — one extra line to include); the stored data stays mixed, made invisible rather than cleaned; and countries absent from `ALL_COUNTRIES` keep their raw name with no flag, deliberately — better a flagless name than a dropped value. A true data normalisation pass over stored transactions remains a separate, larger option.
 
 ### Decided for the NEXT phase — the month dimension resolves to a range
 

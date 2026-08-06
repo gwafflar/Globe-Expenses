@@ -596,13 +596,19 @@ describe('DashboardTab — drill-down', () => {
 // Card builder (§6)
 // ---------------------------------------------------------------------------
 
+/** One of the builder's two dimension pickers. Both offer the same chip
+ *  labels, so every builder assertion has to say which row it means. */
+function picker(name: 'First dimension' | 'Second dimension (optional)'): HTMLElement {
+  return within(screen.getByRole('dialog')).getByRole('group', { name })
+}
+
 describe('DashboardTab — card builder', () => {
   it('persists a new card to the shared space config', () => {
     const onSpaceChange = vi.fn()
     renderDashboard(makeSpace(), [makeTx('t1')], { onSpaceChange })
 
     fireEvent.click(screen.getByRole('button', { name: '+ Add card' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Payment' }))
+    fireEvent.click(within(picker('First dimension')).getByRole('button', { name: 'Payment' }))
     fireEvent.click(screen.getByRole('button', { name: 'Add card' }))
 
     expect(updateSpaceDashboardCards).toHaveBeenCalledTimes(1)
@@ -650,10 +656,10 @@ describe('DashboardTab — card builder', () => {
     renderDashboard(makeSpace(config), [makeTx('t1')])
     fireEvent.click(screen.getByRole('button', { name: '+ Add card' }))
 
-    const dialog = screen.getByRole('dialog')
-    expect(within(dialog).getByRole('button', { name: 'Category' })).toBeInTheDocument()
-    expect(within(dialog).queryByRole('button', { name: 'Reference' })).toBeNull()
-    expect(within(dialog).queryByRole('button', { name: 'Paid by' })).toBeNull()
+    const first = picker('First dimension')
+    expect(within(first).getByRole('button', { name: 'Category' })).toBeInTheDocument()
+    expect(within(first).queryByRole('button', { name: 'Reference' })).toBeNull()
+    expect(within(first).queryByRole('button', { name: 'Paid by' })).toBeNull()
   })
 })
 
@@ -780,13 +786,12 @@ describe('DashboardTab — pivot cards', () => {
     renderDashboard(pivotSpace([{ id: 'x', dimensions: ['city'] }]), pivotTxs)
 
     fireEvent.click(screen.getByRole('button', { name: '+ Add card' }))
-    const dialog = screen.getByRole('dialog')
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Country' }))
-    fireEvent.click(within(dialog).getByRole('button', { name: '+ Add a second dimension' }))
-    // The second picker is the one whose Category chip is not already active.
-    const pickers = within(dialog).getAllByRole('button', { name: 'Category' })
-    fireEvent.click(pickers[pickers.length - 1])
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Add card' }))
+    // Both rows are always visible — no "add a second dimension" step.
+    fireEvent.click(within(picker('First dimension')).getByRole('button', { name: 'Country' }))
+    fireEvent.click(
+      within(picker('Second dimension (optional)')).getByRole('button', { name: 'Category' }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Add card' }))
 
     const cards = updateSpaceDashboardCards.mock.calls[0][1]
     expect(cards[cards.length - 1].dimensions).toEqual(['country', 'category'])
@@ -813,24 +818,46 @@ describe('DashboardTab — pivot cards', () => {
     renderDashboard(pivotSpace(), pivotTxs)
 
     fireEvent.click(screen.getByRole('button', { name: '+ Add card' }))
-    const dialog = screen.getByRole('dialog')
     // Start a pivot on country — legal, even though [country] is free here.
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Country' }))
-    fireEvent.click(within(dialog).getByRole('button', { name: '+ Add a second dimension' }))
+    fireEvent.click(within(picker('First dimension')).getByRole('button', { name: 'Country' }))
 
-    // country|category already exists → Category is greyed out in the second picker.
-    const categoryChips = within(dialog).getAllByRole('button', { name: 'Category' })
-    expect(categoryChips[categoryChips.length - 1]).toBeDisabled()
-    expect(categoryChips[categoryChips.length - 1]).toHaveAttribute(
+    // country|category already exists → Category is greyed in the SECOND row.
+    const second = () => picker('Second dimension (optional)')
+    expect(within(second()).getByRole('button', { name: 'Category' })).toBeDisabled()
+    expect(within(second()).getByRole('button', { name: 'Category' })).toHaveAttribute(
       'title',
       'Already on your dashboard',
     )
 
     // The REVERSE order is a different card and stays available: pick Category
     // as the primary, and Country is offerable as the secondary.
-    fireEvent.click(categoryChips[0])
-    const countryChips = within(dialog).getAllByRole('button', { name: 'Country' })
-    expect(countryChips[countryChips.length - 1]).not.toBeDisabled()
+    fireEvent.click(within(picker('First dimension')).getByRole('button', { name: 'Category' }))
+    expect(within(second()).getByRole('button', { name: 'Country' })).not.toBeDisabled()
+  })
+
+  it('re-evaluates the FIRST picker against the pair once a second dimension is chosen', () => {
+    // Legacy defaults: 1D cards on category and country already exist, so both
+    // are greyed in the first row while the card is still 1D…
+    renderDashboard(makeSpace(), pivotTxs)
+    fireEvent.click(screen.getByRole('button', { name: '+ Add card' }))
+    const first = () => picker('First dimension')
+    expect(within(first()).getByRole('button', { name: 'Country' })).toBeDisabled()
+
+    // …but picking a second dimension changes the question being asked. The
+    // card being built is now [x, category], and country|category does not
+    // exist, so Country must UNGREY in the first row.
+    fireEvent.click(
+      within(picker('Second dimension (optional)')).getByRole('button', { name: 'Category' }),
+    )
+    expect(within(first()).getByRole('button', { name: 'Country' })).not.toBeDisabled()
+
+    // …and it is now pickable as the primary of country × category.
+    fireEvent.click(within(first()).getByRole('button', { name: 'Country' }))
+    // Dropping back to 1D would duplicate the existing [country] card, so the
+    // "None" chip is greyed rather than silently producing an unsaveable card.
+    expect(
+      within(picker('Second dimension (optional)')).getByRole('button', { name: 'None' }),
+    ).toBeDisabled()
   })
 
   it('disables the swap control when the swapped card already exists', () => {
@@ -873,9 +900,9 @@ describe('DashboardTab — pivot cards', () => {
     const reEnabled: SpaceConfig = { ...configFromPreset('travel'), dashboardCards: stored }
     renderDashboard(makeSpace(reEnabled), pivotTxs)
     fireEvent.click(screen.getByRole('button', { name: '+ Add card' }))
-    const dialog = screen.getByRole('dialog')
-    expect(within(dialog).getByRole('button', { name: 'Payment' })).toBeDisabled()
-    expect(within(dialog).getByRole('button', { name: 'Payment' })).toHaveAttribute(
+    const first = picker('First dimension')
+    expect(within(first).getByRole('button', { name: 'Payment' })).toBeDisabled()
+    expect(within(first).getByRole('button', { name: 'Payment' })).toHaveAttribute(
       'title',
       'Already on your dashboard',
     )

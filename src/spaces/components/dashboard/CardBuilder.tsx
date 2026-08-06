@@ -149,7 +149,7 @@ export function CardBuilder({
                 1D card stays pickable as the START of a pivot, and one used
                 inside a pair does not block the 1D card. */}
             <DimensionPicker
-              label={secondary ? 'First dimension' : 'Break down by'}
+              label="First dimension"
               dimensions={dimensions}
               selectedKey={primaryKey}
               isDisabled={(dim) =>
@@ -160,36 +160,28 @@ export function CardBuilder({
               onPick={handlePickPrimary}
             />
 
-            {/* ── Second dimension (optional) ───────────────────────────── */}
-            {secondary ? (
+            {/* ── Second dimension ──────────────────────────────────────── */}
+            {/* Always visible, with a leading "None" chip standing for a 1D
+                card. A hidden "+ Add a second dimension" action made the pivot
+                option — and the greying that depends on it — undiscoverable.
+                A dimension is disabled here when it would COMPLETE an existing
+                pair; pairing a dimension with itself is never legal; and None
+                is disabled when the 1D card already exists. */}
+            <DimensionPicker
+              label="Second dimension (optional)"
+              dimensions={dimensions}
+              selectedKey={secondaryKey}
+              noneLabel="None"
+              isDisabled={(dim) =>
+                dim.key === primaryKey || usedKeys.has(`${primaryKey}|${dim.key}`)
+              }
+              isNoneDisabled={usedKeys.has(primaryKey)}
+              onPick={setSecondaryKey}
+            />
+
+            {/* Swap — the live title beside it updates with the order. */}
+            {secondary && (
               <div className="flex flex-col gap-1.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-medium text-muted-foreground">
-                    Second dimension
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setSecondaryKey('')}
-                    className="text-xs text-muted-foreground underline hover:text-foreground"
-                  >
-                    Remove
-                  </button>
-                </div>
-
-                {/* A dimension is disabled here when it would COMPLETE an
-                    existing pair — and pairing a dimension with itself is
-                    never legal. */}
-                <DimensionPicker
-                  dimensions={dimensions}
-                  selectedKey={secondaryKey}
-                  isDisabled={(dim) =>
-                    dim.key === primaryKey ||
-                    (dim.key !== secondaryKey && usedKeys.has(`${primaryKey}|${dim.key}`))
-                  }
-                  onPick={setSecondaryKey}
-                />
-
-                {/* Swap — the live title above updates with it. */}
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
@@ -210,24 +202,6 @@ export function CardBuilder({
                   </p>
                 )}
               </div>
-            ) : (
-              // Adding a second dimension picks the first legal one, so the
-              // pivot preview appears immediately rather than after two taps.
-              (() => {
-                const firstLegal = dimensions.find(
-                  (d) => d.key !== primaryKey && !usedKeys.has(`${primaryKey}|${d.key}`),
-                )
-                if (!primary || !firstLegal) return null
-                return (
-                  <button
-                    type="button"
-                    onClick={() => setSecondaryKey(firstLegal.key)}
-                    className="self-start text-xs font-medium text-primary underline"
-                  >
-                    + Add a second dimension
-                  </button>
-                )
-              })()
             )}
 
             {/* ── Title — auto-derived from the dimensions, overridable ─── */}
@@ -301,46 +275,89 @@ function DimensionPicker({
   label,
   dimensions,
   selectedKey,
+  noneLabel,
   isDisabled,
+  isNoneDisabled = false,
   onPick,
 }: {
   label?: string
   dimensions: FilterDimension[]
   selectedKey: string
+  /** When set, a leading chip for "no dimension" (key ''). Only the second
+   *  picker uses it: an empty secondary is what keeps the card 1D. */
+  noneLabel?: string
   /** Unavailable choices are GREYED OUT rather than rejected after the fact,
    *  so the user never fills a form that cannot be saved. */
   isDisabled: (dim: FilterDimension) => boolean
+  /** Dropping back to 1D can itself be a duplicate, when the [primary] card
+   *  already exists. */
+  isNoneDisabled?: boolean
   onPick: (key: string) => void
 }) {
   return (
     <div className="flex flex-col gap-1.5">
       {label && <span className="text-xs font-medium text-muted-foreground">{label}</span>}
-      <div className="flex flex-wrap gap-1.5">
+      {/* A labelled group: the two rows offer the SAME chip labels, so without
+          it neither a screen reader nor a test can tell them apart. */}
+      <div role="group" aria-label={label} className="flex flex-wrap gap-1.5">
+        {noneLabel !== undefined && (
+          <Chip
+            label={noneLabel}
+            isActive={selectedKey === ''}
+            disabled={selectedKey !== '' && isNoneDisabled}
+            onClick={() => onPick('')}
+          />
+        )}
         {dimensions.map((dim) => {
           const isActive = dim.key === selectedKey
-          const disabled = !isActive && isDisabled(dim)
           return (
-            <button
+            <Chip
               key={dim.key}
-              type="button"
-              // Accessible name is the plain label — the emoji is decoration.
-              aria-label={dim.label}
-              aria-pressed={isActive}
-              disabled={disabled}
-              title={disabled ? DUPLICATE_HINT : undefined}
+              label={dim.label}
+              emoji={dim.emoji}
+              isActive={isActive}
+              disabled={!isActive && isDisabled(dim)}
               onClick={() => onPick(dim.key)}
-              className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
-                isActive
-                  ? 'border-primary bg-primary text-primary-foreground'
-                  : 'border-input bg-background text-foreground hover:bg-accent'
-              } disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-background`}
-            >
-              {dim.emoji && <span>{dim.emoji}</span>}
-              <span>{dim.label}</span>
-            </button>
+            />
           )
         })}
       </div>
     </div>
+  )
+}
+
+/** One picker chip. Never disables the ACTIVE choice — a selection the user can
+ *  see must stay reversible. */
+function Chip({
+  label,
+  emoji,
+  isActive,
+  disabled,
+  onClick,
+}: {
+  label: string
+  emoji?: string
+  isActive: boolean
+  disabled: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      // Accessible name is the plain label — the emoji is decoration.
+      aria-label={label}
+      aria-pressed={isActive}
+      disabled={disabled}
+      title={disabled ? DUPLICATE_HINT : undefined}
+      onClick={onClick}
+      className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+        isActive
+          ? 'border-primary bg-primary text-primary-foreground'
+          : 'border-input bg-background text-foreground hover:bg-accent'
+      } disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-background`}
+    >
+      {emoji && <span>{emoji}</span>}
+      <span>{label}</span>
+    </button>
   )
 }
