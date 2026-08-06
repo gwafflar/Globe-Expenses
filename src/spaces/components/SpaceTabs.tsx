@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { Space } from '@/spaces/types'
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
 import type { TransferPrefill } from '@/transactions/components/TransactionForm'
+import type { FilterRequest } from '@/transactions/utils/filterDimensions'
 import { TransactionsTab } from '@/spaces/components/tabs/TransactionsTab'
 import { BalanceTab } from '@/spaces/components/tabs/BalanceTab'
 import { DashboardTab } from '@/spaces/components/tabs/DashboardTab'
@@ -59,6 +60,12 @@ interface SpaceTabsProps {
   /** When set, SpaceTabs switches to this tab. Caller should reset to undefined after. */
   requestTab?: typeof TABS[number]['id']
   onRequestTabHandled?: () => void
+  /** Dashboard drill-down (Phase 7a §5): a filter selection for the
+   *  Transactions tab. Travels down as data; the tab switch is a separate
+   *  requestTab, so the two mechanisms stay independent. */
+  filterRequest?: FilterRequest
+  /** Called when a dashboard breakdown row is tapped. */
+  onDrillDown?: (request: Omit<FilterRequest, 'nonce'>) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -85,6 +92,8 @@ export function SpaceTabs({
   onCreateTransfer,
   requestTab,
   onRequestTabHandled,
+  filterRequest,
+  onDrillDown,
 }: SpaceTabsProps) {
   const [activeTab, setActiveTab] = useState<TabId>('transactions')
 
@@ -182,6 +191,7 @@ export function SpaceTabs({
                   onAddExpense={onAddExpense}
                   onEditTransaction={onEditTransaction}
                   onDeleteTransaction={onDeleteTransaction}
+                  filterRequest={filterRequest}
                 />
               )}
               {tab.id === 'balance' && (
@@ -208,6 +218,8 @@ export function SpaceTabs({
                   mainCurrency={mainCurrency}
                   onEditTransaction={onEditTransaction}
                   onAddWithdrawal={onAddWithdrawal}
+                  onSpaceChange={onSpaceChange}
+                  onDrillDown={onDrillDown}
                 />
               )}
               {tab.id === 'parameters' && (

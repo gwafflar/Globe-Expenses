@@ -11,6 +11,8 @@ import { TransactionsTab } from '../TransactionsTab'
 import { configFromPreset } from '@/spaces/presets'
 import type { CustomFieldDef, Space, SpaceConfig } from '@/spaces/types'
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
+import type { FilterRequest } from '@/transactions/utils/filterDimensions'
+import { ALL_TIME, resolveRange } from '@/shared/utils/dateRange'
 
 vi.mock('@/services/firebase', () => ({ db: {} }))
 vi.mock('@/shared/components/ImportXlsxDialog', () => ({ ImportXlsxDialog: () => null }))
@@ -408,5 +410,102 @@ describe('TransactionsTab — stale filters', () => {
     expect(screen.queryByText('Untagged')).not.toBeInTheDocument()
     const badges = screen.getByRole('button', { name: /Remove filter Alpha renamed/ })
     expect(within(badges.parentElement!).getByText(/Alpha renamed/)).toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Dashboard drill-down (Space refactor Phase 7a, §5)
+// ---------------------------------------------------------------------------
+
+describe('TransactionsTab — drill-down from the dashboard', () => {
+  const txs = [
+    makeTx('in-june', { date: '10-06-2026', category: 'Food', name: 'June food' }),
+    makeTx('in-may', { date: '10-05-2026', category: 'Food', name: 'May food' }),
+    makeTx('other-cat', { date: '10-06-2026', category: 'Transport', name: 'June transport' }),
+  ]
+
+  /** A request shaped as SpaceDetailPage mints it. */
+  function request(overrides: Partial<FilterRequest> = {}): FilterRequest {
+    return {
+      nonce: 1,
+      dimensionKey: 'category',
+      values: ['Food'],
+      range: resolveRange('custom', { from: new Date(2026, 5, 1), to: new Date(2026, 5, 30) }),
+      ...overrides,
+    }
+  }
+
+  function renderWithRequest(req: FilterRequest) {
+    return render(
+      <TransactionsTab
+        space={makeSpace()}
+        transactions={txs}
+        loading={false}
+        error={null}
+        currentUserUid="u1"
+        isSolo={false}
+        mainCurrency="EUR"
+        onAddExpense={vi.fn()}
+        onEditTransaction={vi.fn()}
+        onDeleteTransaction={vi.fn()}
+        filterRequest={req}
+      />,
+    )
+  }
+
+  it('applies the dimension filter AND the date range', () => {
+    renderWithRequest(request())
+    expect(screen.getByText('June food')).toBeInTheDocument()
+    // Same category but outside the range: the drilled list has to sum to the
+    // number the user tapped, so this one cannot appear.
+    expect(screen.queryByText('May food')).not.toBeInTheDocument()
+    // Inside the range but a different category.
+    expect(screen.queryByText('June transport')).not.toBeInTheDocument()
+  })
+
+  it('opens the filter panel showing both the dimension and the range badges', () => {
+    renderWithRequest(request())
+    expect(screen.getByRole('button', { name: 'Remove filter Food' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Remove date range filter' })).toBeInTheDocument()
+  })
+
+  it('drills into several values at once (a collapsed "Other" row)', () => {
+    renderWithRequest(request({ values: ['Food', 'Transport'] }))
+    expect(screen.getByText('June food')).toBeInTheDocument()
+    expect(screen.getByText('June transport')).toBeInTheDocument()
+    expect(screen.queryByText('May food')).not.toBeInTheDocument()
+  })
+
+  it('REPLACES any prior filters rather than merging with them', () => {
+    const { rerender } = renderWithRequest(request({ values: ['Transport'], range: ALL_TIME }))
+    expect(screen.getByText('June transport')).toBeInTheDocument()
+
+    // A second drill-down on a different value must not intersect with the first.
+    rerender(
+      <TransactionsTab
+        space={makeSpace()}
+        transactions={txs}
+        loading={false}
+        error={null}
+        currentUserUid="u1"
+        isSolo={false}
+        mainCurrency="EUR"
+        onAddExpense={vi.fn()}
+        onEditTransaction={vi.fn()}
+        onDeleteTransaction={vi.fn()}
+        filterRequest={request({ nonce: 2, values: ['Food'], range: ALL_TIME })}
+      />,
+    )
+    expect(screen.getByText('June food')).toBeInTheDocument()
+    expect(screen.getByText('May food')).toBeInTheDocument()
+    expect(screen.queryByText('June transport')).not.toBeInTheDocument()
+  })
+
+  it('lets the user clear the date range on its own', () => {
+    renderWithRequest(request())
+    fireEvent.click(screen.getByRole('button', { name: 'Remove date range filter' }))
+    // Range gone, category filter still active.
+    expect(screen.getByText('May food')).toBeInTheDocument()
+    expect(screen.queryByText('June transport')).not.toBeInTheDocument()
   })
 })

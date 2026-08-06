@@ -59,5 +59,12 @@ export default defineConfig({
     environment: 'jsdom',   // simulates browser APIs (needed for React component tests)
     globals: true,           // lets you use describe/it/expect without importing them
     setupFiles: ['./src/test/setup.ts'],  // jest-dom matchers (toBeDisabled, toBeInTheDocument, ...)
+    // Vitest's 5s default is per-test wall clock, not CPU time. With several
+    // component-test files running in parallel workers, the FIRST test in a
+    // file pays for that file's whole module graph being transformed and
+    // imported — which regularly exceeds 5s on a loaded machine even though
+    // the same test finishes in ~100ms when its file runs alone. That produced
+    // flaky "Test timed out" failures that had nothing to do with the code.
+    testTimeout: 20000,
   },
 })

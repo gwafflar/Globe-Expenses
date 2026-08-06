@@ -70,6 +70,21 @@ export interface CustomFieldDef {
 
 export type CustomFieldType = 'select' | 'text' | 'boolean'
 
+/** A user-created dashboard breakdown card (Space refactor Phase 7a, §4).
+ *  Stored on the space document under config.dashboardCards, so the card set is
+ *  SHARED across members — consistent with categories and currencies, and
+ *  unlike the date range / You-All controls which are ephemeral per visit. */
+export interface DashboardCardDef {
+  /** nanoid. Stable across renames and reorders. */
+  id: string
+  /** A FilterDimension.key: a built-in key ('category', 'country', …) or a
+   *  CustomFieldDef.id. Phase 7b will allow a SECOND entry for 2D pivots —
+   *  the array shape exists now so that addition needs no migration. */
+  dimensions: [string]
+  /** User override. When absent, the title is derived from the dimension label. */
+  title?: string
+}
+
 /** Value stored in Transaction.custom. The matching CustomFieldDef.type tells
  *  you which variant to expect, so read-time parsing is deterministic. */
 export type CustomValue = string | boolean
@@ -92,6 +107,10 @@ export interface SpaceConfig {
     multiCurrency: boolean
   }
   customFields: CustomFieldDef[]
+  /** Dashboard breakdown cards, in display order. ABSENT means "never edited"
+   *  and resolves to the legacy default set — see resolveDashboardCards().
+   *  An empty array is meaningful and distinct: the user deleted every card. */
+  dashboardCards?: DashboardCardDef[]
 }
 
 export type PresetId = 'travel' | 'solo' | 'group' | 'custom'

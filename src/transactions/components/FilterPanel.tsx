@@ -19,6 +19,7 @@ import {
   type AvailableOptions,
 } from '@/transactions/hooks/useTransactionFilters'
 import type { FilterDimension, FilterState } from '@/transactions/utils/filterDimensions'
+import { rangeLabel, type DateRange } from '@/shared/utils/dateRange'
 
 // ---------------------------------------------------------------------------
 // Props
@@ -36,6 +37,10 @@ interface FilterPanelProps {
   /** Exclusive selection, used by tri-state controls. null clears the dimension. */
   onSetExclusiveFilter: (key: string, value: string | null) => void
   onClearDimension: (key: string) => void
+  /** Active date-range restriction (set by the dashboard drill-down, §5).
+   *  ALL_TIME means "no restriction" and renders nothing. */
+  dateRange: DateRange
+  onClearDateRange: () => void
   onClearAll: () => void
   hasActiveFilters: boolean
   resultCount: number
@@ -55,6 +60,8 @@ export function FilterPanel({
   onToggleFilter,
   onSetExclusiveFilter,
   onClearDimension,
+  dateRange,
+  onClearDateRange,
   onClearAll,
   hasActiveFilters,
   resultCount,
@@ -221,6 +228,23 @@ export function FilterPanel({
       {/* Active filter summary badges — iterated in dimension display order */}
       {hasActiveFilters && (
         <div className="flex flex-wrap items-center gap-1.5">
+          {/* Date-range badge — first, because it constrains every other filter.
+              It has no chip of its own above (there is no in-panel date picker
+              yet); it arrives from the dashboard drill-down and can be cleared. */}
+          {dateRange.preset !== 'all' && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
+              📅 {rangeLabel(dateRange)}
+              <button
+                type="button"
+                aria-label="Remove date range filter"
+                onClick={onClearDateRange}
+                className="ml-0.5 text-primary/60 hover:text-primary"
+              >
+                ×
+              </button>
+            </span>
+          )}
+
           {dimensions.map((dim) =>
             Array.from(filters[dim.key] ?? []).map((value) => (
               <span

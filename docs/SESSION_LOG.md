@@ -2222,7 +2222,7 @@ Discussed and deferred to a future session:
 - Tier 2 items not yet implemented (see above) — this session was analysis + critical-fix only.
 - Changes not yet committed as of this log entry.
 
-## ♻️ Working Session 022 — 27 July 2026
+## ♻️ Working Session 022.1 — 27 July 2026
 
 **Type**: Refactor — Space refactor Phase 1 (Travel → Space rename)
 **Tools used**: Claude Code (claude-code CLI)
@@ -2285,7 +2285,7 @@ No stray `Travel`/`travel` identifiers, UI strings, or import paths remain outsi
 - Phase 2 (config foundation: `SpaceConfig`, `getSpaceConfig()`, presets, per-field tiers) — next phase, not started.
 - Changes not yet committed as of this log entry (pending user review).
 
-## 🐛 Working Session 022 — 27 July 2026
+## 🐛 Working Session 022.2 — 27 July 2026
 
 **Type**: Bug fix + tests (Space refactor Phase 4.1 and 4.2)
 **Tools used**: Claude Code (claude-code CLI)
@@ -2406,3 +2406,90 @@ Full suite: 308/308 passing (was 259). `tsc --noEmit`, `pnpm build` clean. `pnpm
 - Manual browser verification (prompt §Verification items 2, 9, 10 — legacy click-through, day-header layout with country disabled, 375px with several chips) was **not** performed: no Firebase login session in this environment. Legacy parity is covered by the component tests above, but a real click-through is still recommended before treating Phase 6 as closed.
 - Custom `select` filters offer no "Undefined" option (built-ins do). Not requested; worth deciding before Phase 7 reuses these descriptors for dashboard breakdowns.
 - Out of scope by prompt §7: grouping/sorting by a custom dimension (Phase 7), bulk selection, filter persistence across sessions.
+
+## ✨ Working Session 024 — 6 August 2026
+
+**Type**: Feature — Space refactor Phase 7a (config-driven dashboard) + member scope picker patch
+**Tools used**: Claude Code (claude-code CLI)
+
+### Context
+
+Phase 7a rebuilt the Dashboard tab around a single scoped pipeline, added generic 1D breakdown cards with a card builder, gated every card on `config`, and wired row-tap drill-down into the Transactions tab. A follow-up patch in the same session replaced the binary You/All toggle with a full member picker.
+
+### The one idea the phase is built around
+
+Every card now reads **one** resolution step and nothing else:
+
+```
+transactions → scope (global range; exclude transfers/withdrawals) → attribute → ScopedTransaction[]
+```
+
+`scopeTransactions()` is pure, has no React import, and takes `{ range, mode, mainCurrency }`. Cards never receive raw transactions. Before this, each card did its own filtering, so two cards could quietly show different windows.
+
+The exclusion rule was **not** rewritten — `countsAsSpending()` from `walletHelpers` is reused, so transfers and withdrawals stay out and expense-mode adjustments stay in, exactly as before. **Adjustment treatment, stated explicitly:** `adjustmentMode: 'expense'` counts as spending; `'balance_only'` and a missing mode do not. Unchanged from pre-Phase-7a.
+
+### Member scope picker (the patch)
+
+`mode: 'you' | 'all'` became `mode: typeof ALL_MEMBERS | string`, and `currentMemberId` was **removed from `ScopeOptions` entirely**. The pure function therefore has no parameter that could carry identity: the UI resolves its "You" row to a `travelMemberId` before calling in, so `scopeTransactions()` never sees the string `'you'` and works for any member, not just the logged-in one.
+
+The picker is a bottom sheet (vaul `Drawer`) — a segmented control does not survive 375px past three members. Rows: All · You · then the rest in `space.members` order, unclaimed slots included (they hold splits like anyone else). Hidden entirely in a one-member space. Neither the range nor the member selection is persisted: a stored range goes stale the moment the calendar moves on.
+
+If the selected member disappears (removed by someone else, arriving over `onSnapshot`), the tab falls back to `ALL_MEMBERS` via adjust-state-during-render rather than showing zeroes for someone who is gone.
+
+### Drill-down asymmetry (deliberate)
+
+Tapping a breakdown row opens Transactions with the dimension, the value(s), **and the global date range** — without the range the drilled list would not sum to the number just tapped. It deliberately does **not** carry the member selection: a member's share of a group dinner is not a transaction of its own, so pre-filtering would hide the very rows the number came from. Commented at the call site and pinned by a test asserting the payload keys.
+
+`useTransactionFilters` gained a set-from-outside entry point (`FilterRequest` with a `nonce`, since the same row can legitimately be tapped twice) rather than having its internals reached into. Existing filters are **replaced**, not merged.
+
+### Cards owning their own scoping — migrated
+
+Only one: **"Recent days"** owned a 3/7/15-day look-back pill. §2 required lifting it, so it now reads the global range, was renamed **"Day by day"**, and is capped at 15 rows with a show-all link. **This is the only card whose numbers change on a legacy space.** Every other card reproduces its pre-Phase-7a figures.
+
+### Deviation from the acceptance criterion (accepted)
+
+§6's legacy default card set is category **and** country, but no country card existed before this phase — so a legacy space gains one. Reviewed and kept: it is an addition, no existing card's numbers move, and it is config-gated.
+
+### The "Uncategorized" degradation, fixed
+
+Phase 5 let a space with `builtInFields.category` disabled fall back to a single "Uncategorized" bucket. `categoryKey()` now returns `''` when the field is off, so the bucket never forms.
+
+### Default range without branching on `presetOrigin`
+
+The spec asked for all-time on travel-shaped spaces and this-month elsewhere, but SPEC §8 invariant 4 forbids branching on `presetOrigin`. `defaultRangePreset(config)` reads `builtInFields.country || features.wallets` instead, which reproduces the intended default for a legacy space and for all four presets.
+
+### Tests added (+43 over Phase 6's 344 → 387)
+
+- `dashboardScope.test.ts` (19) — exclusions incl. the three adjustment cases; `ALL_MEMBERS` sums `totalAmountMain`; a member id takes the beneficiary share at the tx rate; unclaimed slots attribute normally; **both** members reconcile against `computeBalances` (`consumed = paid − net`) and their shares partition the group total; DD-MM-YYYY is never compared lexicographically; `defaultRangePreset` per preset.
+- `dashboardCards.test.ts` (17) — sort by amount, Other collapsing, missing row pinned last even after Other, select grouped on option **id** with label resolution and raw-value fallback, boolean absent-key counts as No, disabled dimension hides a card without deleting it.
+- `DashboardTab.test.tsx` (30) — legacy regression; gating; breakdown behaviour; controls; drill-down payload; card builder.
+- `DashboardControls.test.tsx` (7) — pins that "You" calls back with a member id and **never** `'you'`.
+- `TransactionsTab.test.tsx` (+5) — drill-down replaces rather than merges, carries the range, opens the panel.
+
+**Mutation-tested rather than assumed.** Three deliberate mutations confirmed the new assertions bite: `beneficiaries`→`paidBy` (5 failures), range filter disabled (2), All-mode amount doubled (10). All reverted.
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `src/shared/utils/dateRange.ts` | **New** — relative range model; parses via `parseTxDate`, never raw string compare |
+| `src/spaces/utils/dashboardScope.ts` | **New** — `scopeTransactions`, `attributedAmount`, `defaultRangePreset` |
+| `src/spaces/utils/dashboardCards.ts` | **New** — `computeBreakdown`, legacy card set, visibility |
+| `src/spaces/components/dashboard/` | **New** — `DashboardControls`, `BreakdownCard`, `CardBuilder` |
+| `src/spaces/components/tabs/DashboardTab.tsx` | Rewritten around the scoped pipeline |
+| `src/spaces/types.ts` | `DashboardCardDef`; `SpaceConfig.dashboardCards?` |
+| `src/spaces/config.ts` | `dashboardCards` preserved as `undefined` (absent ≠ empty) |
+| `src/spaces/services/spaceService.ts` | `updateSpaceDashboardCards()`, dotted-path atomic write |
+| `src/transactions/utils/filterDimensions.ts` | `FilterRequest` type |
+| `src/transactions/hooks/useTransactionFilters.ts` | Set-from-outside entry point; `dateRange` state |
+| `src/transactions/components/FilterPanel.tsx` | 📅 range badge |
+| `src/spaces/components/CollapsibleCard.tsx` | `actions` slot as a **sibling** of the toggle (a button may not nest a button) |
+| `src/spaces/components/SpaceTabs.tsx`, `SpaceDetailPage.tsx` | Plumb `filterRequest` down, `onDrillDown` up |
+| `vite.config.ts` | `testTimeout: 20000` — cold-start transform under parallel workers was tripping the 5s default |
+
+### Not done / still open
+
+- **`TransactionForm.tsx` has 47 `react-hooks/rules-of-hooks` errors** (conditional hooks). Not touched this session and not introduced by it; the file was heavily rewritten in Phase 5, so that is the likely origin. This is **not** a style complaint — hooks called conditionally corrupt state when the condition flips between renders. Worth a dedicated session; the usual cause is one early return sitting above the hook block.
+- Lint across the whole project: 90 problems (84 errors, 6 warnings). 9 fall in files this session touched, **all pre-existing, 0 new** (4 of them are named verbatim in Session 023's entry, written before Phase 7a existed).
+- Manual browser verification not performed (no Firebase session in this environment): legacy click-through, You-mode agreement with the Balance tab in the real app, 375px layout.
+- Phase 7b (out of scope by §7): 2D pivot cards, a month dimension, per-member dashboards, persisting range/mode. `DashboardCardDef.dimensions` is already an array so 7b widens `[string]` → `[string, string]` without a stored-shape change. Expected friction: `computeBreakdown` returns a flat `BreakdownRow[]`; a separate `computePivot` is probably cleaner than overloading it.

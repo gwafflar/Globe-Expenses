@@ -17,6 +17,7 @@ import type { CustomValue, LabeledItem, Space, SpaceConfig } from '@/spaces/type
 import { enabledCustomFields } from '@/spaces/config'
 import { getTransactionType } from '@/transactions/utils/walletHelpers'
 import type { Transaction } from '@/transactions/types'
+import type { DateRange } from '@/shared/utils/dateRange'
 
 // ---------------------------------------------------------------------------
 // Sentinel values
@@ -65,6 +66,29 @@ export type ObservedValues = Partial<Record<string, string[]>>
 /** dimension key → set of selected value ids. Custom fields are keyed by
  *  CustomFieldDef.id, so this map is `string`-keyed rather than a closed union. */
 export type FilterState = Partial<Record<string, Set<string>>>
+
+/**
+ * A filter selection pushed in from OUTSIDE the transactions tab — currently
+ * the dashboard drill-down (Phase 7a §5). This is the tab's set-from-outside
+ * entry point: callers build one of these instead of reaching into the filter
+ * hook's internals.
+ *
+ * Applying it REPLACES every existing filter and the search query. The user
+ * tapped a number and expects to see exactly the transactions behind it.
+ */
+export interface FilterRequest {
+  /** Changes on every request. Required because the same dimension/value pair
+   *  can legitimately be requested twice in a row (tap a row, clear filters,
+   *  tap the same row again) and the payload alone would look unchanged. */
+  nonce: number
+  /** A FilterDimension.key. */
+  dimensionKey: string
+  /** Value ids to select. Several at once for a collapsed "Other" row. */
+  values: string[]
+  /** ⚠️ Carried deliberately: without the dashboard's date range the drilled
+   *  list would not sum to the number the user tapped. */
+  range: DateRange
+}
 
 // ---------------------------------------------------------------------------
 // Static (core + built-in) dimension metadata

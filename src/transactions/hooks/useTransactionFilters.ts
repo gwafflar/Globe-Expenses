@@ -25,15 +25,18 @@ import {
   reconcileFilters,
   searchableCustomFieldIds,
   type FilterDimension,
+  type FilterRequest,
   type FilterState,
   type ObservedValues,
 } from '@/transactions/utils/filterDimensions'
+import { ALL_TIME, isDateInRange, type DateRange } from '@/shared/utils/dateRange'
 
 export {
   UNDEFINED_FILTER,
   BOOL_TRUE,
   BOOL_FALSE,
   type FilterDimension,
+  type FilterRequest,
   type FilterState,
 } from '@/transactions/utils/filterDimensions'
 
@@ -63,7 +66,13 @@ export interface UseTransactionFiltersResult {
   setExclusiveFilter: (key: string, value: string | null) => void
   /** Clear all selected values for one dimension. */
   clearDimension: (key: string) => void
-  /** Clear ALL filters and search in one action. */
+  /** The active date-range restriction. ALL_TIME means "no restriction".
+   *  Set by the dashboard drill-down (§5); there is no in-panel date picker
+   *  yet, so the panel only offers to clear it. */
+  dateRange: DateRange
+  /** Drop the date-range restriction, leaving other filters alone. */
+  clearDateRange: () => void
+  /** Clear ALL filters, the date range and the search in one action. */
   clearAll: () => void
   /** Whether any filter or search is currently active. */
   hasActiveFilters: boolean
@@ -115,10 +124,34 @@ export function useTransactionFilters(
   transactions: TransactionWithStatus[],
   space: Space,
   isSolo: boolean,
+  /** A selection pushed in from outside the tab — see FilterRequest. The
+   *  dashboard drill-down uses this; pass undefined when there is none. */
+  request?: FilterRequest,
 ): UseTransactionFiltersResult {
   // -- State --
   const [filters, setFilters] = useState<FilterState>({})
   const [searchQuery, setSearchQuery] = useState('')
+  const [dateRange, setDateRange] = useState<DateRange>(ALL_TIME)
+
+  // -- External filter request (§5) --
+  // Which request has already been consumed. Compared by nonce, not by value:
+  // drilling into the same row twice in a row is a legitimate repeat request.
+  const [appliedNonce, setAppliedNonce] = useState<number | null>(null)
+
+  // Same "adjust state during render" escape hatch as the reconciliation below
+  // (and for the same reason: an effect would apply the filters one commit too
+  // late, so the user would see the unfiltered list flash first). Identity-
+  // guarded by the nonce, so it runs exactly once per request and converges.
+  if (request && request.nonce !== appliedNonce) {
+    setAppliedNonce(request.nonce)
+    // REPLACE, never merge: the user tapped a number and expects to see
+    // exactly the transactions behind it.
+    setFilters({ [request.dimensionKey]: new Set(request.values) })
+    setDateRange(request.range)
+    setSearchQuery('')
+  }
+
+  const clearDateRange = useCallback(() => setDateRange(ALL_TIME), [])
 
   // Legacy spaces (no space.config) resolve to travel-mode defaults, so the
   // dimension list below is identical to the old hard-coded one.
@@ -254,6 +287,7 @@ export function useTransactionFilters(
   const clearAll = useCallback(() => {
     setFilters({})
     setSearchQuery('')
+    setDateRange(ALL_TIME)
   }, [])
 
   // -- Filtering logic --
@@ -274,13 +308,16 @@ export function useTransactionFilters(
   const filtered = useMemo(() => {
     return transactions.filter((tx) => {
       if (!matchesSearch(tx, q, searchAsNumber, searchNotes, textFieldIds)) return false
+      // ⚠️ Goes through isDateInRange → parseTxDate: "DD-MM-YYYY" does not
+      // compare lexicographically.
+      if (!isDateInRange(tx.date, dateRange)) return false
       // Each active dimension is OR within, AND across.
       for (const [dim, selected] of activeDims) {
         if (!matchesDimension(tx, dim, selected)) return false
       }
       return true
     })
-  }, [transactions, activeDims, q, searchAsNumber, searchNotes, textFieldIds])
+  }, [transactions, activeDims, q, searchAsNumber, searchNotes, textFieldIds, dateRange])
 
   // -- Cross-filtered availability --
   // For each dimension, apply all OTHER filters + search, then collect which
@@ -289,7 +326,7 @@ export function useTransactionFilters(
     const result: AvailableOptions = {}
 
     // Shortcut: with nothing active every option is reachable.
-    if (activeDims.length === 0 && !q) {
+    if (activeDims.length === 0 && !q && dateRange.preset === 'all') {
       for (const dim of dimensions) result[dim.key] = new Set(dim.options.map((o) => o.id))
       return result
     }
@@ -299,6 +336,7 @@ export function useTransactionFilters(
       const available = new Set<string>()
       for (const tx of transactions) {
         if (!matchesSearch(tx, q, searchAsNumber, searchNotes, textFieldIds)) continue
+        if (!isDateInRange(tx.date, dateRange)) continue
         let passesOthers = true
         for (const [dim, selected] of otherDims) {
           if (!matchesDimension(tx, dim, selected)) { passesOthers = false; break }
@@ -309,11 +347,12 @@ export function useTransactionFilters(
       result[target.key] = available
     }
     return result
-  }, [transactions, dimensions, activeDims, q, searchAsNumber, searchNotes, textFieldIds])
+  }, [transactions, dimensions, activeDims, q, searchAsNumber, searchNotes, textFieldIds, dateRange])
 
   // -- Derived --
 
-  const hasActiveFilters = activeDims.length > 0 || q.length > 0
+  const hasActiveFilters =
+    activeDims.length > 0 || q.length > 0 || dateRange.preset !== 'all'
 
   return {
     filtered,
@@ -324,6 +363,8 @@ export function useTransactionFilters(
     toggleFilter,
     setExclusiveFilter,
     clearDimension,
+    dateRange,
+    clearDateRange,
     clearAll,
     hasActiveFilters,
     availableOptions,

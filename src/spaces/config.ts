@@ -27,6 +27,10 @@ export function getSpaceConfig(space: Space): SpaceConfig {
       multiCurrency: raw?.features?.multiCurrency ?? true,
     },
     customFields: raw?.customFields ? [...raw.customFields] : [],
+    // ⚠️ undefined is preserved deliberately: "never edited" (→ legacy default
+    // card set) is a different state from [] ("the user deleted every card").
+    // See resolveDashboardCards() in spaces/utils/dashboardCards.ts.
+    dashboardCards: raw?.dashboardCards ? [...raw.dashboardCards] : undefined,
   }
 
   return normaliseSpaceConfig(resolved)
@@ -49,6 +53,7 @@ export function normaliseSpaceConfig(config: SpaceConfig): SpaceConfig {
     builtInFields,
     features: { ...config.features },
     customFields: config.customFields,
+    dashboardCards: config.dashboardCards,
   }
 }
 

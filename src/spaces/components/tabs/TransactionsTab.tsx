@@ -13,6 +13,7 @@ import { exportSpaceToXlsx } from '@/shared/utils/sheetExport'
 import { ImportXlsxDialog } from '@/shared/components/ImportXlsxDialog'
 import { normalizeTransactionSplits, parseTxDate } from '@/spaces/components/tabs/dashboardHelpers'
 import { useTransactionFilters } from '@/transactions/hooks/useTransactionFilters'
+import type { FilterRequest } from '@/transactions/utils/filterDimensions'
 import { FilterPanel } from '@/transactions/components/FilterPanel'
 import { getTransactionType, countsAsSpending, isTransfer } from '@/transactions/utils/walletHelpers'
 import type { CustomFieldDef, SpaceConfig } from '@/spaces/types'
@@ -754,6 +755,9 @@ interface TransactionsTabProps {
   onAddExpense: () => void
   onEditTransaction: (txId: string) => void
   onDeleteTransaction: (txId: string) => void
+  /** A filter selection pushed in from outside the tab — the dashboard
+   *  drill-down (Phase 7a §5). Applying it replaces any existing filters. */
+  filterRequest?: FilterRequest
 }
 
 export function TransactionsTab({
@@ -767,6 +771,7 @@ export function TransactionsTab({
   onAddExpense,
   onEditTransaction,
   onDeleteTransaction,
+  filterRequest,
 }: TransactionsTabProps) {
   // Derive the current user's travelMemberId — used for "your share" and "(you)" labels
   const currentUserTravelMemberId = useMemo(
@@ -804,17 +809,30 @@ export function TransactionsTab({
     toggleFilter,
     setExclusiveFilter,
     clearDimension,
+    dateRange,
+    clearDateRange,
     clearAll,
     hasActiveFilters,
     availableOptions,
     resultCount,
-  } = useTransactionFilters(normalizedTransactions, space, isSolo)
+  } = useTransactionFilters(normalizedTransactions, space, isSolo, filterRequest)
 
-  // Controls whether the filter panel is visible
+  // Controls whether the filter panel is visible.
+  // A drill-down from the dashboard opens it, so the user can see (and undo)
+  // the filters that were applied on their behalf rather than wondering why
+  // the list suddenly got shorter.
   const [filterOpen, setFilterOpen] = useState(false)
+  const [openedForNonce, setOpenedForNonce] = useState<number | null>(null)
+  if (filterRequest && filterRequest.nonce !== openedForNonce) {
+    setOpenedForNonce(filterRequest.nonce)
+    setFilterOpen(true)
+  }
 
-  // Count of active filter dimensions (not counting search) — shown on the toggle button
-  const activeFilterCount = Object.keys(filters).length + (searchQuery.trim() ? 1 : 0)
+  // Count of active filter dimensions (search and date range each count as one)
+  const activeFilterCount =
+    Object.keys(filters).length +
+    (searchQuery.trim() ? 1 : 0) +
+    (dateRange.preset !== 'all' ? 1 : 0)
 
   // Sort by spending date descending (most recent first), with createdAt as tiebreaker.
   // parseTxDate converts "DD-MM-YYYY" → JS Date so we don't sort lexicographically.
@@ -901,6 +919,8 @@ export function TransactionsTab({
           onToggleFilter={toggleFilter}
           onSetExclusiveFilter={setExclusiveFilter}
           onClearDimension={clearDimension}
+          dateRange={dateRange}
+          onClearDateRange={clearDateRange}
           onClearAll={clearAll}
           hasActiveFilters={hasActiveFilters}
           resultCount={resultCount}

@@ -1,31 +1,37 @@
 // DashboardTab.tsx — read-only analytics view for a space.
 //
-// All statistics are computed client-side from the `transactions` array that
-// is already loaded in memory by SpaceDetailPage. No Firestore queries here.
+// All statistics are computed client-side from the `transactions` array that is
+// already loaded in memory by SpaceDetailPage. No Firestore queries here.
+//
+// ── Space refactor Phase 7a ────────────────────────────────────────────────
+// Every card now reads ONE scoped list (see spaces/utils/dashboardScope.ts):
+//
+//   transactions → scope (global date range, spending only)
+//                → attribute (all members, or one member's share)
+//                → ScopedTransaction[] → per card: group → sort → top-N
+//
+// Before this phase each card applied its own period and member scoping, so two
+// cards could silently show different windows. The controls at the top are now
+// the only place scoping happens.
 //
 // Layout (top to bottom):
-//   1. Controls bar — period filter pills + member picker button
-//   2. Hero card — total spend, avg/day, focus-member stat, tx count
-//   3. Spending over time — day-by-day bar chart (always group totals)
-//   4. Recent days — per-day category breakdown, configurable look-back
-//   5. By category — category totals list
+//   1. Controls bar — date range + member scope
+//   2. Hero card — total spend, avg/day, your share, tx count
+//   3. Spending over time — day-by-day bar chart
+//   4. Day by day — per-day category breakdown
+//   5. Breakdown cards — generic, user-configurable (§4)
 //   6. Per person — per-member consumed/paid (hidden when isSolo)
-//   7. Currencies — grouped by currency with converted totals
+//   7. Wallet balances — gated on features.wallets
+//   8. Currencies — gated on features.multiCurrency
 
-import { useState, useMemo } from 'react'
-import type { Space, SpaceMember } from '@/spaces/types'
+import { useMemo, useState } from 'react'
+import type { DashboardCardDef, Space } from '@/spaces/types'
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
+import { getSpaceConfig } from '@/spaces/config'
+import { updateSpaceDashboardCards } from '@/spaces/services/spaceService'
 import { CollapsibleCard } from '@/spaces/components/CollapsibleCard'
 import {
-  Drawer,
-  DrawerContent,
-  DrawerHeader,
-  DrawerTitle,
-} from '@/components/ui/drawer'
-import {
-  type PeriodFilter,
   normalizeTransactionSplits,
-  filterTransactions,
   getTripDurationDays,
   computeMemberStats,
   categoryColor,
@@ -33,8 +39,6 @@ import {
   formatAmount,
   formatDayLabel,
   parseTxDate,
-  dateRangeLabel,
-  numberOfDaysInRange,
 } from './dashboardHelpers'
 import {
   countsAsSpending,
@@ -44,6 +48,29 @@ import {
   type WalletBalance,
 } from '@/transactions/utils/walletHelpers'
 import { ReconciliationDialog } from '@/transactions/components/ReconciliationDialog'
+import { DashboardControls } from '@/spaces/components/dashboard/DashboardControls'
+import { BreakdownCard } from '@/spaces/components/dashboard/BreakdownCard'
+import { CardBuilder } from '@/spaces/components/dashboard/CardBuilder'
+import {
+  breakdownDimensions,
+  resolveDashboardCards,
+  visibleDashboardCards,
+} from '@/spaces/utils/dashboardCards'
+import {
+  ALL_MEMBERS,
+  defaultRangePreset,
+  scopeTransactions,
+  scopedTotal,
+  type ScopeMode,
+  type ScopedTransaction,
+} from '@/spaces/utils/dashboardScope'
+import {
+  rangeDayCount,
+  rangeLabel,
+  resolveRange,
+  type DateRange,
+} from '@/shared/utils/dateRange'
+import type { FilterRequest } from '@/transactions/utils/filterDimensions'
 
 // ---------------------------------------------------------------------------
 // Props
@@ -57,7 +84,14 @@ interface DashboardTabProps {
   mainCurrency: string
   onEditTransaction: (txId: string) => void
   onAddWithdrawal?: () => void
+  /** Keeps SpaceDetailPage's local Space in sync after a card edit is written. */
+  onSpaceChange?: (updated: Partial<Space>) => void
+  /** Tapping a breakdown row opens the Transactions tab with filters applied. */
+  onDrillDown?: (request: Omit<FilterRequest, 'nonce'>) => void
 }
+
+/** How many day rows the "Day by day" card shows before the "show all" link. */
+const DAY_ROWS_LIMIT = 15
 
 // ---------------------------------------------------------------------------
 // Small reusable sub-components (local to this file)
@@ -76,7 +110,6 @@ function MemberAvatar({
   index: number
   size?: 'sm' | 'md'
 }) {
-  // Pick a palette colour based on the member's position in the list
   const bg = CATEGORY_PALETTE[index % CATEGORY_PALETTE.length]
   const initial = name.trim().charAt(0).toUpperCase() || '?'
   const sizeClass = size === 'md' ? 'h-8 w-8 text-sm' : 'h-6 w-6 text-xs'
@@ -88,6 +121,32 @@ function MemberAvatar({
     >
       {initial}
     </span>
+  )
+}
+
+/** A tiny square icon button used for the card edit affordances. */
+function CardActionButton({
+  label,
+  glyph,
+  onClick,
+  disabled,
+}: {
+  label: string
+  glyph: string
+  onClick: () => void
+  disabled?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      disabled={disabled}
+      className="rounded p-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-30"
+    >
+      {glyph}
+    </button>
   )
 }
 
@@ -103,138 +162,212 @@ export function DashboardTab({
   mainCurrency,
   onEditTransaction,
   onAddWithdrawal,
+  onSpaceChange,
+  onDrillDown,
 }: DashboardTabProps) {
+  // Resolved once and passed down. Legacy spaces (no space.config) resolve to
+  // full travel-mode defaults, so every gate below is `true` and the dashboard
+  // shows what it always showed.
+  const config = useMemo(() => getSpaceConfig(space), [space])
+
   // ---------------------------------------------------------------------------
-  // State
+  // Global controls (§2) — deliberately NOT persisted
   // ---------------------------------------------------------------------------
 
-  // period tracks the active time filter. 'all' by default — shows all transactions.
-  const [period, setPeriod] = useState<PeriodFilter>({ type: 'all' })
+  // A stored range goes stale the moment the calendar moves on, so the range
+  // resets to the space's default on every visit. The default is derived from
+  // config (trip-shaped → all time, budget-shaped → this month), never from
+  // presetOrigin — SPEC §8 invariant 4.
+  const [range, setRange] = useState<DateRange>(() => resolveRange(defaultRangePreset(config)))
 
-  // customFrom / customTo hold the raw date strings from the custom range inputs,
-  // separate from period so the user can edit them before pressing Apply.
-  const [customFrom, setCustomFrom] = useState('')
-  const [customTo,   setCustomTo  ] = useState('')
+  // ALL_MEMBERS by default; the picker itself is hidden in a one-member space,
+  // where every selection produces identical numbers.
+  const [mode, setMode] = useState<ScopeMode>(ALL_MEMBERS)
 
-  // customPanelOpen controls the inline date-range panel visibility.
-  const [customPanelOpen, setCustomPanelOpen] = useState(false)
+  // ---------------------------------------------------------------------------
+  // Other UI state
+  // ---------------------------------------------------------------------------
 
-  // selectedTravelMemberId: null = "all members" aggregate view.
-  // When set, stat cards filter to that member's consumed amounts.
-  // We store the travelMemberId (nanoid) not the Firebase Auth UID, because
-  // that is what Split[] uses for attribution.
-  const [selectedTravelMemberId, setSelectedTravelMemberId] = useState<string | null>(null)
-
-  // memberSheetOpen controls the bottom-sheet member picker.
-  const [memberSheetOpen, setMemberSheetOpen] = useState(false)
-
-  // recentDays is the look-back window for Card ④ "Recent days".
-  // Default 3 days — independent from the global period filter above.
-  const [recentDays, setRecentDays] = useState(3)
-
-  // recentCustomPanelOpen controls the slider panel inside Card ④.
-  const [recentCustomPanelOpen, setRecentCustomPanelOpen] = useState(false)
-
-  // sliderValue is the live value of the range slider (before Apply is pressed).
-  const [sliderValue, setSliderValue] = useState(3)
-
-  // hiddenCategories — categories excluded from the "Recent days" chart so that
-  // outlier transactions don't squash the scale for all other bars.
+  // hiddenTxIds / hiddenCategories — exclusions for the "Day by day" chart, so a
+  // single outlier doesn't squash the scale for every other bar.
   const [hiddenCategories, setHiddenCategories] = useState<Set<string>>(new Set())
-
-  // hiddenTxIds — individual transaction IDs excluded from the chart.
-  // Lets the user hide a single outlier without hiding the entire category.
   const [hiddenTxIds, setHiddenTxIds] = useState<Set<string>>(new Set())
 
-  // tappedSegmentKey — tracks which segment was tapped: category name + date string.
-  // null = info panel closed. We derive transaction details from this.
+  // tappedSegmentKey — which (category, day) segment is expanded. null = closed.
   const [tappedSegmentKey, setTappedSegmentKey] = useState<{
     categoryName: string
     dateStr: string
   } | null>(null)
 
-  // tappedDayKey — which day bar was tapped in Card ② (Spending over time).
-  // null = panel closed. Stores the DD-MM-YYYY date string.
+  // tappedDayKey — which day bar is expanded in "Spending over time".
   const [tappedDayKey, setTappedDayKey] = useState<string | null>(null)
 
-  // hiddenSpendingTxIds — transaction IDs hidden from the spending-over-time chart.
-  // Independent from hiddenTxIds (which is for Card ③ Recent days).
+  // Exclusions for the "Spending over time" chart (independent of the above).
   const [hiddenSpendingTxIds, setHiddenSpendingTxIds] = useState<Set<string>>(new Set())
-
-  // hiddenSpendingCategories — entire category names hidden from the
-  // spending-over-time chart. All transactions of a hidden category are excluded.
   const [hiddenSpendingCategories, setHiddenSpendingCategories] = useState<Set<string>>(new Set())
 
-  // tappedCategoryKey — which category was tapped in Card ④ (By category).
-  // null = panel closed. Stores the category name (empty string = Uncategorized).
-  const [tappedCategoryKey, setTappedCategoryKey] = useState<string | null>(null)
-
-  // hiddenCategoryTxIds — transaction IDs hidden from the by-category chart.
-  // Independent from the other hidden sets.
-  const [hiddenCategoryTxIds, setHiddenCategoryTxIds] = useState<Set<string>>(new Set())
-
-  // hiddenCategoryNames — entire category names hidden from the by-category chart.
-  const [hiddenCategoryNames, setHiddenCategoryNames] = useState<Set<string>>(new Set())
+  // Whether the "Day by day" card is showing every day or just the first page.
+  const [showAllDays, setShowAllDays] = useState(false)
 
   // reconcileBalance — the wallet balance being reconciled (null = dialog closed).
   const [reconcileBalance, setReconcileBalance] = useState<WalletBalance | null>(null)
 
-  // selectedWalletKey — which wallet carousel card is tapped for drill-down.
-  // Format: "paymentMethodId|currency" or null (no selection = show all top-ups).
+  // selectedWalletKey — "paymentMethodId|currency", or null for "show all".
   const [selectedWalletKey, setSelectedWalletKey] = useState<string | null>(null)
 
+  // Card management (§6): the builder dialog, and whether the per-card
+  // edit/reorder/delete affordances are revealed.
+  const [builderOpen, setBuilderOpen] = useState(false)
+  const [editingCard, setEditingCard] = useState<DashboardCardDef | undefined>(undefined)
+  // Bumped on each open so CardBuilder remounts with fresh draft state.
+  const [builderKey, setBuilderKey] = useState(0)
+  const [cardsEditMode, setCardsEditMode] = useState(false)
+
   // ---------------------------------------------------------------------------
-  // Resolve current user's travelMemberId (the stable key in Split[])
+  // Identity
   // ---------------------------------------------------------------------------
 
-  // The prop gives us a Firebase Auth UID. We need the corresponding
-  // travelMemberId so we can filter Split[] which uses travelMemberId.
+  // The prop gives us a Firebase Auth UID. Split[] is keyed by travelMemberId,
+  // so resolve the current user's member slot once.
   const currentMember = space.members.find((m) => m.userId === currentUserUid)
   const currentTravelMemberId = currentMember?.travelMemberId ?? ''
 
-  // focusTravelMemberId: the member whose stats are highlighted in the hero card.
-  // Defaults to the current user when nothing is explicitly selected.
-  const focusTravelMemberId = selectedTravelMemberId ?? currentTravelMemberId
+  // A selected member can disappear underneath us — another member removing
+  // them, or an edit arriving over the onSnapshot listener. Fall back to
+  // ALL_MEMBERS rather than silently showing zeroes for a member who is gone.
+  // Adjust-state-during-render (identity-guarded, converges in one extra pass),
+  // same pattern as the filter hook's reconciliation.
+  const selectedMemberExists =
+    mode === ALL_MEMBERS || space.members.some((m) => m.travelMemberId === mode)
+  if (!selectedMemberExists) setMode(ALL_MEMBERS)
+  const effectiveMode: ScopeMode = selectedMemberExists ? mode : ALL_MEMBERS
 
-  // focusMember: full SpaceMember record for the focus member
-  const focusMember = space.members.find(
-    (m) => m.travelMemberId === focusTravelMemberId,
-  )
+  // The member whose share is being shown, or null for ALL_MEMBERS. Drives the
+  // hero heading only — the pipeline needs nothing but the id.
+  const scopedMember =
+    effectiveMode === ALL_MEMBERS
+      ? null
+      : (space.members.find((m) => m.travelMemberId === effectiveMode) ?? null)
 
   // ---------------------------------------------------------------------------
-  // Derived data (useMemo — avoids recomputing on every render)
+  // The scoped pipeline (§1)
   // ---------------------------------------------------------------------------
 
-  // normalizedTxs — transactions with split IDs remapped from the legacy 'uid'
-  // field to 'travelMemberId'.  Transactions created before the Session 009
-  // SpaceMember refactor stored splits as { uid, amount }; post-refactor splits
-  // use { travelMemberId, amount }.  Without this step, computeMemberStats would
-  // see split.travelMemberId === undefined for every old split and return paid=0
-  // even for members who did pay.  The normalisation is O(n) and only allocates
-  // new objects when a split actually needs remapping.
+  // normalizedTxs — splits remapped from the legacy 'uid' field to
+  // 'travelMemberId'. Pre-Session-009 transactions stored { uid, amount }.
+  // Without this, every per-member computation would see undefined ids.
   const normalizedTxs = useMemo(
     () => normalizeTransactionSplits(transactions, space.members),
     [transactions, space.members],
   )
 
-  // spendingTxs — only transactions that count toward spending analytics.
-  // Excludes withdrawals and balance-only adjustments so they don't inflate
-  // totals, category breakdowns, or per-member stats.
-  const spendingTxs = useMemo(
-    () => normalizedTxs.filter(countsAsSpending),
-    [normalizedTxs],
+  // THE one resolution step. Every card below reads this and nothing else.
+  const scoped = useMemo(
+    () => scopeTransactions(normalizedTxs, { range, mode: effectiveMode, mainCurrency }),
+    [normalizedTxs, range, effectiveMode, mainCurrency],
   )
 
-  // filteredTxs — the spending-only list restricted to the active period.
-  // Recomputed whenever the period selection or the raw transactions change.
-  const filteredTxs = useMemo(
-    () => filterTransactions(spendingTxs, period),
-    [spendingTxs, period],
+  // The underlying documents, for the cards that need more than an amount
+  // (per-member stats, transaction lists, edit links).
+  const scopedTxs = useMemo(() => scoped.map((s) => s.transaction), [scoped])
+
+  const totalSpent = useMemo(() => scopedTotal(scoped), [scoped])
+
+  // tripDurationDays — the span of the data, used as the divisor for "avg/day"
+  // when the range is unbounded (an "all time" range has no intrinsic length).
+  const tripDurationDays = useMemo(
+    () => getTripDurationDays(space, normalizedTxs),
+    [space, normalizedTxs],
+  )
+  const nDaysInRange = rangeDayCount(range, tripDurationDays)
+  const avgPerDay = nDaysInRange > 0 ? totalSpent / nDaysInRange : 0
+
+  // Your consumed/paid within the range. Independent of the member selection:
+  // this box always answers "what about me", which is what it did before.
+  const focusStats = useMemo(
+    () => computeMemberStats(scopedTxs, currentTravelMemberId),
+    [scopedTxs, currentTravelMemberId],
   )
 
-  // walletBalances — per (paymentMethod, currency) remaining balance for the
-  // current user. Computed from ALL normalised transactions (not period-filtered)
-  // because wallet balance is cumulative across the entire space.
+  // ---------------------------------------------------------------------------
+  // Card gating (§3)
+  // ---------------------------------------------------------------------------
+
+  const showCategory = config.builtInFields.category
+  const showWallets = config.features.wallets
+  const showCurrencies = config.features.multiCurrency
+
+  // Dimensions a breakdown card may be built on, and the cards themselves.
+  const dimensions = useMemo(() => breakdownDimensions(space, config), [space, config])
+  const storedCards = useMemo(() => resolveDashboardCards(config), [config])
+  // A card whose dimension is disabled is HIDDEN, not deleted — it comes back
+  // intact when the field is re-enabled.
+  const visibleCards = useMemo(
+    () => visibleDashboardCards(storedCards, dimensions),
+    [storedCards, dimensions],
+  )
+
+  // ---------------------------------------------------------------------------
+  // Card persistence (§6)
+  // ---------------------------------------------------------------------------
+
+  /** Write the card list to Firestore (fire-and-forget) and mirror it into the
+   *  local Space so the dashboard updates without waiting for the round-trip.
+   *  The FIRST edit materialises the array — until then the space has no
+   *  `dashboardCards` key and resolves to the legacy default set. */
+  function persistCards(next: DashboardCardDef[]) {
+    updateSpaceDashboardCards(space.spaceId, next)
+    onSpaceChange?.({ config: { ...config, dashboardCards: next } })
+  }
+
+  function handleSaveCard(card: DashboardCardDef) {
+    const exists = storedCards.some((c) => c.id === card.id)
+    persistCards(exists ? storedCards.map((c) => (c.id === card.id ? card : c)) : [...storedCards, card])
+  }
+
+  /** Deletion needs no confirmation — a card holds no data. */
+  function handleDeleteCard(cardId: string) {
+    persistCards(storedCards.filter((c) => c.id !== cardId))
+  }
+
+  /** Move a card one position up (-1) or down (+1) in the stored order.
+   *  Reordering operates on the STORED list, not the visible one, so a hidden
+   *  card keeps its place relative to its neighbours. */
+  function handleMoveCard(cardId: string, delta: -1 | 1) {
+    const idx = storedCards.findIndex((c) => c.id === cardId)
+    const target = idx + delta
+    if (idx < 0 || target < 0 || target >= storedCards.length) return
+    const next = [...storedCards]
+    const [moved] = next.splice(idx, 1)
+    next.splice(target, 0, moved)
+    persistCards(next)
+  }
+
+  function openBuilder(card?: DashboardCardDef) {
+    setEditingCard(card)
+    setBuilderKey((k) => k + 1)
+    setBuilderOpen(true)
+  }
+
+  /** Tapping a breakdown row → Transactions tab, filtered.
+   *
+   *  The date range travels with it: without it the drilled list would not sum
+   *  to the number the user tapped.
+   *
+   *  ⚠️ The member selection deliberately does NOT travel with it, even when a
+   *  member is selected. This asymmetry is intentional, not an omission: the
+   *  transactions list has its own Paid-by / For filters, and a row tapped
+   *  under "Marie" should show every transaction behind that number — Marie's
+   *  share of a group dinner is not a transaction of its own, so pre-filtering
+   *  to her would hide the very rows the figure came from. */
+  function handleRowDrillDown(dimensionKey: string, values: string[]) {
+    onDrillDown?.({ dimensionKey, values, range })
+  }
+
+  // ---------------------------------------------------------------------------
+  // Wallet data (NOT range-scoped — a wallet balance is cumulative)
+  // ---------------------------------------------------------------------------
+
   const pmLabelMap = useMemo(() => {
     const m = new Map<string, string>()
     for (const pm of space.paymentMethods ?? []) {
@@ -248,28 +381,23 @@ export function DashboardTab({
     [normalizedTxs, currentTravelMemberId, pmLabelMap],
   )
 
-  // walletEventTxs — all withdrawal and adjustment transactions where the current
-  // user paid, sorted by date descending. Used by the wallet card's history list.
   const walletEventTxs = useMemo(() => {
     return normalizedTxs
       .filter(tx => (isWithdrawal(tx) || isAdjustment(tx)) && tx.paidBy.some(s => s.travelMemberId === currentTravelMemberId))
       .sort((a, b) => parseTxDate(b.date).getTime() - parseTxDate(a.date).getTime())
   }, [normalizedTxs, currentTravelMemberId])
 
-  // selectedWalletDetail — drill-down data for the tapped wallet card.
-  // Computes filtered withdrawals, summary stats, and "since last top-up" data.
   const selectedWalletDetail = useMemo(() => {
     if (!selectedWalletKey) return null
     const [pm, currency] = selectedWalletKey.split('|')
     const wb = walletBalances.find(w => w.paymentMethod === pm && w.currency === currency)
     if (!wb) return null
 
-    // Wallet events (withdrawals + adjustments) for this specific wallet, already sorted desc
     const walletEvents = walletEventTxs.filter(
       tx => tx.paymentMethod === pm && tx.currency === currency,
     )
 
-    const lastTopup = walletEvents.find(tx => isWithdrawal(tx)) // most recent withdrawal
+    const lastTopup = walletEvents.find(tx => isWithdrawal(tx))
     if (!lastTopup) {
       return { wb, walletEvents, lastTopup: null, lastTopupNetAmount: 0, spentSinceLastTopup: 0, balanceAfterLastTopup: wb.remaining }
     }
@@ -277,7 +405,6 @@ export function DashboardTab({
     const lastTopupDate = parseTxDate(lastTopup.date)
     const lastTopupNetAmount = (lastTopup.paidBy.find(s => s.travelMemberId === currentTravelMemberId)?.amount ?? 0) - (lastTopup.fees ?? 0)
 
-    // Sum expenses paid by this member with this PM+currency on or after last top-up date
     let spentSinceLastTopup = 0
     for (const tx of normalizedTxs) {
       if (tx.paymentMethod !== pm || tx.currency !== currency) continue
@@ -296,15 +423,10 @@ export function DashboardTab({
       lastTopup,
       lastTopupNetAmount: Math.round(lastTopupNetAmount * 100) / 100,
       spentSinceLastTopup,
-      // Balance right after the last top-up ≈ current remaining + everything spent since
       balanceAfterLastTopup: Math.round((wb.remaining + spentSinceLastTopup) * 100) / 100,
     }
   }, [selectedWalletKey, walletBalances, walletEventTxs, normalizedTxs, currentTravelMemberId])
 
-  // walletSpendingGaps — for each gap between consecutive wallet events in the
-  // selected wallet drill-down, compute total spending in that date range.
-  // Keyed by the index of the upper (more recent) event in the list.
-  // Only computed when a wallet is selected (gaps are meaningless across mixed wallets).
   const walletSpendingGaps = useMemo(() => {
     const gaps = new Map<number, { fromDate: string; toDate: string; amount: number }>()
     if (!selectedWalletDetail) return gaps
@@ -312,8 +434,7 @@ export function DashboardTab({
     const [pm, currency] = selectedWalletKey!.split('|')
     const events = selectedWalletDetail.walletEvents
 
-    // Collect spending txs for this wallet once (avoid re-scanning per gap)
-    const spendingTxs = normalizedTxs.filter(tx => {
+    const walletSpendingTxs = normalizedTxs.filter(tx => {
       if (tx.paymentMethod !== pm || tx.currency !== currency) return false
       if (!countsAsSpending(tx)) return false
       return (tx.paidBy.find(s => s.travelMemberId === currentTravelMemberId)?.amount ?? 0) > 0
@@ -324,15 +445,13 @@ export function DashboardTab({
       const olderDate = parseTxDate(events[i + 1].date)
 
       let total = 0
-      for (const tx of spendingTxs) {
+      for (const tx of walletSpendingTxs) {
         const txDate = parseTxDate(tx.date)
-        // Include spending strictly between the two event dates
         if (txDate.getTime() > olderDate.getTime() && txDate.getTime() < newerDate.getTime()) {
           total += tx.paidBy.find(s => s.travelMemberId === currentTravelMemberId)?.amount ?? 0
         }
       }
 
-      // Always show the gap row (even if 0 — gives context of the time range)
       gaps.set(i, {
         fromDate: events[i + 1].date,
         toDate: events[i].date,
@@ -343,136 +462,32 @@ export function DashboardTab({
     return gaps
   }, [selectedWalletDetail, selectedWalletKey, normalizedTxs, currentTravelMemberId])
 
-  // totalSpent — sum of all filtered transactions in main currency.
-  const totalSpent = useMemo(
-    () => filteredTxs.reduce((sum, tx) => sum + tx.totalAmountMain, 0),
-    [filteredTxs],
-  )
+  // ---------------------------------------------------------------------------
+  // Spending over time (Card ②)
+  // ---------------------------------------------------------------------------
 
-  // focusStats — how much the focus member consumed and paid within the filter.
-  const focusStats = useMemo(
-    () => computeMemberStats(filteredTxs, focusTravelMemberId),
-    [filteredTxs, focusTravelMemberId],
-  )
+  /** The category bucket a transaction belongs to, or '' when the space does
+   *  not track categories. Gating here is what stops a category-less space
+   *  degrading into a single "Uncategorized" bucket. */
+  function categoryKey(tx: { category?: string }): string {
+    return showCategory ? (tx.category?.trim() || '') : ''
+  }
 
-  // tripDurationDays — total trip length in days. Used to cap the slider max
-  // and as the "n" for the 'all' period average.
-  const tripDurationDays = useMemo(
-    () => getTripDurationDays(space, normalizedTxs),
-    [space, normalizedTxs],
-  )
-
-  // nDaysInRange — how many calendar days the active filter spans.
-  const nDaysInRange = useMemo(
-    () => numberOfDaysInRange(period, tripDurationDays),
-    [period, tripDurationDays],
-  )
-
-  // avgPerDay — average daily spend across the active period.
-  const avgPerDay = useMemo(
-    () => (nDaysInRange > 0 ? totalSpent / nDaysInRange : 0),
-    [totalSpent, nDaysInRange],
-  )
-
-  // perDayTotals — Map<DD-MM-YYYY, totalAmountMain> for the spending-over-time
-  // bar chart. Always uses group totals (not filtered by member) so the time
-  // context stays intact regardless of member selection.
-  // Excludes transactions hidden via the spending-over-time card's hide feature
-  // (both individual txIds and entire categories).
   const perDayTotals = useMemo(() => {
     const map = new Map<string, number>()
-    for (const tx of filteredTxs) {
-      if (hiddenSpendingTxIds.has(tx.txId)) continue
-      if (hiddenSpendingCategories.has(tx.category?.trim() || '')) continue
-      map.set(tx.date, (map.get(tx.date) ?? 0) + tx.totalAmountMain)
+    for (const { transaction, attributedAmount } of scoped) {
+      if (hiddenSpendingTxIds.has(transaction.txId)) continue
+      if (showCategory && hiddenSpendingCategories.has(transaction.category?.trim() || '')) continue
+      map.set(transaction.date, (map.get(transaction.date) ?? 0) + attributedAmount)
     }
     return map
-  }, [filteredTxs, hiddenSpendingTxIds, hiddenSpendingCategories])
-
-  // perCategoryTotals — sorted array of { name, total, color } for Card ⑤.
-  // When selectedTravelMemberId is set, uses that member's consumed share per
-  // category; otherwise uses the full tx.totalAmountMain.
-  // Excludes transactions hidden via the by-category card's hide feature.
-  const perCategoryTotals = useMemo(() => {
-    const map = new Map<string, number>()
-
-    for (const tx of filteredTxs) {
-      if (hiddenCategoryTxIds.has(tx.txId)) continue
-      const key = tx.category?.trim() || '' // empty string = "Uncategorized"
-      if (hiddenCategoryNames.has(key)) continue
-
-      if (selectedTravelMemberId) {
-        // Sum only the selected member's beneficiary share for this transaction
-        for (const split of tx.beneficiaries) {
-          if (split.travelMemberId === selectedTravelMemberId) {
-            map.set(key, (map.get(key) ?? 0) + split.amount * tx.exchangeRate)
-          }
-        }
-      } else {
-        map.set(key, (map.get(key) ?? 0) + tx.totalAmountMain)
-      }
-    }
-
-    return Array.from(map.entries())
-      .map(([name, total]) => ({ name, total, color: categoryColor(name || 'Uncategorized') }))
-      .sort((a, b) => {
-        // "Uncategorized" always goes last
-        if (a.name === '' && b.name !== '') return 1
-        if (b.name === '' && a.name !== '') return -1
-        return b.total - a.total
-      })
-  }, [filteredTxs, selectedTravelMemberId, hiddenCategoryTxIds, hiddenCategoryNames])
-
-  // perMemberStats — sorted array of { member, consumed, paid } for Card ⑥.
-  // Current user always first, then descending by consumed.
-  const perMemberStats = useMemo(() => {
-    const stats = space.members.map((member, idx) => ({
-      member,
-      memberIndex: idx,
-      ...computeMemberStats(filteredTxs, member.travelMemberId),
-    }))
-
-    return stats.sort((a, b) => {
-      // Current user's member card floats to the top
-      const aIsCurrent = a.member.userId === currentUserUid
-      const bIsCurrent = b.member.userId === currentUserUid
-      if (aIsCurrent && !bIsCurrent) return -1
-      if (bIsCurrent && !aIsCurrent) return 1
-      return b.consumed - a.consumed
-    })
-  }, [filteredTxs, space.members, currentUserUid])
-
-  // labelForPeriod — active period button label, used in the hero subtitle.
-  const rangeLabelStr = useMemo(
-    () => dateRangeLabel(period, filteredTxs, tripDurationDays),
-    [period, filteredTxs, tripDurationDays],
-  )
-
-  // ---------------------------------------------------------------------------
-  // Member picker helpers
-  // ---------------------------------------------------------------------------
-
-  /** The currently selected member's display info for the picker button. */
-  const selectedMember: SpaceMember | null =
-    selectedTravelMemberId
-      ? (space.members.find((m) => m.travelMemberId === selectedTravelMemberId) ?? null)
-      : null
-
-  const selectedMemberIndex = selectedMember
-    ? space.members.indexOf(selectedMember)
-    : -1
-
-  // ---------------------------------------------------------------------------
-  // Spending-over-time bar chart data
-  // ---------------------------------------------------------------------------
+  }, [scoped, hiddenSpendingTxIds, hiddenSpendingCategories, showCategory])
 
   const sortedDays = useMemo(() => {
-    // Sort by date ascending for the bar chart (oldest left, newest right)
-    return Array.from(perDayTotals.entries()).sort((a, b) => {
-      const da = parseTxDate(a[0]).getTime()
-      const db = parseTxDate(b[0]).getTime()
-      return da - db
-    })
+    // Ascending for the bar chart (oldest left, newest right).
+    return Array.from(perDayTotals.entries()).sort(
+      (a, b) => parseTxDate(a[0]).getTime() - parseTxDate(b[0]).getTime(),
+    )
   }, [perDayTotals])
 
   const maxDayTotal = useMemo(
@@ -480,417 +495,188 @@ export function DashboardTab({
     [sortedDays],
   )
 
-  // yAxisTicks — "nice" round values for the horizontal grid lines on Card ②.
-  // Dynamically picks a step size so we get 2–5 lines that are easy to read
-  // (e.g. 50, 100, 200, 500, 1000…).  The algorithm:
-  //   1. Divide maxDayTotal by a target of ~4 ticks to get a raw step.
-  //   2. Round that step up to the nearest "nice" number (1, 2, 5 × 10^n).
-  //   3. Generate ticks from step up to maxDayTotal.
-  const yAxisTicks = useMemo(() => {
-    if (maxDayTotal <= 0) return []
-    const TARGET_TICKS = 4
-    const rawStep = maxDayTotal / TARGET_TICKS
+  const yAxisTicks = useMemo(() => niceTicks(maxDayTotal), [maxDayTotal])
 
-    // Find the order of magnitude, then snap to 1/2/5 within it
-    const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)))
-    const residual = rawStep / magnitude
-    let niceStep: number
-    if (residual <= 1.5) niceStep = 1 * magnitude
-    else if (residual <= 3.5) niceStep = 2 * magnitude
-    else if (residual <= 7.5) niceStep = 5 * magnitude
-    else niceStep = 10 * magnitude
-
-    const ticks: number[] = []
-    for (let v = niceStep; v <= maxDayTotal; v += niceStep) {
-      ticks.push(v)
-    }
-    return ticks
-  }, [maxDayTotal])
-
-  // ---------------------------------------------------------------------------
-  // Recent days card data
-  // ---------------------------------------------------------------------------
-
-  // Generate the last `recentDays` calendar dates as DD-MM-YYYY strings,
-  // counting back from today. We always use today as day 0 so that the user
-  // sees "Today" even when there are no transactions yet today.
-  const recentDateStrings = useMemo(() => {
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    return Array.from({ length: recentDays }, (_, i) => {
-      const d = new Date(today.getTime() - i * 86_400_000)
-      const day   = String(d.getDate()).padStart(2, '0')
-      const month = String(d.getMonth() + 1).padStart(2, '0')
-      const year  = d.getFullYear()
-      return `${day}-${month}-${year}`
-    }).reverse() // oldest first so bars read left-to-right
-  }, [recentDays])
-
-  // For each recent date, compute per-category amounts (or full totals if no
-  // member is selected).
-  const recentDaysData = useMemo(() => {
-    return recentDateStrings.map((dateStr) => {
-      const dayTxs = spendingTxs.filter((tx) => tx.date === dateStr && !hiddenTxIds.has(tx.txId))
-
-      if (dayTxs.length === 0) {
-        return { dateStr, total: 0, categories: [] as { name: string; amount: number; color: string }[] }
-      }
-
-      const catMap = new Map<string, number>()
-      let total = 0
-
-      for (const tx of dayTxs) {
-        const key = tx.category?.trim() || ''
-
-        if (selectedTravelMemberId) {
-          for (const split of tx.beneficiaries) {
-            if (split.travelMemberId === selectedTravelMemberId) {
-              const amt = split.amount * tx.exchangeRate
-              catMap.set(key, (catMap.get(key) ?? 0) + amt)
-              total += amt
-            }
-          }
-        } else {
-          catMap.set(key, (catMap.get(key) ?? 0) + tx.totalAmountMain)
-          total += tx.totalAmountMain
-        }
-      }
-
-      const categories = Array.from(catMap.entries())
-        .map(([name, amount]) => ({ name, amount, color: categoryColor(name || 'Uncategorized') }))
-        .sort((a, b) => b.amount - a.amount)
-
-      return { dateStr, total, categories }
-    })
-  }, [recentDateStrings, spendingTxs, selectedTravelMemberId, hiddenTxIds])
-
-  // Filtered recent days data — excludes hidden categories so the scale adjusts.
-  // Each day gets a new total and filtered categories array.
-  const filteredRecentDaysData = useMemo(() => {
-    if (hiddenCategories.size === 0) return recentDaysData
-    return recentDaysData.map((day) => {
-      const cats = day.categories.filter((c) => !hiddenCategories.has(c.name))
-      const total = cats.reduce((sum, c) => sum + c.amount, 0)
-      return { ...day, total, categories: cats }
-    })
-  }, [recentDaysData, hiddenCategories])
-
-  // Max total across recent days — used to scale the bar widths.
-  // Recomputed from filtered data so hiding an outlier rescales the chart.
-  const recentMaxTotal = useMemo(
-    () => Math.max(...filteredRecentDaysData.map((d) => d.total), 1),
-    [filteredRecentDaysData],
-  )
-
-  // recentXTicks — "nice" round values for the vertical grid lines on Card ③.
-  // Same 1/2/5 algorithm as yAxisTicks but applied to horizontal bars.
-  const recentXTicks = useMemo(() => {
-    if (recentMaxTotal <= 0) return []
-    const TARGET_TICKS = 4
-    const rawStep = recentMaxTotal / TARGET_TICKS
-    const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)))
-    const residual = rawStep / magnitude
-    let niceStep: number
-    if (residual <= 1.5) niceStep = 1 * magnitude
-    else if (residual <= 3.5) niceStep = 2 * magnitude
-    else if (residual <= 7.5) niceStep = 5 * magnitude
-    else niceStep = 10 * magnitude
-
-    const ticks: number[] = []
-    for (let v = niceStep; v <= recentMaxTotal; v += niceStep) {
-      ticks.push(v)
-    }
-    return ticks
-  }, [recentMaxTotal])
-
-  // Transactions for the tapped segment's category on the tapped day.
-  // Used to render the detail list inside the info panel.
-  const tappedSegmentTxs = useMemo(() => {
-    if (!tappedSegmentKey) return []
-    return normalizedTxs.filter(
-      (tx) =>
-        tx.date === tappedSegmentKey.dateStr &&
-        (tx.category?.trim() || '') === tappedSegmentKey.categoryName,
-    )
-  }, [tappedSegmentKey, normalizedTxs])
-
-  // Total for the tapped segment (category on that day, including hidden txs).
-  const tappedSegmentTotal = useMemo(
-    () => tappedSegmentTxs.reduce((sum, tx) => sum + tx.totalAmountMain, 0),
-    [tappedSegmentTxs],
-  )
-
-  // Color for the tapped category
-  const tappedSegmentColor = tappedSegmentKey
-    ? categoryColor(tappedSegmentKey.categoryName || 'Uncategorized')
-    : '#999'
-
-  // ---------------------------------------------------------------------------
-  // Tapped day (Card ②) — transactions for the tapped day bar
-  // ---------------------------------------------------------------------------
-
-  // All transactions matching the tapped day (unfiltered — we show hidden ones
-  // with reduced opacity, same pattern as Card ③).
-  const tappedDayTxs = useMemo(() => {
+  // Transactions behind the tapped day bar, grouped by category.
+  const tappedDayScoped = useMemo(() => {
     if (!tappedDayKey) return []
-    return filteredTxs.filter((tx) => tx.date === tappedDayKey)
-  }, [tappedDayKey, filteredTxs])
+    return scoped.filter((s) => s.transaction.date === tappedDayKey)
+  }, [tappedDayKey, scoped])
 
-  // Total for the tapped day (including hidden txs, for the header display).
   const tappedDayTotal = useMemo(
-    () => tappedDayTxs.reduce((sum, tx) => sum + tx.totalAmountMain, 0),
-    [tappedDayTxs],
+    () => scopedTotal(tappedDayScoped),
+    [tappedDayScoped],
   )
 
-  // tappedDayByCategory — transactions for the tapped day, grouped by category.
-  // Each group has { categoryName, color, txs, total }. Sorted by total descending.
   const tappedDayByCategory = useMemo(() => {
     if (!tappedDayKey) return []
-    const map = new Map<string, typeof tappedDayTxs>()
-    for (const tx of tappedDayTxs) {
-      const key = tx.category?.trim() || ''
+    const map = new Map<string, ScopedTransaction<TransactionWithStatus>[]>()
+    for (const s of tappedDayScoped) {
+      const key = categoryKey(s.transaction)
       const arr = map.get(key) ?? []
-      arr.push(tx)
+      arr.push(s)
       map.set(key, arr)
     }
     return Array.from(map.entries())
-      .map(([name, txs]) => ({
+      .map(([name, items]) => ({
         categoryName: name,
-        color: categoryColor(name || 'Uncategorized'),
-        txs,
-        total: txs.reduce((sum, tx) => sum + tx.totalAmountMain, 0),
+        color: showCategory ? categoryColor(name || 'Uncategorized') : CATEGORY_PALETTE[0],
+        items,
+        total: scopedTotal(items),
       }))
       .sort((a, b) => b.total - a.total)
-  }, [tappedDayKey, tappedDayTxs])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tappedDayKey, tappedDayScoped, showCategory])
 
   // ---------------------------------------------------------------------------
-  // Tapped category (Card ④) — transactions for the tapped category
+  // Day by day (Card ③)
   // ---------------------------------------------------------------------------
+  //
+  // ⚠️ Phase 7a: this card used to own its own look-back window (a "3 / 7 / 15
+  // days" pill row). That per-card period is gone — the card now shows the
+  // days inside the GLOBAL range, newest first, capped at DAY_ROWS_LIMIT rows.
 
-  // All transactions matching the tapped category in the filtered period.
-  const tappedCategoryTxs = useMemo(() => {
-    if (tappedCategoryKey === null) return []
-    return filteredTxs.filter(
-      (tx) => (tx.category?.trim() || '') === tappedCategoryKey,
-    )
-  }, [tappedCategoryKey, filteredTxs])
+  const dayRows = useMemo(() => {
+    const byDate = new Map<string, ScopedTransaction<TransactionWithStatus>[]>()
+    for (const s of scoped) {
+      const arr = byDate.get(s.transaction.date) ?? []
+      arr.push(s)
+      byDate.set(s.transaction.date, arr)
+    }
 
-  // Total for the tapped category (including hidden txs).
-  const tappedCategoryTotal = useMemo(
-    () => tappedCategoryTxs.reduce((sum, tx) => sum + tx.totalAmountMain, 0),
-    [tappedCategoryTxs],
+    return Array.from(byDate.entries())
+      .sort((a, b) => parseTxDate(b[0]).getTime() - parseTxDate(a[0]).getTime())
+      .map(([dateStr, items]) => {
+        const catMap = new Map<string, number>()
+        let total = 0
+        for (const { transaction, attributedAmount } of items) {
+          if (hiddenTxIds.has(transaction.txId)) continue
+          const key = categoryKey(transaction)
+          catMap.set(key, (catMap.get(key) ?? 0) + attributedAmount)
+          total += attributedAmount
+        }
+        const categories = Array.from(catMap.entries())
+          .map(([name, amount]) => ({
+            name,
+            amount,
+            color: showCategory ? categoryColor(name || 'Uncategorized') : CATEGORY_PALETTE[0],
+          }))
+          .sort((a, b) => b.amount - a.amount)
+        return { dateStr, total, categories }
+      })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scoped, hiddenTxIds, showCategory])
+
+  // Apply the hidden-category exclusions and rescale.
+  const filteredDayRows = useMemo(() => {
+    if (hiddenCategories.size === 0) return dayRows
+    return dayRows.map((day) => {
+      const cats = day.categories.filter((c) => !hiddenCategories.has(c.name))
+      return { ...day, total: cats.reduce((sum, c) => sum + c.amount, 0), categories: cats }
+    })
+  }, [dayRows, hiddenCategories])
+
+  const shownDayRows = showAllDays ? filteredDayRows : filteredDayRows.slice(0, DAY_ROWS_LIMIT)
+
+  const dayMaxTotal = useMemo(
+    () => Math.max(...shownDayRows.map((d) => d.total), 1),
+    [shownDayRows],
   )
 
-  // Color for the tapped category in Card ④
-  const tappedCategoryColor =
-    tappedCategoryKey !== null
-      ? categoryColor(tappedCategoryKey || 'Uncategorized')
-      : '#999'
+  const dayXTicks = useMemo(() => niceTicks(dayMaxTotal), [dayMaxTotal])
 
-  // Label for the recent-days card summary line
-  const recentDaySummary =
-    recentDays === 1 ? 'today' : `last ${recentDays} days`
+  // Transactions behind the tapped (category, day) segment.
+  const tappedSegmentScoped = useMemo(() => {
+    if (!tappedSegmentKey) return []
+    return scoped.filter(
+      (s) =>
+        s.transaction.date === tappedSegmentKey.dateStr &&
+        categoryKey(s.transaction) === tappedSegmentKey.categoryName,
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tappedSegmentKey, scoped, showCategory])
 
-  // Is the current recentDays value a preset or custom?
-  const PRESET_RECENT = [1, 3, 7, 15]
-  const isCustomRecent = !PRESET_RECENT.includes(recentDays)
+  const tappedSegmentTotal = useMemo(
+    () => scopedTotal(tappedSegmentScoped),
+    [tappedSegmentScoped],
+  )
+
+  const tappedSegmentColor = tappedSegmentKey && showCategory
+    ? categoryColor(tappedSegmentKey.categoryName || 'Uncategorized')
+    : CATEGORY_PALETTE[0]
 
   // ---------------------------------------------------------------------------
-  // Currencies card data
+  // Per person (Card ⑤)
+  // ---------------------------------------------------------------------------
+
+  const perMemberStats = useMemo(() => {
+    const stats = space.members.map((member, idx) => ({
+      member,
+      memberIndex: idx,
+      ...computeMemberStats(scopedTxs, member.travelMemberId),
+    }))
+
+    return stats.sort((a, b) => {
+      const aIsCurrent = a.member.userId === currentUserUid
+      const bIsCurrent = b.member.userId === currentUserUid
+      if (aIsCurrent && !bIsCurrent) return -1
+      if (bIsCurrent && !aIsCurrent) return 1
+      return b.consumed - a.consumed
+    })
+  }, [scopedTxs, space.members, currentUserUid])
+
+  // ---------------------------------------------------------------------------
+  // Currencies (Card ⑥)
   // ---------------------------------------------------------------------------
 
   const currenciesData = useMemo(() => {
     const map = new Map<string, number>()
-
-    for (const tx of filteredTxs) {
-      const key = tx.currency
-
-      if (selectedTravelMemberId) {
-        for (const split of tx.beneficiaries) {
-          if (split.travelMemberId === selectedTravelMemberId) {
-            map.set(key, (map.get(key) ?? 0) + split.amount * tx.exchangeRate)
-          }
-        }
-      } else {
-        map.set(key, (map.get(key) ?? 0) + tx.totalAmountMain)
-      }
+    for (const { transaction, attributedAmount } of scoped) {
+      map.set(transaction.currency, (map.get(transaction.currency) ?? 0) + attributedAmount)
     }
-
     return Array.from(map.entries()).sort((a, b) => b[1] - a[1])
-  }, [filteredTxs, selectedTravelMemberId])
-
-  // ---------------------------------------------------------------------------
-  // Render helpers
-  // ---------------------------------------------------------------------------
-
-  /** Period pill button */
-  function PeriodPill({
-    label,
-    active,
-    onClick,
-  }: {
-    label: string
-    active: boolean
-    onClick: () => void
-  }) {
-    return (
-      <button
-        type="button"
-        onClick={onClick}
-        className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-          active
-            ? 'bg-primary text-primary-foreground'
-            : 'bg-muted text-muted-foreground hover:text-foreground'
-        }`}
-      >
-        {label}
-      </button>
-    )
-  }
-
-  // ---------------------------------------------------------------------------
-  // Derived label for Custom period pill
-  // ---------------------------------------------------------------------------
-  let customPillLabel = 'Custom'
-  if (period.type === 'custom') {
-    const fmt = (d: Date) =>
-      d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-    customPillLabel = `${fmt(period.from)}–${fmt(period.to)}`
-  }
+  }, [scoped])
 
   // ---------------------------------------------------------------------------
   // JSX
   // ---------------------------------------------------------------------------
 
   return (
-    // Root layout: vertical stack, no horizontal padding (each card adds its own)
     <div className="flex flex-col gap-3 pb-6">
 
       {/* ================================================================ */}
-      {/* Controls bar — period filter + member picker                      */}
+      {/* Global controls (§2)                                             */}
       {/* ================================================================ */}
-      <div className="rounded-xl border bg-card px-4 py-3 shadow-sm">
-
-        {/* Row 1: Period pills + member picker button on the same line */}
-        <div className="flex items-center justify-between gap-2">
-
-          {/* Period pills — scroll horizontally on narrow screens */}
-          <div className="flex flex-wrap gap-1.5">
-            <PeriodPill
-              label="All"
-              active={period.type === 'all'}
-              onClick={() => { setPeriod({ type: 'all' }); setCustomPanelOpen(false) }}
-            />
-            <PeriodPill
-              label="Today"
-              active={period.type === 'today'}
-              onClick={() => { setPeriod({ type: 'today' }); setCustomPanelOpen(false) }}
-            />
-            <PeriodPill
-              label="7d"
-              active={period.type === 'days' && period.n === 7}
-              onClick={() => { setPeriod({ type: 'days', n: 7 }); setCustomPanelOpen(false) }}
-            />
-            <PeriodPill
-              label="30d"
-              active={period.type === 'days' && period.n === 30}
-              onClick={() => { setPeriod({ type: 'days', n: 30 }); setCustomPanelOpen(false) }}
-            />
-            <PeriodPill
-              label={customPillLabel}
-              active={period.type === 'custom' || customPanelOpen}
-              onClick={() => setCustomPanelOpen((prev) => !prev)}
-            />
-          </div>
-
-          {/* Member picker button — hidden for solo spaces */}
-          {!isSolo && (
-            <button
-              type="button"
-              onClick={() => setMemberSheetOpen(true)}
-              className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
-                selectedTravelMemberId
-                  ? 'border-primary/30 bg-primary/10 text-primary'
-                  : 'border-border bg-muted text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              {selectedMember ? (
-                <>
-                  <MemberAvatar name={selectedMember.displayName} index={selectedMemberIndex} />
-                  <span className="max-w-[6rem] truncate">{selectedMember.displayName}</span>
-                </>
-              ) : (
-                <span>👤 All</span>
-              )}
-            </button>
-          )}
-        </div>
-
-        {/* Custom date-range panel — shown only when customPanelOpen */}
-        {customPanelOpen && (
-          <div className="mt-3 flex flex-wrap items-end gap-3 border-t pt-3">
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-              From
-              <input
-                type="date"
-                value={customFrom}
-                onChange={(e) => setCustomFrom(e.target.value)}
-                className="rounded border px-2 py-1 text-xs text-foreground"
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-              To
-              <input
-                type="date"
-                value={customTo}
-                onChange={(e) => setCustomTo(e.target.value)}
-                className="rounded border px-2 py-1 text-xs text-foreground"
-              />
-            </label>
-            <button
-              type="button"
-              disabled={!customFrom || !customTo}
-              onClick={() => {
-                if (customFrom && customTo) {
-                  setPeriod({
-                    type: 'custom',
-                    from: new Date(customFrom),
-                    to:   new Date(customTo),
-                  })
-                  setCustomPanelOpen(false)
-                }
-              }}
-              className="rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground disabled:opacity-40"
-            >
-              Apply
-            </button>
-          </div>
-        )}
-      </div>
+      <DashboardControls
+        range={range}
+        onRangeChange={setRange}
+        mode={effectiveMode}
+        onModeChange={setMode}
+        members={space.members}
+        currentMemberId={currentTravelMemberId}
+        isSolo={isSolo}
+      />
 
       {/* ================================================================ */}
       {/* Card ① — Hero (not collapsible)                                  */}
       {/* ================================================================ */}
       <div className="rounded-xl border bg-card px-4 py-4 shadow-sm">
-
-        {/* Total spend — large centered number */}
         <div className="mb-1 text-center text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Total spent
+          {scopedMember === null
+            ? 'Total spent'
+            : scopedMember.travelMemberId === currentTravelMemberId
+              ? 'Your share'
+              : `${scopedMember.displayName}'s share`}
         </div>
         <div className="mb-1 text-center text-3xl font-bold text-foreground">
           {formatAmount(totalSpent, mainCurrency)}
         </div>
 
-        {/* Subtitle: transaction count + date range */}
         <div className="mb-4 text-center text-xs text-muted-foreground">
-          {filteredTxs.length} transaction{filteredTxs.length !== 1 ? 's' : ''}
-          {rangeLabelStr ? ` · ${rangeLabelStr}` : ''}
+          {scoped.length} transaction{scoped.length !== 1 ? 's' : ''} · {rangeLabel(range)}
         </div>
 
-        {/* Three stat boxes */}
         <div className={`grid gap-2 ${isSolo ? 'grid-cols-2' : 'grid-cols-3'}`}>
-
-          {/* Avg/day */}
           <div className="rounded-lg border bg-muted/30 px-3 py-2 text-center">
             <div className="text-xs text-muted-foreground">Avg/day</div>
             <div className="mt-0.5 text-sm font-semibold">
@@ -898,12 +684,11 @@ export function DashboardTab({
             </div>
           </div>
 
-          {/* Focus member stat — hidden when isSolo */}
+          {/* Your own consumed/paid — always about you, regardless of You/All. */}
           {!isSolo && (
             <div className="rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 text-center">
               <div className="truncate text-xs text-primary">
-                {focusMember?.displayName ?? 'You'}
-                {focusTravelMemberId === currentTravelMemberId ? ' (you)' : ''}
+                {currentMember?.displayName ?? 'You'} (you)
               </div>
               <div className="mt-0.5 text-sm font-semibold text-foreground">
                 {formatAmount(focusStats.consumed, mainCurrency)}
@@ -914,10 +699,9 @@ export function DashboardTab({
             </div>
           )}
 
-          {/* Transaction count */}
           <div className="rounded-lg border bg-muted/30 px-3 py-2 text-center">
             <div className="text-xs text-muted-foreground">Transactions</div>
-            <div className="mt-0.5 text-sm font-semibold">{filteredTxs.length}</div>
+            <div className="mt-0.5 text-sm font-semibold">{scoped.length}</div>
           </div>
         </div>
       </div>
@@ -943,7 +727,6 @@ export function DashboardTab({
                   <span
                     key={tick}
                     className="absolute right-0 text-[10px] leading-none text-muted-foreground"
-                    // Position from bottom: tick/max * 100%, nudged up by half line-height
                     style={{ bottom: `calc(${(tick / maxDayTotal) * 100}% - 5px)` }}
                   >
                     {tick >= 1000 ? `${Math.round(tick / 1000)}k` : Math.round(tick)}
@@ -951,9 +734,7 @@ export function DashboardTab({
                 ))}
               </div>
 
-              {/* Chart area — bars + horizontal grid lines */}
               <div className="relative flex-1">
-                {/* Dashed horizontal grid lines (behind the bars via z-0) */}
                 {yAxisTicks.map((tick) => (
                   <div
                     key={tick}
@@ -962,7 +743,6 @@ export function DashboardTab({
                   />
                 ))}
 
-                {/* Bars — z-10 so they render above the grid lines */}
                 <div className="relative z-10 flex h-full items-end gap-0.5">
                   {sortedDays.map(([dateStr, total]) => {
                     const heightPct = (total / maxDayTotal) * 100
@@ -992,10 +772,9 @@ export function DashboardTab({
 
             {/* X-axis labels: first, middle, last — offset to match chart area */}
             {(() => {
-              const first  = sortedDays[0][0]
-              const last   = sortedDays[sortedDays.length - 1][0]
-              const midIdx = Math.floor(sortedDays.length / 2)
-              const mid    = sortedDays[midIdx][0]
+              const first = sortedDays[0][0]
+              const last = sortedDays[sortedDays.length - 1][0]
+              const mid = sortedDays[Math.floor(sortedDays.length / 2)][0]
               return (
                 <div className="ml-[1.875rem] mt-1 flex justify-between text-xs text-muted-foreground">
                   <span>{formatDayLabel(first)}</span>
@@ -1005,60 +784,57 @@ export function DashboardTab({
               )
             })()}
 
-            {/* Tapped day info panel — transactions grouped by category */}
+            {/* Tapped day info panel */}
             {tappedDayKey && (
               <div className="mt-2 rounded-lg border bg-muted/30 px-3 py-2">
-                {/* Day header row: date label + total */}
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-medium text-foreground">
                     {formatDayLabel(tappedDayKey)}
                   </span>
                   <span className="text-xs text-muted-foreground">
                     {formatAmount(tappedDayTotal, mainCurrency)}
-                    {' · '}{tappedDayTxs.length} tx{tappedDayTxs.length !== 1 ? 's' : ''}
+                    {' · '}{tappedDayScoped.length} tx{tappedDayScoped.length !== 1 ? 's' : ''}
                   </span>
                 </div>
 
-                {/* Category groups */}
                 <div className="mt-1.5 flex flex-col gap-2 border-t pt-1.5">
                   {tappedDayByCategory.map((group) => {
-                    // Check if entire category is hidden
                     const isCatHidden = hiddenSpendingCategories.has(group.categoryName)
                     return (
                       <div key={group.categoryName || '__uncategorized__'}>
-                        {/* Category sub-header: dot, name, total, "Hide all" button */}
-                        <div className={`flex items-center gap-2 ${isCatHidden ? 'opacity-40' : ''}`}>
-                          <span
-                            className="inline-block shrink-0 rounded-full"
-                            style={{ width: 8, height: 8, backgroundColor: group.color }}
-                          />
-                          <span className="flex-1 text-xs font-medium text-foreground">
-                            {group.categoryName || 'Uncategorized'}
-                          </span>
-                          <span className="text-xs text-muted-foreground">
-                            {formatAmount(group.total, mainCurrency)}
-                          </span>
-                          {/* Hide / show entire category */}
-                          <button
-                            type="button"
-                            className="shrink-0 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                            title={isCatHidden ? 'Show this category' : 'Hide entire category from chart'}
-                            onClick={() => {
-                              setHiddenSpendingCategories((prev) => {
-                                const next = new Set(prev)
-                                if (isCatHidden) next.delete(group.categoryName)
-                                else next.add(group.categoryName)
-                                return next
-                              })
-                            }}
-                          >
-                            {isCatHidden ? '👁️ Show' : '👁️‍🗨️ Hide all'}
-                          </button>
-                        </div>
+                        {/* Category sub-header — only when the space tracks categories */}
+                        {showCategory && (
+                          <div className={`flex items-center gap-2 ${isCatHidden ? 'opacity-40' : ''}`}>
+                            <span
+                              className="inline-block shrink-0 rounded-full"
+                              style={{ width: 8, height: 8, backgroundColor: group.color }}
+                            />
+                            <span className="flex-1 text-xs font-medium text-foreground">
+                              {group.categoryName || 'Uncategorized'}
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              {formatAmount(group.total, mainCurrency)}
+                            </span>
+                            <button
+                              type="button"
+                              className="shrink-0 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                              title={isCatHidden ? 'Show this category' : 'Hide entire category from chart'}
+                              onClick={() => {
+                                setHiddenSpendingCategories((prev) => {
+                                  const next = new Set(prev)
+                                  if (isCatHidden) next.delete(group.categoryName)
+                                  else next.add(group.categoryName)
+                                  return next
+                                })
+                              }}
+                            >
+                              {isCatHidden ? '👁️ Show' : '👁️‍🗨️ Hide all'}
+                            </button>
+                          </div>
+                        )}
 
-                        {/* Individual transactions in this category */}
-                        <div className="ml-4 mt-1 flex flex-col gap-1">
-                          {group.txs.map((tx) => {
+                        <div className={`${showCategory ? 'ml-4 mt-1' : ''} flex flex-col gap-1`}>
+                          {group.items.map(({ transaction: tx, attributedAmount }) => {
                             const isHidden = hiddenSpendingTxIds.has(tx.txId) || isCatHidden
                             return (
                               <div
@@ -1072,9 +848,8 @@ export function DashboardTab({
                                   </span>
                                 )}
                                 <span className="shrink-0 font-medium text-foreground">
-                                  {formatAmount(tx.totalAmountMain, mainCurrency)}
+                                  {formatAmount(attributedAmount, mainCurrency)}
                                 </span>
-                                {/* Edit button */}
                                 <button
                                   type="button"
                                   className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
@@ -1083,7 +858,6 @@ export function DashboardTab({
                                 >
                                   ✏️
                                 </button>
-                                {/* Hide / show toggle for individual tx (disabled when category is hidden) */}
                                 {!isCatHidden && (
                                   <button
                                     type="button"
@@ -1112,11 +886,10 @@ export function DashboardTab({
               </div>
             )}
 
-            {/* Hidden items pills — click to re-show (categories + individual txs) */}
+            {/* Hidden items pills — click to re-show */}
             {(hiddenSpendingCategories.size > 0 || hiddenSpendingTxIds.size > 0) && (
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 <span className="text-xs text-muted-foreground">Hidden:</span>
-                {/* Hidden category pills */}
                 {Array.from(hiddenSpendingCategories).map((name) => (
                   <button
                     key={`spending-cat-${name}`}
@@ -1138,9 +911,8 @@ export function DashboardTab({
                     <span className="text-[10px]">👁️</span>
                   </button>
                 ))}
-                {/* Hidden individual transaction pills */}
                 {Array.from(hiddenSpendingTxIds).map((txId) => {
-                  const tx = filteredTxs.find((t) => t.txId === txId)
+                  const tx = scopedTxs.find((t) => t.txId === txId)
                   if (!tx) return null
                   return (
                     <button
@@ -1167,532 +939,346 @@ export function DashboardTab({
       </CollapsibleCard>
 
       {/* ================================================================ */}
-      {/* Card ③ — Recent days by category                                 */}
+      {/* Card ③ — Day by day                                              */}
       {/* ================================================================ */}
       <CollapsibleCard
-        title="Recent days"
-        summary={recentDaySummary}
+        title="Day by day"
+        summary={`${filteredDayRows.length} day${filteredDayRows.length !== 1 ? 's' : ''}`}
       >
-        {/* Day preset pills */}
-        <div className="mb-3 flex items-center gap-1.5">
-          {PRESET_RECENT.map((n) => (
-            <button
-              key={n}
-              type="button"
-              onClick={() => { setRecentDays(n); setRecentCustomPanelOpen(false) }}
-              className={`rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors ${
-                recentDays === n && !isCustomRecent
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-muted text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              {n}
-            </button>
-          ))}
-          {/* Custom button: shows "…" when a preset is active, "Nd" when custom */}
-          <button
-            type="button"
-            onClick={() => {
-              setSliderValue(recentDays)
-              setRecentCustomPanelOpen((prev) => !prev)
-            }}
-            className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${
-              isCustomRecent
-                ? 'border-amber-300 bg-amber-100 text-amber-700'
-                : 'border-border bg-muted text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            {isCustomRecent ? `${recentDays}d` : '…'}
-          </button>
-        </div>
-
-        {/* Custom slider panel */}
-        {recentCustomPanelOpen && (
-          <div className="mb-3 flex items-center gap-3 rounded-lg border bg-muted/30 px-3 py-2">
-            <span className="shrink-0 text-xs text-muted-foreground">Custom</span>
-            <input
-              type="range"
-              min={1}
-              max={tripDurationDays}
-              step={1}
-              value={sliderValue}
-              onChange={(e) => setSliderValue(Number(e.target.value))}
-              className="flex-1"
-            />
-            <span className="shrink-0 text-xs text-muted-foreground">
-              {sliderValue} day{sliderValue !== 1 ? 's' : ''}
-            </span>
-            <button
-              type="button"
-              onClick={() => { setRecentDays(sliderValue); setRecentCustomPanelOpen(false) }}
-              className="rounded-full bg-primary px-2.5 py-0.5 text-xs font-medium text-primary-foreground"
-            >
-              Apply
-            </button>
-          </div>
-        )}
-
-        {/* Day rows with vertical grid lines */}
-        <div className="flex flex-col gap-2">
-          {filteredRecentDaysData.map(({ dateStr, total, categories }) => (
-            <div key={dateStr} className="flex items-center gap-2">
-              {/* Date label — fixed width left column */}
-              <span className="w-12 shrink-0 text-xs text-muted-foreground">
-                {formatDayLabel(dateStr)}
-              </span>
-
-              {/* Bar area — relative container so vertical grid lines can be overlaid */}
-              <div className="relative flex flex-1 items-center" style={{ minHeight: 14 }}>
-                {/* Vertical dashed grid lines (behind bars via z-0) */}
-                {recentXTicks.map((tick) => (
-                  <div
-                    key={tick}
-                    className="pointer-events-none absolute top-0 bottom-0 z-0 border-l border-dashed border-muted-foreground/40"
-                    style={{ left: `${(tick / recentMaxTotal) * 100}%` }}
-                  />
-                ))}
-
-                {categories.length === 0 ? (
-                  // No transactions this day — gray placeholder bar
-                  <div className="relative z-10 flex items-center gap-2">
-                    <div
-                      style={{ width: 20, height: 14, borderRadius: 3, backgroundColor: '#d1d5db' }}
-                    />
-                    <span className="text-xs text-muted-foreground">No expenses</span>
-                  </div>
-                ) : (
-                  // Overall bar width scales to recentMaxTotal (days with less spend = shorter bar).
-                  // Each segment inside is proportional to its category amount within the day.
-                  <div
-                    className="relative z-10 flex overflow-hidden rounded"
-                    style={{ width: `${(total / recentMaxTotal) * 100}%`, minWidth: 4, height: 14 }}
-                  >
-                    {categories.map((cat, i) => {
-                      // Segment width as a fraction of the day total
-                      const pct = total > 0 ? (cat.amount / total) * 100 : 0
-                      return (
-                        <div
-                          key={cat.name}
-                          title={`${cat.name || 'Uncategorized'}: ${formatAmount(cat.amount, mainCurrency)}`}
-                          className="cursor-pointer transition-opacity hover:opacity-80"
-                          onClick={() =>
-                            // Toggle: tap same segment again to dismiss info panel
-                            setTappedSegmentKey((prev) =>
-                              prev?.categoryName === cat.name && prev?.dateStr === dateStr
-                                ? null
-                                : { categoryName: cat.name, dateStr },
-                            )
-                          }
-                          style={{
-                            width: `${pct}%`,
-                            minWidth: 3,
-                            backgroundColor: cat.color,
-                            // First segment gets left radius, last gets right radius
-                            borderTopLeftRadius: i === 0 ? 3 : 0,
-                            borderBottomLeftRadius: i === 0 ? 3 : 0,
-                            borderTopRightRadius: i === categories.length - 1 ? 3 : 0,
-                            borderBottomRightRadius: i === categories.length - 1 ? 3 : 0,
-                          }}
-                        />
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* Day total — right column */}
-              <span className="w-16 shrink-0 text-right text-xs font-semibold text-foreground">
-                {total > 0 ? formatAmount(total, mainCurrency) : '—'}
-              </span>
-            </div>
-          ))}
-
-          {/* X-axis tick labels — aligned with the bar area (skip date + total columns) */}
-          {recentXTicks.length > 0 && (
-            <div className="flex items-center gap-2">
-              {/* Spacer matching date label width */}
-              <span className="w-12 shrink-0" />
-              {/* Tick labels positioned relative to bar area */}
-              <div className="relative flex-1" style={{ height: 14 }}>
-                {recentXTicks.map((tick) => (
-                  <span
-                    key={tick}
-                    className="absolute text-[10px] leading-none text-muted-foreground"
-                    // Center the label on the tick line
-                    style={{
-                      left: `${(tick / recentMaxTotal) * 100}%`,
-                      transform: 'translateX(-50%)',
-                    }}
-                  >
-                    {tick >= 1000 ? `${Math.round(tick / 1000)}k` : Math.round(tick)}
+        {shownDayRows.length === 0 ? (
+          <p className="py-4 text-center text-sm text-muted-foreground">No expenses in this range</p>
+        ) : (
+          <>
+            <div className="flex flex-col gap-2">
+              {shownDayRows.map(({ dateStr, total, categories }) => (
+                <div key={dateStr} className="flex items-center gap-2">
+                  <span className="w-12 shrink-0 text-xs text-muted-foreground">
+                    {formatDayLabel(dateStr)}
                   </span>
-                ))}
-              </div>
-              {/* Spacer matching total column width */}
-              <span className="w-16 shrink-0" />
-            </div>
-          )}
-        </div>
 
-        {/* Tapped segment info panel — category header + day's transactions */}
-        {tappedSegmentKey && (
-          <div className="mt-2 rounded-lg border bg-muted/30 px-3 py-2">
-            {/* Category header row: color dot, name, date, total, hide-all button */}
-            <div className="flex items-center gap-2">
-              <span
-                className="inline-block shrink-0 rounded-full"
-                style={{ width: 8, height: 8, backgroundColor: tappedSegmentColor }}
-              />
-              <span className="text-xs font-medium text-foreground">
-                {tappedSegmentKey.categoryName || 'Uncategorized'}
-              </span>
-              <span className="text-xs text-muted-foreground">
-                {formatDayLabel(tappedSegmentKey.dateStr)} · {formatAmount(tappedSegmentTotal, mainCurrency)}
-              </span>
+                  <div className="relative flex flex-1 items-center" style={{ minHeight: 14 }}>
+                    {dayXTicks.map((tick) => (
+                      <div
+                        key={tick}
+                        className="pointer-events-none absolute top-0 bottom-0 z-0 border-l border-dashed border-muted-foreground/40"
+                        style={{ left: `${(tick / dayMaxTotal) * 100}%` }}
+                      />
+                    ))}
+
+                    {categories.length === 0 ? (
+                      <div className="relative z-10 flex items-center gap-2">
+                        <div style={{ width: 20, height: 14, borderRadius: 3, backgroundColor: '#d1d5db' }} />
+                        <span className="text-xs text-muted-foreground">No expenses</span>
+                      </div>
+                    ) : (
+                      <div
+                        className="relative z-10 flex overflow-hidden rounded"
+                        style={{ width: `${(total / dayMaxTotal) * 100}%`, minWidth: 4, height: 14 }}
+                      >
+                        {categories.map((cat, i) => {
+                          const pct = total > 0 ? (cat.amount / total) * 100 : 0
+                          return (
+                            <div
+                              key={cat.name}
+                              title={
+                                showCategory
+                                  ? `${cat.name || 'Uncategorized'}: ${formatAmount(cat.amount, mainCurrency)}`
+                                  : formatAmount(cat.amount, mainCurrency)
+                              }
+                              className="cursor-pointer transition-opacity hover:opacity-80"
+                              onClick={() =>
+                                setTappedSegmentKey((prev) =>
+                                  prev?.categoryName === cat.name && prev?.dateStr === dateStr
+                                    ? null
+                                    : { categoryName: cat.name, dateStr },
+                                )
+                              }
+                              style={{
+                                width: `${pct}%`,
+                                minWidth: 3,
+                                backgroundColor: cat.color,
+                                borderTopLeftRadius: i === 0 ? 3 : 0,
+                                borderBottomLeftRadius: i === 0 ? 3 : 0,
+                                borderTopRightRadius: i === categories.length - 1 ? 3 : 0,
+                                borderBottomRightRadius: i === categories.length - 1 ? 3 : 0,
+                              }}
+                            />
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  <span className="w-16 shrink-0 text-right text-xs font-semibold text-foreground">
+                    {total > 0 ? formatAmount(total, mainCurrency) : '—'}
+                  </span>
+                </div>
+              ))}
+
+              {/* X-axis tick labels — aligned with the bar area */}
+              {dayXTicks.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <span className="w-12 shrink-0" />
+                  <div className="relative flex-1" style={{ height: 14 }}>
+                    {dayXTicks.map((tick) => (
+                      <span
+                        key={tick}
+                        className="absolute text-[10px] leading-none text-muted-foreground"
+                        style={{ left: `${(tick / dayMaxTotal) * 100}%`, transform: 'translateX(-50%)' }}
+                      >
+                        {tick >= 1000 ? `${Math.round(tick / 1000)}k` : Math.round(tick)}
+                      </span>
+                    ))}
+                  </div>
+                  <span className="w-16 shrink-0" />
+                </div>
+              )}
+            </div>
+
+            {/* Paging — the range can be long, the card must not be endless */}
+            {filteredDayRows.length > DAY_ROWS_LIMIT && (
               <button
                 type="button"
-                className="ml-auto text-xs text-muted-foreground hover:text-foreground transition-colors"
-                title="Hide entire category from the chart"
-                onClick={() => {
-                  setHiddenCategories((prev) => new Set(prev).add(tappedSegmentKey.categoryName))
-                  setTappedSegmentKey(null)
-                }}
+                onClick={() => setShowAllDays((prev) => !prev)}
+                className="mt-2 w-full text-xs text-muted-foreground underline hover:text-foreground"
               >
-                👁️‍🗨️ Hide all
+                {showAllDays
+                  ? 'Show fewer days'
+                  : `Show all ${filteredDayRows.length} days`}
               </button>
-            </div>
+            )}
 
-            {/* Individual transactions for this category on this day */}
-            <div className="mt-1.5 flex flex-col gap-1 border-t pt-1.5">
-              {tappedSegmentTxs.map((tx) => {
-                const isHidden = hiddenTxIds.has(tx.txId)
-                return (
-                  <div
-                    key={tx.txId}
-                    className={`flex items-center gap-2 text-xs ${isHidden ? 'opacity-40' : ''}`}
-                  >
-                    <span className="min-w-0 flex-1 truncate text-foreground">{tx.name}</span>
-                    {/* Amount in transaction currency (if different from main) */}
-                    {tx.currency !== mainCurrency && (
-                      <span className="shrink-0 text-muted-foreground">
-                        {formatAmount(tx.totalAmount, tx.currency)}
-                      </span>
-                    )}
-                    {/* Amount in main currency */}
-                    <span className="shrink-0 font-medium text-foreground">
-                      {formatAmount(tx.totalAmountMain, mainCurrency)}
+            {/* Tapped segment info panel */}
+            {tappedSegmentKey && (
+              <div className="mt-2 rounded-lg border bg-muted/30 px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <span
+                    className="inline-block shrink-0 rounded-full"
+                    style={{ width: 8, height: 8, backgroundColor: tappedSegmentColor }}
+                  />
+                  {showCategory && (
+                    <span className="text-xs font-medium text-foreground">
+                      {tappedSegmentKey.categoryName || 'Uncategorized'}
                     </span>
-                    {/* Edit this transaction — opens the TransactionForm drawer */}
+                  )}
+                  <span className="text-xs text-muted-foreground">
+                    {formatDayLabel(tappedSegmentKey.dateStr)} · {formatAmount(tappedSegmentTotal, mainCurrency)}
+                  </span>
+                  {showCategory && (
                     <button
                       type="button"
-                      className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-                      title="Edit this transaction"
-                      onClick={() => onEditTransaction(tx.txId)}
-                    >
-                      ✏️
-                    </button>
-                    {/* Hide / show toggle for this transaction */}
-                    <button
-                      type="button"
-                      className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-                      title={isHidden ? 'Show this transaction' : 'Hide this transaction'}
+                      className="ml-auto text-xs text-muted-foreground hover:text-foreground transition-colors"
+                      title="Hide entire category from the chart"
                       onClick={() => {
-                        setHiddenTxIds((prev) => {
-                          const next = new Set(prev)
-                          if (isHidden) next.delete(tx.txId)
-                          else next.add(tx.txId)
-                          return next
-                        })
+                        setHiddenCategories((prev) => new Set(prev).add(tappedSegmentKey.categoryName))
+                        setTappedSegmentKey(null)
                       }}
                     >
-                      {isHidden ? '👁️' : '👁️‍🗨️'}
+                      👁️‍🗨️ Hide all
                     </button>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        )}
+                  )}
+                </div>
 
-        {/* Hidden items — pills to re-show (categories + individual transactions) */}
-        {(hiddenCategories.size > 0 || hiddenTxIds.size > 0) && (
-          <div className="mt-2 flex flex-wrap items-center gap-1.5">
-            <span className="text-xs text-muted-foreground">Hidden:</span>
-            {/* Hidden category pills */}
-            {Array.from(hiddenCategories).map((name) => (
-              <button
-                key={`cat-${name}`}
-                type="button"
-                onClick={() => {
-                  setHiddenCategories((prev) => {
-                    const next = new Set(prev)
-                    next.delete(name)
-                    return next
-                  })
-                }}
-                className="flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-              >
-                <span
-                  className="inline-block rounded-full"
-                  style={{ width: 6, height: 6, backgroundColor: categoryColor(name || 'Uncategorized') }}
-                />
-                {name || 'Uncategorized'}
-                <span className="text-[10px]">👁️</span>
-              </button>
-            ))}
-            {/* Hidden individual transaction pills */}
-            {Array.from(hiddenTxIds).map((txId) => {
-              const tx = normalizedTxs.find((t) => t.txId === txId)
-              if (!tx) return null
-              return (
-                <button
-                  key={`tx-${txId}`}
-                  type="button"
-                  onClick={() => {
-                    setHiddenTxIds((prev) => {
-                      const next = new Set(prev)
-                      next.delete(txId)
-                      return next
-                    })
-                  }}
-                  className="flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  <span className="max-w-[8rem] truncate">{tx.name}</span>
-                  <span className="text-[10px]">👁️</span>
-                </button>
-              )
-            })}
-          </div>
-        )}
-      </CollapsibleCard>
-
-      {/* ================================================================ */}
-      {/* Card ④ — By category                                             */}
-      {/* ================================================================ */}
-      {(() => {
-        const grandTotal = perCategoryTotals.reduce((s, c) => s + c.total, 0)
-        const top = perCategoryTotals[0]
-        const topName = top?.name || 'Uncategorized'
-        const topPct  = grandTotal > 0 ? Math.round((top?.total ?? 0) / grandTotal * 100) : 0
-        const summary = top ? `${topName} · ${topPct}%` : 'No data'
-
-        return (
-          <CollapsibleCard title="By category" summary={summary}>
-            {perCategoryTotals.length === 0 ? (
-              <p className="py-4 text-center text-sm text-muted-foreground">No data</p>
-            ) : (
-              <>
-                <div className="flex flex-col gap-2">
-                  {perCategoryTotals.map(({ name, total, color }) => {
-                    const pct = grandTotal > 0 ? Math.round(total / grandTotal * 100) : 0
-                    // Highlight the tapped category row
-                    const isTapped = tappedCategoryKey === name
+                <div className="mt-1.5 flex flex-col gap-1 border-t pt-1.5">
+                  {tappedSegmentScoped.map(({ transaction: tx, attributedAmount }) => {
+                    const isHidden = hiddenTxIds.has(tx.txId)
                     return (
                       <div
-                        key={name || '__uncategorized__'}
-                        // Clicking a category row toggles the transaction detail panel
-                        className={`flex cursor-pointer items-center gap-2 rounded-md px-1 py-0.5 transition-colors ${
-                          isTapped ? 'bg-muted/60' : 'hover:bg-muted/30'
-                        }`}
-                        onClick={() =>
-                          setTappedCategoryKey((prev) => (prev === name ? null : name))
-                        }
+                        key={tx.txId}
+                        className={`flex items-center gap-2 text-xs ${isHidden ? 'opacity-40' : ''}`}
                       >
-                        {/* Coloured dot */}
-                        <span
-                          className="inline-block shrink-0 rounded-full"
-                          style={{ width: 8, height: 8, backgroundColor: color }}
-                        />
-                        {/* Category name */}
-                        <span className="flex-1 text-sm text-foreground">
-                          {name || 'Uncategorized'}
+                        <span className="min-w-0 flex-1 truncate text-foreground">{tx.name}</span>
+                        {tx.currency !== mainCurrency && (
+                          <span className="shrink-0 text-muted-foreground">
+                            {formatAmount(tx.totalAmount, tx.currency)}
+                          </span>
+                        )}
+                        <span className="shrink-0 font-medium text-foreground">
+                          {formatAmount(attributedAmount, mainCurrency)}
                         </span>
-                        {/* Amount */}
-                        <span className="text-sm font-medium text-foreground">
-                          {formatAmount(total, mainCurrency)}
-                        </span>
-                        {/* Percentage */}
-                        <span className="w-10 text-right text-xs text-muted-foreground">
-                          {pct}%
-                        </span>
+                        <button
+                          type="button"
+                          className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                          title="Edit this transaction"
+                          onClick={() => onEditTransaction(tx.txId)}
+                        >
+                          ✏️
+                        </button>
+                        <button
+                          type="button"
+                          className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                          title={isHidden ? 'Show this transaction' : 'Hide this transaction'}
+                          onClick={() => {
+                            setHiddenTxIds((prev) => {
+                              const next = new Set(prev)
+                              if (isHidden) next.delete(tx.txId)
+                              else next.add(tx.txId)
+                              return next
+                            })
+                          }}
+                        >
+                          {isHidden ? '👁️' : '👁️‍🗨️'}
+                        </button>
                       </div>
                     )
                   })}
                 </div>
-
-                {/* Tapped category info panel — transaction list for the selected category */}
-                {tappedCategoryKey !== null && (
-                  <div className="mt-2 rounded-lg border bg-muted/30 px-3 py-2">
-                    {/* Category header row: color dot, name, total, "Hide all" button */}
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="inline-block shrink-0 rounded-full"
-                        style={{ width: 8, height: 8, backgroundColor: tappedCategoryColor }}
-                      />
-                      <span className="text-xs font-medium text-foreground">
-                        {tappedCategoryKey || 'Uncategorized'}
-                      </span>
-                      <span className="text-xs text-muted-foreground">
-                        {formatAmount(tappedCategoryTotal, mainCurrency)}
-                        {' · '}{tappedCategoryTxs.length} tx{tappedCategoryTxs.length !== 1 ? 's' : ''}
-                      </span>
-                      {/* "Hide all" — hides the entire category from the chart */}
-                      <button
-                        type="button"
-                        className="ml-auto shrink-0 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                        title="Hide entire category from the chart"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setHiddenCategoryNames((prev) => new Set(prev).add(tappedCategoryKey))
-                          setTappedCategoryKey(null)
-                        }}
-                      >
-                        👁️‍🗨️ Hide all
-                      </button>
-                    </div>
-
-                    {/* Individual transactions for this category */}
-                    <div className="mt-1.5 flex flex-col gap-1 border-t pt-1.5">
-                      {tappedCategoryTxs.map((tx) => {
-                        const isHidden = hiddenCategoryTxIds.has(tx.txId)
-                        return (
-                          <div
-                            key={tx.txId}
-                            className={`flex items-center gap-2 text-xs ${isHidden ? 'opacity-40' : ''}`}
-                          >
-                            {/* Date label */}
-                            <span className="shrink-0 text-muted-foreground">
-                              {formatDayLabel(tx.date)}
-                            </span>
-                            <span className="min-w-0 flex-1 truncate text-foreground">{tx.name}</span>
-                            {/* Amount in tx currency if different from main */}
-                            {tx.currency !== mainCurrency && (
-                              <span className="shrink-0 text-muted-foreground">
-                                {formatAmount(tx.totalAmount, tx.currency)}
-                              </span>
-                            )}
-                            {/* Amount in main currency */}
-                            <span className="shrink-0 font-medium text-foreground">
-                              {formatAmount(tx.totalAmountMain, mainCurrency)}
-                            </span>
-                            {/* Edit button */}
-                            <button
-                              type="button"
-                              className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-                              title="Edit this transaction"
-                              onClick={(e) => { e.stopPropagation(); onEditTransaction(tx.txId) }}
-                            >
-                              ✏️
-                            </button>
-                            {/* Hide / show toggle */}
-                            <button
-                              type="button"
-                              className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-                              title={isHidden ? 'Show this transaction' : 'Hide this transaction'}
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                setHiddenCategoryTxIds((prev) => {
-                                  const next = new Set(prev)
-                                  if (isHidden) next.delete(tx.txId)
-                                  else next.add(tx.txId)
-                                  return next
-                                })
-                              }}
-                            >
-                              {isHidden ? '👁️' : '👁️‍🗨️'}
-                            </button>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {/* Hidden items pills — click to re-show (categories + individual txs) */}
-                {(hiddenCategoryNames.size > 0 || hiddenCategoryTxIds.size > 0) && (
-                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                    <span className="text-xs text-muted-foreground">Hidden:</span>
-                    {/* Hidden category name pills */}
-                    {Array.from(hiddenCategoryNames).map((name) => (
-                      <button
-                        key={`catname-${name}`}
-                        type="button"
-                        onClick={() => {
-                          setHiddenCategoryNames((prev) => {
-                            const next = new Set(prev)
-                            next.delete(name)
-                            return next
-                          })
-                        }}
-                        className="flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-                      >
-                        <span
-                          className="inline-block rounded-full"
-                          style={{ width: 6, height: 6, backgroundColor: categoryColor(name || 'Uncategorized') }}
-                        />
-                        {name || 'Uncategorized'}
-                        <span className="text-[10px]">👁️</span>
-                      </button>
-                    ))}
-                    {/* Hidden individual transaction pills */}
-                    {Array.from(hiddenCategoryTxIds).map((txId) => {
-                      const tx = filteredTxs.find((t) => t.txId === txId)
-                      if (!tx) return null
-                      return (
-                        <button
-                          key={`cat-tx-${txId}`}
-                          type="button"
-                          onClick={() => {
-                            setHiddenCategoryTxIds((prev) => {
-                              const next = new Set(prev)
-                              next.delete(txId)
-                              return next
-                            })
-                          }}
-                          className="flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-                        >
-                          <span className="max-w-[8rem] truncate">{tx.name}</span>
-                          <span className="text-[10px]">👁️</span>
-                        </button>
-                      )
-                    })}
-                  </div>
-                )}
-              </>
+              </div>
             )}
-          </CollapsibleCard>
+
+            {/* Hidden items — pills to re-show */}
+            {(hiddenCategories.size > 0 || hiddenTxIds.size > 0) && (
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                <span className="text-xs text-muted-foreground">Hidden:</span>
+                {Array.from(hiddenCategories).map((name) => (
+                  <button
+                    key={`cat-${name}`}
+                    type="button"
+                    onClick={() => {
+                      setHiddenCategories((prev) => {
+                        const next = new Set(prev)
+                        next.delete(name)
+                        return next
+                      })
+                    }}
+                    className="flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    <span
+                      className="inline-block rounded-full"
+                      style={{ width: 6, height: 6, backgroundColor: categoryColor(name || 'Uncategorized') }}
+                    />
+                    {name || 'Uncategorized'}
+                    <span className="text-[10px]">👁️</span>
+                  </button>
+                ))}
+                {Array.from(hiddenTxIds).map((txId) => {
+                  const tx = normalizedTxs.find((t) => t.txId === txId)
+                  if (!tx) return null
+                  return (
+                    <button
+                      key={`tx-${txId}`}
+                      type="button"
+                      onClick={() => {
+                        setHiddenTxIds((prev) => {
+                          const next = new Set(prev)
+                          next.delete(txId)
+                          return next
+                        })
+                      }}
+                      className="flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      <span className="max-w-[8rem] truncate">{tx.name}</span>
+                      <span className="text-[10px]">👁️</span>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </>
+        )}
+      </CollapsibleCard>
+
+      {/* ================================================================ */}
+      {/* Breakdown cards (§4) — one generic component per card definition */}
+      {/* ================================================================ */}
+      {visibleCards.map(({ card, dimension }) => {
+        // Position within the STORED list, so the arrows move a card past its
+        // real neighbour even when a hidden card sits between them.
+        const storedIndex = storedCards.findIndex((c) => c.id === card.id)
+        return (
+          <BreakdownCard
+            key={card.id}
+            card={card}
+            dimension={dimension}
+            scoped={scoped}
+            mainCurrency={mainCurrency}
+            onDrillDown={(values) => handleRowDrillDown(dimension.key, values)}
+            actions={
+              cardsEditMode ? (
+                <>
+                  <CardActionButton
+                    label="Move card up"
+                    glyph="↑"
+                    disabled={storedIndex <= 0}
+                    onClick={() => handleMoveCard(card.id, -1)}
+                  />
+                  <CardActionButton
+                    label="Move card down"
+                    glyph="↓"
+                    disabled={storedIndex >= storedCards.length - 1}
+                    onClick={() => handleMoveCard(card.id, 1)}
+                  />
+                  <CardActionButton
+                    label="Edit card"
+                    glyph="✏️"
+                    onClick={() => openBuilder(card)}
+                  />
+                  <CardActionButton
+                    label="Delete card"
+                    glyph="✕"
+                    onClick={() => handleDeleteCard(card.id)}
+                  />
+                </>
+              ) : undefined
+            }
+          />
         )
-      })()}
+      })}
+
+      {/* Quiet invitation when the dashboard has no breakdown card at all —
+          an invitation, not an apology, and not a wall of suggestions. */}
+      {visibleCards.length === 0 && dimensions.length > 0 && (
+        <button
+          type="button"
+          onClick={() => openBuilder()}
+          className="rounded-xl border border-dashed px-4 py-6 text-center text-sm text-muted-foreground transition-colors hover:bg-muted/30"
+        >
+          Break your spending down by {dimensions[0].label.toLowerCase()} — or any other field.
+          <span className="mt-1 block text-xs font-medium text-primary">+ Add a card</span>
+        </button>
+      )}
+
+      {/* Card management row */}
+      {dimensions.length > 0 && visibleCards.length > 0 && (
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => openBuilder()}
+            className="flex-1 rounded-lg border border-dashed border-primary/30 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/5"
+          >
+            + Add card
+          </button>
+          <button
+            type="button"
+            onClick={() => setCardsEditMode((prev) => !prev)}
+            aria-pressed={cardsEditMode}
+            className="rounded-lg border px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            {cardsEditMode ? 'Done' : 'Edit cards'}
+          </button>
+        </div>
+      )}
 
       {/* ================================================================ */}
       {/* Card ⑤ — Per person (hidden when isSolo)                         */}
       {/* ================================================================ */}
       {!isSolo && (() => {
         const maxConsumed = Math.max(...perMemberStats.map((s) => s.consumed), 1)
-        const focusName   = focusMember?.displayName ?? 'You'
 
         return (
           <CollapsibleCard
             title="Per person"
-            summary={`${focusName}: ${formatAmount(focusStats.consumed, mainCurrency)}`}
+            summary={`${currentMember?.displayName ?? 'You'}: ${formatAmount(focusStats.consumed, mainCurrency)}`}
           >
             <div className="flex flex-col gap-3">
               {perMemberStats.map(({ member, memberIndex, consumed, paid }) => {
                 const isCurrentUser = member.userId === currentUserUid
-                const isHighlighted = member.travelMemberId === selectedTravelMemberId
-                const barWidth      = (consumed / maxConsumed) * 100
+                const barWidth = (consumed / maxConsumed) * 100
 
                 return (
-                  <div
-                    key={member.travelMemberId}
-                    className={`flex items-center gap-3 ${
-                      isHighlighted ? 'border-l-2 border-amber-400 pl-2' : ''
-                    }`}
-                  >
-                    {/* Avatar */}
+                  <div key={member.travelMemberId} className="flex items-center gap-3">
                     <MemberAvatar name={member.displayName} index={memberIndex} size="md" />
 
-                    {/* Name + bar */}
                     <div className="min-w-0 flex-1">
                       <div className="mb-1 text-xs font-medium text-foreground">
                         {member.displayName}
@@ -1700,20 +1286,17 @@ export function DashboardTab({
                           <span className="ml-1 text-muted-foreground">(you)</span>
                         ) : null}
                       </div>
-                      {/* Bar track */}
                       <div className="h-1 w-full rounded bg-muted">
                         <div
                           className="h-1 rounded"
                           style={{
                             width: `${barWidth}%`,
-                            backgroundColor:
-                              CATEGORY_PALETTE[memberIndex % CATEGORY_PALETTE.length],
+                            backgroundColor: CATEGORY_PALETTE[memberIndex % CATEGORY_PALETTE.length],
                           }}
                         />
                       </div>
                     </div>
 
-                    {/* Amounts */}
                     <div className="shrink-0 text-right">
                       <div className="text-sm font-semibold text-foreground">
                         {formatAmount(consumed, mainCurrency)}
@@ -1731,265 +1314,276 @@ export function DashboardTab({
       })()}
 
       {/* ================================================================ */}
-      {/* Card — Wallet balances (always shown; empty state if no wallets) */}
+      {/* Card — Wallet balances (gated on features.wallets)               */}
       {/* ================================================================ */}
-      <CollapsibleCard
-        title="Wallet balances"
-        summary={walletBalances.length > 0 ? `${walletBalances.length} wallet(s)` : 'No wallets yet'}
-      >
-        {walletBalances.length > 0 ? (
-          <div className="flex flex-col gap-3">
+      {showWallets && (
+        <CollapsibleCard
+          title="Wallet balances"
+          summary={walletBalances.length > 0 ? `${walletBalances.length} wallet(s)` : 'No wallets yet'}
+        >
+          {walletBalances.length > 0 ? (
+            <div className="flex flex-col gap-3">
 
-            {/* (a) Horizontal carousel of wallet sub-cards */}
-            <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1" style={{ scrollbarWidth: 'none' }}>
-              {walletBalances.map((wb) => {
-                const key = `${wb.paymentMethod}|${wb.currency}`
-                const isSelected = selectedWalletKey === key
-                // paymentMethodLabel is the stored string (e.g. "💳 Cash" or "Cash").
-                // Extract leading emoji if present; otherwise fall back to 💸.
-                const labelStr = wb.paymentMethodLabel
-                const firstCp = labelStr.codePointAt(0) ?? 0
-                const hasEmoji = firstCp > 0xff // non-Latin code point = emoji prefix
-                const emoji = hasEmoji ? labelStr.split(' ')[0] : '💸'
-                const label = hasEmoji ? labelStr.slice(labelStr.indexOf(' ') + 1) : labelStr
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => setSelectedWalletKey(isSelected ? null : key)}
-                    className={`
-                      flex min-w-[120px] shrink-0 flex-col rounded-xl border px-3 py-2 text-left transition-all
-                      ${isSelected
-                        ? 'border-primary bg-primary/5 ring-1 ring-primary'
-                        : 'border-border bg-muted/30 hover:bg-muted/50'}
-                    `}
-                  >
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-lg leading-none">{emoji}</span>
-                      <span className="truncate text-xs font-medium text-muted-foreground">{label}</span>
-                    </div>
-                    <span className={`mt-1 text-base font-bold ${
-                      wb.remaining > 0 ? 'text-green-600 dark:text-green-400'
-                        : wb.remaining < 0 ? 'text-red-600 dark:text-red-400'
-                        : 'text-foreground'
-                    }`}>
-                      {formatAmount(wb.remaining, wb.currency)}
-                    </span>
-                    <span className="text-[10px] text-muted-foreground">{wb.currency} remaining</span>
-                  </button>
-                )
-              })}
-            </div>
-
-            {/* (c) Drill-down detail when a wallet card is selected */}
-            {selectedWalletDetail && (
-              <div className="rounded-lg border bg-muted/20 px-3 py-2.5 space-y-2">
-                {/* Summary stats */}
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                  <div>
-                    <span className="text-muted-foreground">Total deposited: </span>
-                    <span className="font-medium">{formatAmount(selectedWalletDetail.wb.deposited, selectedWalletDetail.wb.currency)}</span>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground">Total spent: </span>
-                    <span className="font-medium">{formatAmount(selectedWalletDetail.wb.spent, selectedWalletDetail.wb.currency)}</span>
-                  </div>
-                  {selectedWalletDetail.wb.adjustments !== 0 && (
-                    <div>
-                      <span className="text-muted-foreground">Adjustments: </span>
-                      <span className="font-medium">
-                        {selectedWalletDetail.wb.adjustments > 0 ? '+' : ''}{formatAmount(selectedWalletDetail.wb.adjustments, selectedWalletDetail.wb.currency)}
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Since last top-up section */}
-                {selectedWalletDetail.lastTopup && (
-                  <div className="border-t pt-2 space-y-1">
-                    <div className="text-xs font-medium text-muted-foreground">Since last top-up</div>
-                    <div className="text-[10px] text-muted-foreground italic">Includes all transactions from end of day of last top-up</div>
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                      <div>
-                        <span className="text-muted-foreground">Date: </span>
-                        <span className="font-medium">{formatDayLabel(selectedWalletDetail.lastTopup.date)}</span>
+              {/* (a) Horizontal carousel of wallet sub-cards */}
+              <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1" style={{ scrollbarWidth: 'none' }}>
+                {walletBalances.map((wb) => {
+                  const key = `${wb.paymentMethod}|${wb.currency}`
+                  const isSelected = selectedWalletKey === key
+                  const labelStr = wb.paymentMethodLabel
+                  const firstCp = labelStr.codePointAt(0) ?? 0
+                  const hasEmoji = firstCp > 0xff
+                  const emoji = hasEmoji ? labelStr.split(' ')[0] : '💸'
+                  const label = hasEmoji ? labelStr.slice(labelStr.indexOf(' ') + 1) : labelStr
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setSelectedWalletKey(isSelected ? null : key)}
+                      className={`
+                        flex min-w-[120px] shrink-0 flex-col rounded-xl border px-3 py-2 text-left transition-all
+                        ${isSelected
+                          ? 'border-primary bg-primary/5 ring-1 ring-primary'
+                          : 'border-border bg-muted/30 hover:bg-muted/50'}
+                      `}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-lg leading-none">{emoji}</span>
+                        <span className="truncate text-xs font-medium text-muted-foreground">{label}</span>
                       </div>
-                      <div>
-                        <span className="text-muted-foreground">Amount: </span>
-                        <span className="font-medium">{formatAmount(selectedWalletDetail.lastTopupNetAmount, selectedWalletDetail.wb.currency)}</span>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Balance after: </span>
-                        <span className="font-medium">{formatAmount(selectedWalletDetail.balanceAfterLastTopup, selectedWalletDetail.wb.currency)}</span>
-                      </div>
-                      <div>
-                        <span className="text-muted-foreground">Spent since: </span>
-                        <span className="font-medium">{formatAmount(selectedWalletDetail.spentSinceLastTopup, selectedWalletDetail.wb.currency)}</span>
-                      </div>
-                    </div>
-                    <div className="pt-1 text-xs">
-                      <span className="text-muted-foreground">Est. remaining: </span>
-                      <span className={`font-semibold ${
-                        selectedWalletDetail.wb.remaining > 0 ? 'text-green-600 dark:text-green-400'
-                          : selectedWalletDetail.wb.remaining < 0 ? 'text-red-600 dark:text-red-400'
-                          : ''
+                      <span className={`mt-1 text-base font-bold ${
+                        wb.remaining > 0 ? 'text-green-600 dark:text-green-400'
+                          : wb.remaining < 0 ? 'text-red-600 dark:text-red-400'
+                          : 'text-foreground'
                       }`}>
-                        {formatAmount(selectedWalletDetail.wb.remaining, selectedWalletDetail.wb.currency)}
+                        {formatAmount(wb.remaining, wb.currency)}
                       </span>
-                    </div>
-                    <div className="flex items-center gap-2 pt-1.5">
-                      <span className="text-[11px] text-muted-foreground">Not the amount you have?</span>
-                      <button
-                        type="button"
-                        onClick={() => setReconcileBalance(selectedWalletDetail.wb)}
-                        className="rounded-md border border-primary/30 px-2 py-0.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/5"
-                      >
-                        Reconcile with current amount
-                      </button>
-                    </div>
-                  </div>
-                )}
+                      <span className="text-[10px] text-muted-foreground">{wb.currency} remaining</span>
+                    </button>
+                  )
+                })}
               </div>
-            )}
 
-            {/* (b)/(d) Wallet event list — withdrawals + adjustments, all or filtered */}
-            {(() => {
-              const displayedEvents = selectedWalletDetail
-                ? selectedWalletDetail.walletEvents
-                : walletEventTxs
-
-              if (displayedEvents.length === 0) {
-                return (
-                  <p className="py-1 text-center text-xs text-muted-foreground">
-                    No wallet events recorded yet.
-                  </p>
-                )
-              }
-
-              return (
-                <div className="space-y-1">
-                  <div className="text-xs font-medium text-muted-foreground">
-                    {selectedWalletDetail ? 'History' : 'All wallet events'}
+              {/* (c) Drill-down detail when a wallet card is selected */}
+              {selectedWalletDetail && (
+                <div className="rounded-lg border bg-muted/20 px-3 py-2.5 space-y-2">
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                    <div>
+                      <span className="text-muted-foreground">Total deposited: </span>
+                      <span className="font-medium">{formatAmount(selectedWalletDetail.wb.deposited, selectedWalletDetail.wb.currency)}</span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Total spent: </span>
+                      <span className="font-medium">{formatAmount(selectedWalletDetail.wb.spent, selectedWalletDetail.wb.currency)}</span>
+                    </div>
+                    {selectedWalletDetail.wb.adjustments !== 0 && (
+                      <div>
+                        <span className="text-muted-foreground">Adjustments: </span>
+                        <span className="font-medium">
+                          {selectedWalletDetail.wb.adjustments > 0 ? '+' : ''}{formatAmount(selectedWalletDetail.wb.adjustments, selectedWalletDetail.wb.currency)}
+                        </span>
+                      </div>
+                    )}
                   </div>
-                  <div className="max-h-[200px] space-y-1 overflow-y-auto">
-                    {displayedEvents.map((tx, idx) => {
-                      const txIsWithdrawal = isWithdrawal(tx)
-                      const typeEmoji = txIsWithdrawal ? '🏧' : '⚖️'
-                      const paid = tx.paidBy.find(s => s.travelMemberId === currentTravelMemberId)?.amount ?? 0
-                      // Spending gap row between this event and the next (older) one
-                      const gap = selectedWalletDetail ? walletSpendingGaps.get(idx) : null
-                      return (
-                        <div key={tx.txId}>
-                          <div className="flex items-center justify-between rounded-md bg-muted/30 px-2 py-1.5 text-xs">
-                            <div className="flex min-w-0 items-center gap-1.5">
-                              <span>{typeEmoji}</span>
-                              <span className="text-muted-foreground">{formatDayLabel(tx.date)}</span>
-                              <span className="truncate font-medium">{tx.name}</span>
-                            </div>
-                            <div className="ml-2 flex shrink-0 items-center gap-1.5">
-                              <div className="text-right">
-                                <span className={`font-medium ${
-                                  txIsWithdrawal
-                                    ? 'text-green-600 dark:text-green-400'
-                                    : paid >= 0
-                                      ? 'text-blue-600 dark:text-blue-400'
-                                      : 'text-red-600 dark:text-red-400'
-                                }`}>
-                                  {txIsWithdrawal ? '+' : paid >= 0 ? '+' : ''}{formatAmount(paid, tx.currency)}
-                                </span>
-                                {tx.fees != null && tx.fees > 0 && (
-                                  <div className="text-[10px] text-muted-foreground">
-                                    fees: {formatAmount(tx.fees, tx.currency)}
-                                  </div>
-                                )}
-                              </div>
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); onEditTransaction(tx.txId) }}
-                                className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                                title="Edit"
-                              >
-                                ✏️
-                              </button>
-                            </div>
-                          </div>
-                          {/* Spending gap between this event and the next (older) one */}
-                          {gap && (
-                            <div className="flex items-center gap-1.5 px-3 py-1 text-[10px] text-muted-foreground">
-                              <span>↕</span>
-                              <span>
-                                Spent between {formatDayLabel(gap.fromDate)} and {formatDayLabel(gap.toDate)}:
-                              </span>
-                              <span className="font-medium">
-                                {gap.amount > 0
-                                  ? formatAmount(gap.amount, selectedWalletDetail!.wb.currency)
-                                  : `0 ${selectedWalletDetail!.wb.currency}`
-                                }
-                              </span>
-                            </div>
-                          )}
+
+                  {selectedWalletDetail.lastTopup && (
+                    <div className="border-t pt-2 space-y-1">
+                      <div className="text-xs font-medium text-muted-foreground">Since last top-up</div>
+                      <div className="text-[10px] text-muted-foreground italic">Includes all transactions from end of day of last top-up</div>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                        <div>
+                          <span className="text-muted-foreground">Date: </span>
+                          <span className="font-medium">{formatDayLabel(selectedWalletDetail.lastTopup.date)}</span>
                         </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )
-            })()}
-
-          </div>
-        ) : (
-          <p className="py-2 text-center text-sm text-muted-foreground">
-            Record a withdrawal to start tracking a payment method balance.
-          </p>
-        )}
-        {/* (e) Record withdrawal button */}
-        {onAddWithdrawal && (
-          <button
-            type="button"
-            onClick={onAddWithdrawal}
-            className="mt-2 w-full rounded-lg border border-dashed border-primary/30 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/5"
-          >
-            + Record withdrawal
-          </button>
-        )}
-        <p className="mt-2 text-xs text-muted-foreground">
-          Only your wallet balances are shown. Withdrawal data is stored alongside shared transactions.
-          Transfers between participants are not included in wallet computation.
-        </p>
-      </CollapsibleCard>
-
-      {/* ================================================================ */}
-      {/* Card ⑥ — Currencies                                              */}
-      {/* ================================================================ */}
-      <CollapsibleCard
-        title="Currencies"
-        summary={currenciesData.map(([code]) => code).join(' · ') || 'None'}
-      >
-        {currenciesData.length === 0 ? (
-          <p className="py-4 text-center text-sm text-muted-foreground">No data</p>
-        ) : (
-          <>
-            <div className="flex flex-wrap gap-2">
-              {currenciesData.map(([code, convertedTotal]) => (
-                <div
-                  key={code}
-                  className="rounded-full border bg-muted/40 px-3 py-1 text-xs font-medium text-foreground"
-                >
-                  <span className="font-semibold">{code}</span>
-                  {'  '}
-                  {formatAmount(convertedTotal, mainCurrency)}
-                  {code !== mainCurrency && (
-                    <span className="ml-1 text-muted-foreground">≈</span>
+                        <div>
+                          <span className="text-muted-foreground">Amount: </span>
+                          <span className="font-medium">{formatAmount(selectedWalletDetail.lastTopupNetAmount, selectedWalletDetail.wb.currency)}</span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">Balance after: </span>
+                          <span className="font-medium">{formatAmount(selectedWalletDetail.balanceAfterLastTopup, selectedWalletDetail.wb.currency)}</span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">Spent since: </span>
+                          <span className="font-medium">{formatAmount(selectedWalletDetail.spentSinceLastTopup, selectedWalletDetail.wb.currency)}</span>
+                        </div>
+                      </div>
+                      <div className="pt-1 text-xs">
+                        <span className="text-muted-foreground">Est. remaining: </span>
+                        <span className={`font-semibold ${
+                          selectedWalletDetail.wb.remaining > 0 ? 'text-green-600 dark:text-green-400'
+                            : selectedWalletDetail.wb.remaining < 0 ? 'text-red-600 dark:text-red-400'
+                            : ''
+                        }`}>
+                          {formatAmount(selectedWalletDetail.wb.remaining, selectedWalletDetail.wb.currency)}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 pt-1.5">
+                        <span className="text-[11px] text-muted-foreground">Not the amount you have?</span>
+                        <button
+                          type="button"
+                          onClick={() => setReconcileBalance(selectedWalletDetail.wb)}
+                          className="rounded-md border border-primary/30 px-2 py-0.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/5"
+                        >
+                          Reconcile with current amount
+                        </button>
+                      </div>
+                    </div>
                   )}
                 </div>
-              ))}
+              )}
+
+              {/* (b)/(d) Wallet event list — withdrawals + adjustments */}
+              {(() => {
+                const displayedEvents = selectedWalletDetail
+                  ? selectedWalletDetail.walletEvents
+                  : walletEventTxs
+
+                if (displayedEvents.length === 0) {
+                  return (
+                    <p className="py-1 text-center text-xs text-muted-foreground">
+                      No wallet events recorded yet.
+                    </p>
+                  )
+                }
+
+                return (
+                  <div className="space-y-1">
+                    <div className="text-xs font-medium text-muted-foreground">
+                      {selectedWalletDetail ? 'History' : 'All wallet events'}
+                    </div>
+                    <div className="max-h-[200px] space-y-1 overflow-y-auto">
+                      {displayedEvents.map((tx, idx) => {
+                        const txIsWithdrawal = isWithdrawal(tx)
+                        const typeEmoji = txIsWithdrawal ? '🏧' : '⚖️'
+                        const paid = tx.paidBy.find(s => s.travelMemberId === currentTravelMemberId)?.amount ?? 0
+                        const gap = selectedWalletDetail ? walletSpendingGaps.get(idx) : null
+                        return (
+                          <div key={tx.txId}>
+                            <div className="flex items-center justify-between rounded-md bg-muted/30 px-2 py-1.5 text-xs">
+                              <div className="flex min-w-0 items-center gap-1.5">
+                                <span>{typeEmoji}</span>
+                                <span className="text-muted-foreground">{formatDayLabel(tx.date)}</span>
+                                <span className="truncate font-medium">{tx.name}</span>
+                              </div>
+                              <div className="ml-2 flex shrink-0 items-center gap-1.5">
+                                <div className="text-right">
+                                  <span className={`font-medium ${
+                                    txIsWithdrawal
+                                      ? 'text-green-600 dark:text-green-400'
+                                      : paid >= 0
+                                        ? 'text-blue-600 dark:text-blue-400'
+                                        : 'text-red-600 dark:text-red-400'
+                                  }`}>
+                                    {txIsWithdrawal ? '+' : paid >= 0 ? '+' : ''}{formatAmount(paid, tx.currency)}
+                                  </span>
+                                  {tx.fees != null && tx.fees > 0 && (
+                                    <div className="text-[10px] text-muted-foreground">
+                                      fees: {formatAmount(tx.fees, tx.currency)}
+                                    </div>
+                                  )}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); onEditTransaction(tx.txId) }}
+                                  className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                                  title="Edit"
+                                >
+                                  ✏️
+                                </button>
+                              </div>
+                            </div>
+                            {gap && (
+                              <div className="flex items-center gap-1.5 px-3 py-1 text-[10px] text-muted-foreground">
+                                <span>↕</span>
+                                <span>
+                                  Spent between {formatDayLabel(gap.fromDate)} and {formatDayLabel(gap.toDate)}:
+                                </span>
+                                <span className="font-medium">
+                                  {gap.amount > 0
+                                    ? formatAmount(gap.amount, selectedWalletDetail!.wb.currency)
+                                    : `0 ${selectedWalletDetail!.wb.currency}`
+                                  }
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )
+              })()}
+
             </div>
-            <p className="mt-2 text-xs text-muted-foreground">
-              Amounts converted at rate stored per transaction
+          ) : (
+            <p className="py-2 text-center text-sm text-muted-foreground">
+              Record a withdrawal to start tracking a payment method balance.
             </p>
-          </>
-        )}
-      </CollapsibleCard>
+          )}
+          {onAddWithdrawal && (
+            <button
+              type="button"
+              onClick={onAddWithdrawal}
+              className="mt-2 w-full rounded-lg border border-dashed border-primary/30 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/5"
+            >
+              + Record withdrawal
+            </button>
+          )}
+          <p className="mt-2 text-xs text-muted-foreground">
+            Only your wallet balances are shown. Withdrawal data is stored alongside shared transactions.
+            Transfers between participants are not included in wallet computation.
+          </p>
+        </CollapsibleCard>
+      )}
+
+      {/* ================================================================ */}
+      {/* Card ⑥ — Currencies (gated on features.multiCurrency)            */}
+      {/* ================================================================ */}
+      {showCurrencies && (
+        <CollapsibleCard
+          title="Currencies"
+          summary={currenciesData.map(([code]) => code).join(' · ') || 'None'}
+        >
+          {currenciesData.length === 0 ? (
+            <p className="py-4 text-center text-sm text-muted-foreground">No data</p>
+          ) : (
+            <>
+              <div className="flex flex-wrap gap-2">
+                {currenciesData.map(([code, convertedTotal]) => (
+                  <div
+                    key={code}
+                    className="rounded-full border bg-muted/40 px-3 py-1 text-xs font-medium text-foreground"
+                  >
+                    <span className="font-semibold">{code}</span>
+                    {'  '}
+                    {formatAmount(convertedTotal, mainCurrency)}
+                    {code !== mainCurrency && (
+                      <span className="ml-1 text-muted-foreground">≈</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Amounts converted at rate stored per transaction
+              </p>
+            </>
+          )}
+        </CollapsibleCard>
+      )}
+
+      {/* ================================================================ */}
+      {/* Card builder dialog                                               */}
+      {/* ================================================================ */}
+      <CardBuilder
+        key={builderKey}
+        open={builderOpen}
+        onOpenChange={setBuilderOpen}
+        dimensions={dimensions}
+        scoped={scoped}
+        mainCurrency={mainCurrency}
+        editing={editingCard}
+        onSave={handleSaveCard}
+      />
 
       {/* ================================================================ */}
       {/* Reconciliation dialog                                             */}
@@ -2006,68 +1600,32 @@ export function DashboardTab({
           onSuccess={() => setReconcileBalance(null)}
         />
       )}
-
-      {/* ================================================================ */}
-      {/* Member picker bottom sheet                                        */}
-      {/* ================================================================ */}
-      {/* Uses vaul Drawer (direction=bottom) since Sheet is not installed. */}
-      {!isSolo && (
-        <Drawer
-          open={memberSheetOpen}
-          onOpenChange={setMemberSheetOpen}
-          direction="bottom"
-        >
-          <DrawerContent>
-            <DrawerHeader>
-              <DrawerTitle>View stats for</DrawerTitle>
-            </DrawerHeader>
-
-            <div className="flex flex-col px-4 pb-6">
-              {/* "All members" row */}
-              <button
-                type="button"
-                onClick={() => { setSelectedTravelMemberId(null); setMemberSheetOpen(false) }}
-                className="flex items-center gap-3 rounded-lg px-2 py-3 hover:bg-muted/50"
-              >
-                <span className="flex h-8 w-8 items-center justify-center rounded-full border text-sm">
-                  👤
-                </span>
-                <span className="flex-1 text-sm font-medium text-foreground">All members</span>
-                {selectedTravelMemberId === null && (
-                  <span className="text-primary">✓</span>
-                )}
-              </button>
-
-              {/* One row per member */}
-              {space.members.map((member, idx) => {
-                const isActive    = member.travelMemberId === selectedTravelMemberId
-                const isCurrentUser = member.userId === currentUserUid
-
-                return (
-                  <button
-                    key={member.travelMemberId}
-                    type="button"
-                    onClick={() => {
-                      setSelectedTravelMemberId(member.travelMemberId)
-                      setMemberSheetOpen(false)
-                    }}
-                    className="flex items-center gap-3 rounded-lg px-2 py-3 hover:bg-muted/50"
-                  >
-                    <MemberAvatar name={member.displayName} index={idx} size="md" />
-                    <span className="flex-1 text-sm text-foreground">
-                      {member.displayName}
-                      {isCurrentUser && (
-                        <span className="ml-1 text-muted-foreground text-xs">(you)</span>
-                      )}
-                    </span>
-                    {isActive && <span className="text-primary">✓</span>}
-                  </button>
-                )
-              })}
-            </div>
-          </DrawerContent>
-        </Drawer>
-      )}
     </div>
   )
+}
+
+// ---------------------------------------------------------------------------
+// Chart helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * "Nice" round values for chart grid lines: aim for ~4 ticks, then snap the
+ * step up to the nearest 1 / 2 / 5 × 10^n so the labels read cleanly
+ * (50, 100, 200, 500, 1000…).
+ */
+function niceTicks(max: number): number[] {
+  if (max <= 0) return []
+  const TARGET_TICKS = 4
+  const rawStep = max / TARGET_TICKS
+  const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)))
+  const residual = rawStep / magnitude
+  let niceStep: number
+  if (residual <= 1.5) niceStep = 1 * magnitude
+  else if (residual <= 3.5) niceStep = 2 * magnitude
+  else if (residual <= 7.5) niceStep = 5 * magnitude
+  else niceStep = 10 * magnitude
+
+  const ticks: number[] = []
+  for (let v = niceStep; v <= max; v += niceStep) ticks.push(v)
+  return ticks
 }

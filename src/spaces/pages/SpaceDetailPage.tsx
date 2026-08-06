@@ -26,6 +26,7 @@ import { useTransactions, type TransactionWithStatus } from '@/transactions/hook
 import { Button } from '@/components/ui/button'
 import { TransactionForm, type TransferPrefill } from '@/transactions/components/TransactionForm'
 import type { TransactionType } from '@/transactions/types'
+import type { FilterRequest } from '@/transactions/utils/filterDimensions'
 import { SpaceTabs } from '@/spaces/components/SpaceTabs'
 import { InstallPromptBanner } from '@/shared/components/InstallPromptBanner'
 import { deleteTransaction } from '@/transactions/services/transactionService'
@@ -395,6 +396,19 @@ export function SpaceDetailPage() {
   // Tab navigation request — used by the solo-space CTA to switch to Parameters
   const [requestTab, setRequestTab] = useState<'transactions' | 'balance' | 'dashboard' | 'parameters' | undefined>(undefined)
 
+  // Dashboard drill-down (Phase 7a §5): the filter selection to hand to the
+  // Transactions tab. The nonce is minted here so the same row can be tapped
+  // twice in a row and still re-apply. Reusing the existing requestTab
+  // mechanism for the tab switch keeps the two concerns separate.
+  const [filterRequest, setFilterRequest] = useState<FilterRequest | undefined>(undefined)
+  const drillDownNonce = useRef(0)
+
+  function handleDrillDown(request: Omit<FilterRequest, 'nonce'>) {
+    drillDownNonce.current += 1
+    setFilterRequest({ ...request, nonce: drillDownNonce.current })
+    setRequestTab('transactions')
+  }
+
   const handleBack = () => navigate('/spaces')
 
   const hue = currentUser ? avatarHue(currentUser.uid) : 0
@@ -579,6 +593,8 @@ export function SpaceDetailPage() {
           onSpaceChange={handleSpaceChange}
           requestTab={requestTab}
           onRequestTabHandled={() => setRequestTab(undefined)}
+          filterRequest={filterRequest}
+          onDrillDown={handleDrillDown}
         />
       </main>
 

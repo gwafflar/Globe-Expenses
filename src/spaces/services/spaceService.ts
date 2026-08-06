@@ -17,7 +17,7 @@ import {
 } from 'firebase/firestore'
 import { nanoid } from 'nanoid'
 import { db } from '@/services/firebase'
-import type { CustomFieldDef, LabeledItem, PresetId, Space, SpaceConfig, SpaceMember, SpaceSettings } from '@/spaces/types'
+import type { CustomFieldDef, DashboardCardDef, LabeledItem, PresetId, Space, SpaceConfig, SpaceMember, SpaceSettings } from '@/spaces/types'
 import { normaliseMember } from '@/spaces/types'
 import { getFlagForCountry } from '@/shared/data/pickerData'
 import { buildDefaultRates } from '@/shared/utils/exchangeRates'
@@ -102,12 +102,26 @@ function serialiseCustomFieldDef(f: CustomFieldDef): Record<string, unknown> {
   return obj
 }
 
+function serialiseDashboardCard(c: DashboardCardDef): Record<string, unknown> {
+  const obj: Record<string, unknown> = { id: c.id, dimensions: [...c.dimensions] }
+  // `title` is an optional override; Firestore rejects undefined values.
+  if (c.title !== undefined) obj.title = c.title
+  return obj
+}
+
 function serialiseSpaceConfig(config: SpaceConfig): Record<string, unknown> {
-  return {
+  const obj: Record<string, unknown> = {
     builtInFields: { ...config.builtInFields },
     features: { ...config.features },
     customFields: config.customFields.map(serialiseCustomFieldDef),
   }
+  // Absent means "never edited" and must STAY absent, so the space keeps
+  // resolving to the legacy default card set (Phase 7a §6). An empty array is
+  // a real value — the user deleted every card — and is written as such.
+  if (config.dashboardCards !== undefined) {
+    obj.dashboardCards = config.dashboardCards.map(serialiseDashboardCard)
+  }
+  return obj
 }
 
 // ---------------------------------------------------------------------------
@@ -230,6 +244,26 @@ export async function updateSpaceSettings(
 export async function updateSpaceConfig(spaceId: string, config: SpaceConfig): Promise<void> {
   const ref = doc(db, 'travels', spaceId)
   await updateDoc(ref, { config: serialiseSpaceConfig(normaliseSpaceConfig(config)) })
+}
+
+/**
+ * Persist the dashboard breakdown cards (Phase 7a §6).
+ *
+ * Dot-notation so the rest of `config` is never rewritten — two members editing
+ * different sections of the config concurrently can't clobber each other. On a
+ * legacy space with no `config` map at all this creates one holding only
+ * `dashboardCards`; getSpaceConfig() resolves every other key to its legacy
+ * default, so a partial config is a supported state.
+ *
+ * Fire-and-forget: safe offline, replayed on reconnect, same pattern as
+ * ensureMultiCurrency().
+ */
+export function updateSpaceDashboardCards(spaceId: string, cards: DashboardCardDef[]): void {
+  const ref = doc(db, 'travels', spaceId)
+  updateDoc(ref, { 'config.dashboardCards': cards.map(serialiseDashboardCard) })
+    .catch((err: unknown) => {
+      console.error('[spaceService] updateSpaceDashboardCards failed:', err)
+    })
 }
 
 /** Updates the display-only preset badge. Never drives behaviour. */

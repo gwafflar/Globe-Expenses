@@ -27,6 +27,10 @@ interface CollapsibleCardProps {
   summary: string
   /** Whether the card starts expanded. Defaults to true. */
   defaultOpen?: boolean
+  /** Optional controls (edit, delete, reorder…) rendered to the RIGHT of the
+   *  header, as a sibling of the toggle button rather than inside it —
+   *  a <button> may not contain another <button>. */
+  actions?: React.ReactNode
   children: React.ReactNode
 }
 
@@ -38,6 +42,7 @@ export function CollapsibleCard({
   title,
   summary,
   defaultOpen = true,
+  actions,
   children,
 }: CollapsibleCardProps) {
   // isOpen tracks whether the card body is visible.
@@ -48,24 +53,29 @@ export function CollapsibleCard({
   return (
     <div className="rounded-xl border bg-card shadow-sm">
       {/* ── Header row — always visible ── */}
-      <button
-        type="button"
-        onClick={() => setIsOpen((prev) => !prev)}
-        // w-full so the tap target covers the whole header, not just the chevron
-        className="flex w-full items-center justify-between px-4 py-3 text-left"
-      >
-        {/* Card title — left side */}
-        <span className="text-sm font-semibold text-foreground">{title}</span>
+      <div className="flex items-center">
+        <button
+          type="button"
+          onClick={() => setIsOpen((prev) => !prev)}
+          aria-expanded={isOpen}
+          // flex-1 so the tap target covers the whole header except the actions
+          className={`flex flex-1 items-center justify-between py-3 pl-4 text-left ${actions ? 'pr-2' : 'pr-4'}`}
+        >
+          {/* Card title — left side */}
+          <span className="text-sm font-semibold text-foreground">{title}</span>
 
-        {/* Summary + chevron — right side */}
-        <span className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">{summary}</span>
-          {/* ▲ / ▼ chevron: simple Unicode character, no icon library needed */}
-          <span className="text-xs text-muted-foreground">
-            {isOpen ? '▲' : '▼'}
+          {/* Summary + chevron — right side */}
+          <span className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">{summary}</span>
+            {/* ▲ / ▼ chevron: simple Unicode character, no icon library needed */}
+            <span className="text-xs text-muted-foreground">
+              {isOpen ? '▲' : '▼'}
+            </span>
           </span>
-        </span>
-      </button>
+        </button>
+
+        {actions && <div className="flex shrink-0 items-center gap-1 pr-3">{actions}</div>}
+      </div>
 
       {/* ── Collapsible body ── */}
       {isOpen && (
