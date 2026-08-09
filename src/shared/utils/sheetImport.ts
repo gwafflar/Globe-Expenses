@@ -20,6 +20,7 @@ import {
 import { getExchangeRate } from '@/shared/utils/exchangeRates'
 import { SHEET_PARAMS, SHEET_EXPENSES } from '@/shared/utils/sheetExport'
 import { parseMetaSheet, type MetaPayload } from '@/shared/utils/sheetMeta'
+import type { ForeignParsedRow } from '@/shared/utils/foreignSheet'
 import type { CustomFieldDef, CustomValue, Space } from '@/spaces/types'
 
 // ---------------------------------------------------------------------------
@@ -423,6 +424,68 @@ export function resolveCustomForSpace(
   }
 
   return Object.keys(out).length > 0 ? out : undefined
+}
+
+// ---------------------------------------------------------------------------
+// Foreign-path writes
+// ---------------------------------------------------------------------------
+
+/**
+ * Write rows built by the foreign path.
+ *
+ * Splits are already resolved to travelMemberIds, so there is no slot mapping —
+ * that difference is why this is a sibling of importParsedRows() rather than a
+ * parameter on it. Batching, progress and the offline story are identical.
+ */
+export async function importForeignRows(
+  spaceId: string,
+  rows: ForeignParsedRow[],
+  currentUserUid: string,
+  mainCurrency: string,
+  onProgress?: (committed: number, total: number) => void,
+): Promise<ImportResult> {
+  const BATCH_SIZE = 500
+  const txCollection = collection(db, 'travels', spaceId, 'transactions')
+  const payloads: Array<{ ref: ReturnType<typeof doc>; data: Record<string, unknown> }> = []
+
+  for (const row of rows) {
+    const exchangeRate    = row.exchangeRate ?? getExchangeRate(row.currency, mainCurrency)
+    const totalAmountMain = row.totalAmount * exchangeRate
+
+    const data: Record<string, unknown> = {
+      date:           row.date,
+      name:           row.name,
+      totalAmount:    row.totalAmount,
+      currency:       row.currency,
+      exchangeRate,
+      totalAmountMain,
+      paidBy:         row.paid,
+      beneficiaries:  row.cost,
+      createdBy:      { type: 'user', uid: currentUserUid },
+      createdAt:      serverTimestamp(),
+      lastModifiedBy: currentUserUid,
+      lastModifiedAt: serverTimestamp(),
+      // ⚠️ `!== undefined`, never truthiness: '' and 0 are valid stored values.
+      ...(row.category      !== undefined && { category:      row.category }),
+      ...(row.paymentMethod !== undefined && { paymentMethod: row.paymentMethod }),
+      ...(row.country       !== undefined && { country:       row.country }),
+      ...(row.city          !== undefined && { city:          row.city }),
+      ...(row.notes         !== undefined && { notes:         row.notes }),
+      ...(row.custom        !== undefined && { custom:        row.custom }),
+    }
+
+    payloads.push({ ref: doc(txCollection), data })
+  }
+
+  onProgress?.(0, payloads.length)
+  for (let i = 0; i < payloads.length; i += BATCH_SIZE) {
+    const batch = writeBatch(db)
+    for (const { ref, data } of payloads.slice(i, i + BATCH_SIZE)) batch.set(ref, data)
+    await batch.commit()
+    onProgress?.(Math.min(i + BATCH_SIZE, payloads.length), payloads.length)
+  }
+
+  return { imported: payloads.length, updated: 0, skipped: 0, errors: [] }
 }
 
 // ---------------------------------------------------------------------------

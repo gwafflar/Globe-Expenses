@@ -7,10 +7,27 @@
 // The dialog is controlled (open prop) so the parent can close it cleanly.
 
 import { useCallback, useMemo, useRef, useState } from 'react'
+import * as XLSX from 'xlsx'
 import { arrayUnion, doc, updateDoc } from 'firebase/firestore'
 import { db } from '@/services/firebase'
 import type { Space, LabeledItem } from '@/spaces/types'
 import { getSpaceMainCurrency } from '@/spaces/types'
+import { updateSpaceConfig } from '@/spaces/services/spaceService'
+import {
+  autoMatchColumns,
+  buildForeignRows,
+  collectPendingOptions,
+  readForeignSheet,
+  summariseSelectColumn,
+  validateMapping,
+  withCreatedListItems,
+  withCreatedOptions,
+  type ColumnMapping,
+  type ForeignSheet,
+  type SelectDecisions,
+} from '@/shared/utils/foreignSheet'
+import { ColumnMappingStep } from '@/shared/components/import/ColumnMappingStep'
+import { ValueDecisionStep, type SelectColumnInfo } from '@/shared/components/import/ValueDecisionStep'
 import type { ParsedSheetRow } from '@/shared/utils/sheetImport'
 import { CollapsibleCard } from '@/spaces/components/CollapsibleCard'
 import { getFlagForCountry } from '@/shared/data/pickerData'
@@ -25,6 +42,7 @@ import { Button } from '@/components/ui/button'
 import {
   parseSheetFile,
   importParsedRows,
+  importForeignRows,
   selectImportPath,
   type ImportPath,
   type ParseResult,
@@ -49,8 +67,11 @@ interface ImportXlsxDialogProps {
 
 function UploadStep({
   onParsed,
+  onForeign,
 }: {
   onParsed: (result: ParseResult) => void
+  /** The file has no GlobeExpenses structure at all — column mapping instead. */
+  onForeign: (sheet: ForeignSheet) => void
 }) {
   const [isDragging, setIsDragging] = useState(false)
   const [isParsing, setIsParsing]   = useState(false)
@@ -65,10 +86,21 @@ function UploadStep({
     setError(null)
     setIsParsing(true)
     try {
+      // Try the GlobeExpenses layout first. It is the only path that can read
+      // the hidden txId column, which is what makes a re-import update rows
+      // in place rather than duplicating them — worth preferring even for a
+      // pre-Phase-8 file that has no metadata sheet.
       const result = await parseSheetFile(file)
       onParsed(result)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to parse the file.')
+    } catch {
+      // No Parameters/Expenses sheet: a spreadsheet from somewhere else.
+      // Fall back to reading it as an arbitrary grid and mapping the columns.
+      try {
+        const wb = XLSX.read(await file.arrayBuffer(), { cellDates: false })
+        onForeign(readForeignSheet(wb))
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to read the file.')
+      }
     } finally {
       setIsParsing(false)
     }
@@ -92,8 +124,8 @@ function UploadStep({
     <div className="flex flex-col gap-4">
       {/* Format notice */}
       <div className="rounded-md bg-blue-50 px-3 py-2 text-xs text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
-        Only files exported from GlobeExpenses are supported. Files in any other format
-        (manual spreadsheets, bank exports, etc.) will not parse correctly.
+        A GlobeExpenses export imports in one tap. Any other spreadsheet works too — you'll
+        be asked to match its columns to fields.
       </div>
 
       {/* Drop zone */}
@@ -532,6 +564,15 @@ function buildInitialMapping(
   return mapping
 }
 
+/** The member slot belonging to the signed-in user, used as the default owner
+ *  of every row when the sheet carries no per-member split columns. Falls back
+ *  to the first slot so a personal import into an unclaimed space still lands
+ *  somewhere rather than silently producing split-less transactions. */
+function currentUserMemberId(space: Space, uid: string): string | undefined {
+  return space.members.find((m) => m.userId === uid)?.travelMemberId
+    ?? space.members[0]?.travelMemberId
+}
+
 // ---------------------------------------------------------------------------
 // Main dialog component
 // ---------------------------------------------------------------------------
@@ -542,12 +583,21 @@ export function ImportXlsxDialog({
   space,
   currentUserUid,
 }: ImportXlsxDialogProps) {
-  // 'confirm' is the lossless path's single screen; 'mapping'/'preview' are the
-  // wizard the other two paths still go through.
-  type Step = 'upload' | 'confirm' | 'mapping' | 'preview' | 'result'
+  // Three routes through this dialog:
+  //   lossless      upload → confirm → result
+  //   foreignSpace  upload → mapping → preview → result   (member slots)
+  //   foreignFile   upload → columns → values  → result   (arbitrary grid)
+  type Step = 'upload' | 'confirm' | 'mapping' | 'preview' | 'columns' | 'values' | 'result'
   const [step, setStep]                 = useState<Step>('upload')
   const [parseResult, setParseResult]   = useState<ParseResult | null>(null)
   const [importPath, setImportPath]     = useState<ImportPath | null>(null)
+
+  // Foreign-file state
+  const [foreignSheet, setForeignSheet] = useState<ForeignSheet | null>(null)
+  const [columnMapping, setColumnMapping] = useState<ColumnMapping>({})
+  const [selectDecisions, setSelectDecisions] = useState<SelectDecisions>({})
+
+  const config = useMemo(() => getSpaceConfig(space), [space])
   // Maps sheet slot index → travelMemberId (the stable ID used in Split[])
   const [slotToTravelMemberId, setSlotToTravelMemberId] = useState<Record<number, string | undefined>>({})
   const [importResult, setImportResult] = useState<ImportResult | null>(null)
@@ -562,12 +612,25 @@ export function ImportXlsxDialog({
       setParseResult(null)
       setImportPath(null)
       setSlotToTravelMemberId({})
+      setForeignSheet(null)
+      setColumnMapping({})
+      setSelectDecisions({})
       setImportResult(null)
       setIsImporting(false)
       setImportProgress({ committed: 0, total: 0 })
     }
     onOpenChange(nextOpen)
   }
+
+  // Step 1 → columns, for a file with no GlobeExpenses structure.
+  const handleForeign = useCallback(
+    (sheet: ForeignSheet) => {
+      setForeignSheet(sheet)
+      setColumnMapping(autoMatchColumns(sheet.columns, space, config))
+      setStep('columns')
+    },
+    [space, config],
+  )
 
   // Step 1 → 2. The file itself decides which path we take.
   const handleParsed = useCallback(
@@ -662,6 +725,121 @@ export function ImportXlsxDialog({
     setIsImporting(false)
   }
 
+  // ── Foreign-file derived state ───────────────────────────────────────────
+
+  const mappingErrors = useMemo(
+    () => (foreignSheet ? validateMapping(columnMapping) : []),
+    [foreignSheet, columnMapping],
+  )
+
+  /** Built-in list options, for value matching and creation. */
+  const builtInOptions = useMemo(() => ({
+    country:       space.countries      ?? [],
+    city:          space.cities         ?? [],
+    category:      space.categories     ?? [],
+    paymentMethod: space.paymentMethods ?? [],
+  }), [space])
+
+  /** The columns that need a per-column decision: those mapped to something
+   *  with a closed option list where at least one value is unmatched. */
+  const selectColumns = useMemo<SelectColumnInfo[]>(() => {
+    if (!foreignSheet) return []
+    const out: SelectColumnInfo[] = []
+
+    for (const col of foreignSheet.columns) {
+      const target = columnMapping[col.index]
+      if (!target) continue
+
+      let options: LabeledItem[] | null = null
+      let fieldLabel = ''
+
+      if (target.kind === 'custom') {
+        const def = config.customFields.find((f) => f.id === target.fieldId)
+        // text fields have no option list, booleans have a fixed one.
+        if (!def || def.type !== 'select') continue
+        options = def.options ?? []
+        fieldLabel = def.label
+      } else if (target.kind === 'builtIn' && target.field !== 'notes') {
+        options = builtInOptions[target.field as keyof typeof builtInOptions] ?? []
+        fieldLabel = target.field
+      }
+
+      if (options === null) continue
+      const summary = summariseSelectColumn(col, options)
+      if (summary.unmatched.length === 0) continue
+      out.push({ ...summary, fieldLabel, existingOptions: options })
+    }
+    return out
+  }, [foreignSheet, columnMapping, config, builtInOptions])
+
+  /** Foreign import: create any opted-in options, then write the rows. */
+  async function handleForeignImport() {
+    if (!foreignSheet) return
+    setIsImporting(true)
+    setStep('result')
+
+    try {
+      const pending = collectPendingOptions(
+        foreignSheet, columnMapping, selectDecisions, config.customFields, builtInOptions,
+      )
+
+      // Custom field options go through updateSpaceConfig — the importer must
+      // never write config itself, so field definitions have one owner.
+      const updatedFields = withCreatedOptions(config.customFields, pending)
+      if (Object.keys(pending.custom).length > 0) {
+        await updateSpaceConfig(space.spaceId, { ...config, customFields: updatedFields })
+      }
+
+      // Built-in lists are plain space arrays.
+      const listUpdates: Record<string, unknown> = {}
+      const listFields = [
+        ['country', 'countries', space.countries, 'country'],
+        ['city', 'cities', space.cities, 'city'],
+        ['category', 'categories', space.categories, 'cat'],
+        ['paymentMethod', 'paymentMethods', space.paymentMethods, 'pm'],
+      ] as const
+      for (const [key, field, existing, prefix] of listFields) {
+        const labels = pending.builtIn[key]
+        if (!labels?.length) continue
+        listUpdates[field] = withCreatedListItems(existing ?? [], labels, prefix)
+      }
+      if (Object.keys(listUpdates).length > 0) {
+        await updateDoc(doc(db, 'travels', space.spaceId), listUpdates)
+      }
+
+      const mergedBuiltIns = {
+        country:       (listUpdates.countries      as LabeledItem[]) ?? space.countries      ?? [],
+        city:          (listUpdates.cities         as LabeledItem[]) ?? space.cities         ?? [],
+        category:      (listUpdates.categories     as LabeledItem[]) ?? space.categories     ?? [],
+        paymentMethod: (listUpdates.paymentMethods as LabeledItem[]) ?? space.paymentMethods ?? [],
+      }
+
+      const { rows } = buildForeignRows({
+        sheet: foreignSheet,
+        mapping: columnMapping,
+        decisions: selectDecisions,
+        customFields: updatedFields,
+        builtInOptions: mergedBuiltIns,
+        defaultMemberId: currentUserMemberId(space, currentUserUid),
+        mainCurrency: getSpaceMainCurrency(space),
+      })
+
+      const result = await importForeignRows(
+        space.spaceId, rows, currentUserUid, getSpaceMainCurrency(space),
+        (committed, total) => setImportProgress({ committed, total }),
+      )
+      setImportResult(result)
+    } catch (err) {
+      console.error('[ImportXlsxDialog] foreign import failed:', err)
+      setImportResult({
+        imported: 0, updated: 0, skipped: 0,
+        errors: [err instanceof Error ? err.message : 'The import failed.'],
+      })
+    } finally {
+      setIsImporting(false)
+    }
+  }
+
   // Derive duplicate-mapping status for the import button
   const assignedIds = Object.values(slotToTravelMemberId).filter((id): id is string => id !== undefined)
   const hasDuplicates = assignedIds.length !== new Set(assignedIds).size
@@ -669,11 +847,13 @@ export function ImportXlsxDialog({
   // The lossless path is two steps, not four — labelling it "Step 2 of 4" would
   // promise work that never comes.
   const stepLabel: Record<Step, string> = {
-    upload:  importPath?.kind === 'lossless' ? 'Step 1 of 2 — Upload' : 'Step 1 of 4 — Upload',
+    upload:  'Step 1 — Upload',
     confirm: 'Step 2 of 2 — Confirm',
     mapping: 'Step 2 of 4 — Member mapping',
     preview: 'Step 3 of 4 — Data preview',
-    result:  importPath?.kind === 'lossless' ? 'Done' : 'Step 4 of 4 — Done',
+    columns: 'Step 2 of 3 — Match columns',
+    values:  'Step 3 of 3 — New values',
+    result:  'Done',
   }
 
   return (
@@ -685,7 +865,28 @@ export function ImportXlsxDialog({
         </DialogHeader>
 
         {/* Step content */}
-        {step === 'upload' && <UploadStep onParsed={handleParsed} />}
+        {step === 'upload' && <UploadStep onParsed={handleParsed} onForeign={handleForeign} />}
+
+        {step === 'columns' && foreignSheet && (
+          <ColumnMappingStep
+            columns={foreignSheet.columns}
+            mapping={columnMapping}
+            onChange={setColumnMapping}
+            space={space}
+            config={config}
+            rowCount={foreignSheet.rows.length}
+            errors={mappingErrors}
+            canCreateFields={false}
+          />
+        )}
+
+        {step === 'values' && (
+          <ValueDecisionStep
+            columns={selectColumns}
+            decisions={selectDecisions}
+            onChange={setSelectDecisions}
+          />
+        )}
 
         {step === 'confirm' && parseResult && (
           <LosslessConfirmStep parseResult={parseResult} space={space} />
@@ -733,6 +934,27 @@ export function ImportXlsxDialog({
                 Back
               </Button>
               <Button onClick={handleImport}>Import</Button>
+            </>
+          )}
+          {step === 'columns' && (
+            <>
+              <Button variant="outline" onClick={() => setStep('upload')}>
+                Back
+              </Button>
+              <Button
+                onClick={() => setStep('values')}
+                disabled={mappingErrors.length > 0}
+              >
+                Next
+              </Button>
+            </>
+          )}
+          {step === 'values' && (
+            <>
+              <Button variant="outline" onClick={() => setStep('columns')}>
+                Back
+              </Button>
+              <Button onClick={handleForeignImport}>Import</Button>
             </>
           )}
           {step === 'mapping' && (
