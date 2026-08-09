@@ -155,6 +155,61 @@ describe('export with included disabled fields', () => {
   })
 })
 
+describe('no export path assumes a built-in field exists', () => {
+  /** A space with every optional built-in switched off — the hardest case for
+   *  code that grew up assuming country/category were always there. */
+  function barestSpace() {
+    const { space, transactions } = soloSpace()
+    space.config = {
+      ...space.config!,
+      builtInFields: {
+        country: false, city: false, category: false, paymentMethod: false, notes: false,
+      },
+      features: { wallets: false, multiCurrency: false },
+      dashboardCards: [],
+    }
+    return { space, transactions }
+  }
+
+  it('exports without throwing and without those columns', () => {
+    const { space, transactions } = barestSpace()
+    const cm = columnMapForConfig(1, getSpaceConfig(space))
+    const wb = writeRead(buildSpaceWorkbook(space, transactions))
+    const ws = wb.Sheets[SHEET_EXPENSES]
+
+    const hdrs = headers(ws, cm.totalCols)
+    for (const gone of ['Country', 'City', 'Category', 'Payment method', 'Notes']) {
+      expect(hdrs).not.toContain(gone)
+    }
+    // The core columns are all still there.
+    expect(hdrs).toEqual(expect.arrayContaining(['Date', 'Description', 'Amount (local)', 'Currency']))
+  })
+
+  it('produces no #REF! in any sheet', () => {
+    const { space, transactions } = barestSpace()
+    const wb = writeRead(buildSpaceWorkbook(space, transactions))
+
+    for (const name of wb.SheetNames) {
+      const ws = wb.Sheets[name] as Record<string, { f?: string; v?: unknown }>
+      for (const [key, cell] of Object.entries(ws)) {
+        if (key.startsWith('!')) continue
+        expect(cell.f ?? '').not.toContain('#REF')
+        expect(String(cell.v ?? '')).not.toContain('#REF')
+      }
+    }
+  })
+
+  it('still round-trips its transactions', async () => {
+    const { space, transactions } = barestSpace()
+    const cm = columnMapForConfig(1, getSpaceConfig(space))
+    const ws = writeRead(buildSpaceWorkbook(space, transactions)).Sheets[SHEET_EXPENSES]
+
+    // Amounts and descriptions survive even with every optional field gone.
+    expect(cell(ws, cm.name, 3)).toBe(transactions[0].name)
+    expect(cell(ws, cm.amountLocal, 3)).toBeCloseTo(transactions[0].totalAmount, 4)
+  })
+})
+
 describe('exportFileName', () => {
   it('derives the filename from the space name', () => {
     const space = makeSpace({ name: 'Japan 2026' })

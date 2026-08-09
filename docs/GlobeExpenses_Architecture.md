@@ -156,9 +156,19 @@ TypeScript interface defined in `src/auth/services/userService.ts`. Mirrors the 
 | paymentMethods | LabeledItem[] | Per-space payment method list. Same fallback behaviour. |
 | countries | LabeledItem[] | Countries visited in this space. Seeded automatically via syncTransactionLocation(); editable in Parameters tab via CountryPicker. |
 | cities | LabeledItem[] | Cities visited. Same seeding and edit behaviour. |
-| settings | object? | Optional space settings (e.g. `{ trackLocation: boolean }`) |
+| settings | object? | Optional space settings (e.g. `{ trackLocation: boolean }`). **Superseded by `config`** — retained for backward compatibility and read by `getSpaceConfig()` as the legacy source for `builtInFields.country` / `.city`. New writes go to `config`. |
+| config | SpaceConfig? | Per-space field and feature configuration. Absent on legacy documents. ⚠️ **Never read directly** — always go through `getSpaceConfig()`, which resolves legacy documents to full travel-mode defaults. See `docs/SPACE_REFACTOR_SPEC.md` §4. |
+| presetOrigin | PresetId? | `'travel' \| 'solo' \| 'group' \| 'custom'`. **DISPLAY ONLY** — which preset the space was created from, used for the list badge and the "re-apply preset" section in Parameters. ⚠️ No behaviour may branch on this field; behaviour reads `config`. |
+| startDate | string? | Optional trip start, ISO `"YYYY-MM-DD"`. ⚠️ This format **differs** from `Transaction.date` (`"DD-MM-YYYY"`) — never compare the two as raw strings, go through an explicit parse helper. Set only for the `travel` preset's optional "Set trip dates" extra. Display only. |
+| endDate | string? | Optional trip end, ISO `"YYYY-MM-DD"`. Same format caveat as `startDate`. |
 | archivedByUids | string[] | UIDs of members who have archived this space. Per-user archive — each member can archive/unarchive independently. Absent on older documents, read as `[]`. |
 | pendingInviteId | string? | Transient field written by a joining non-member solely to pass the invite token to Firestore security rules for authorization via `get()`. Not semantic after the write; ignored by the UI. |
+
+**SpaceConfig**: `{ builtInFields, features, customFields, dashboardCards? }`
+- `builtInFields`: `{ country, city, category, paymentMethod, notes }` — all `boolean`. Disabling hides the field everywhere and omits its export column; it never deletes stored values.
+- `features`: `{ wallets, multiCurrency }`. `multiCurrency` is a sticky flag — it auto-upgrades to `true` on first foreign-currency use and never auto-downgrades. `wallets: true` forces `paymentMethod: true` (see `normaliseSpaceConfig()`), since wallet balances are keyed on payment method.
+- `customFields`: `CustomFieldDef[]` — `{ id, label, emoji?, type, options?, enabled }` where `type` is `'select' | 'text' | 'boolean'`. `id` is a stable nanoid, never derived from the label.
+- `dashboardCards`: `DashboardCardDef[]?` — `{ id, dimensions: [string] | [string, string], title? }`. ⚠️ **Absent and `[]` are different states**: absent means "never edited" and resolves to the legacy default card set; `[]` means the user deleted every card. See `resolveDashboardCards()`.
 
 **Future: `mainCurrency` editability (v2 design note)** — staying locked in v1 by decision. When this is picked up, it must be an explicit **batch-recompute action**, not a quiet field edit: every existing transaction's `exchangeRate` and `totalAmountMain` was computed relative to the *old* `mainCurrency` and becomes silently wrong the instant `mainCurrency` changes underneath it. Proposed flow: user picks a new `mainCurrency` → client computes the new `exchangeRate`/`totalAmountMain` for every transaction in the subcollection (using `defaultRates`/hardcoded fallback resolved against the *new* currency) → show a preview (old vs. new totals, at least aggregate) → user confirms → single batched write (chunked at 500 docs, same pattern as `deleteSpace`/`mergeMembers`). Treat as high blast-radius; do not implement as a simple settings toggle.
 
@@ -193,13 +203,14 @@ TypeScript interface defined in `src/auth/services/userService.ts`. Mirrors the 
 | lastModifiedAt | Timestamp | Last write timestamp (for conflict detection) |
 | lastModifiedBy | string | UID of last writer |
 | draftId | string? | ID of the originating draft if created via bank import (v2) |
-| country | string? | Country where the expense occurred. Stored with flag emoji prefix (e.g. "🇯🇵 Japan"). |
-| city | string? | City where the expense occurred (optional) |
+| country | string? | Country where the expense occurred. ⚠️ Stored **bare**, with no flag prefix (e.g. `"Japan"`) — `SmartCountrySelect` passes the plain name and the flag is kept separately in `Space.countries[].emoji`. This corrects an earlier claim in this document that it carried a `"🇯🇵 Japan"` prefix (audit finding F7); the Analysis sheet's SUMPRODUCT formulas relied on that claim and silently summed every country to zero until Phase 8. **Note the asymmetry with `category` / `paymentMethod`**, which *are* stored with their emoji prefix because the picker's option value is the concatenated display string. `dimensionCellText()` is the single place that encodes which is which. |
+| city | string? | City where the expense occurred (optional). Stored bare. |
 | notes | string? | Optional free-text notes |
 | amountFormula | string? | Raw formula string entered by the user (e.g. "2*2.5 + 1.5"). `totalAmount` is always the computed result. Display-only — never used in any calculation. |
 | type | TransactionType? | `'expense' \| 'withdrawal' \| 'adjustment' \| 'transfer'`. Undefined on legacy documents → treated as `'expense'`. |
 | fees | number? | Withdrawal fees in transaction currency. Deducted from wallet balance: user received `totalAmount - fees`. Only meaningful when `type === 'withdrawal'`. |
 | adjustmentMode | AdjustmentMode? | `'expense'` (counts in spending analytics) or `'balance_only'` (wallet-only, invisible to analytics). Only meaningful when `type === 'adjustment'`. |
+| custom | Record<string, CustomValue>? | User-defined field values, keyed by `CustomFieldDef.id`. `CustomValue = string \| boolean`. Absent when the space has no custom fields or none were filled. ⚠️ For `select` fields the value is the **option id**, never the label — renaming an option updates every transaction for free. ⚠️ `false` is **never stored**: `buildCustomPayload()` omits it, so an absent boolean key means "no". A single map rather than top-level keys avoids collisions with reserved names and gives form, detail, filter and export one generic code path. |
 
 **Split**: `{ travelMemberId: string, amount: number }` — amounts must sum to totalAmount. `travelMemberId` is the stable nanoid from `SpaceMember`, never a Firebase Auth UID. Legacy documents stored `{ uid, amount }`; `normalizeTransactionSplits()` in `dashboardHelpers.ts` remaps these at read time (applied in both `DashboardTab` and `TransactionsTab`).
 
@@ -364,11 +375,34 @@ Firestore FieldValue transforms (arrayUnion, arrayRemove, serverTimestamp) are N
 2. `useSpaces` splits results client-side into `activeSpaces` and `archivedSpaces` based on whether the user's UID is in `archivedByUids`
 3. No impact on `memberUids` or `members` — purely additive
 
-## 5.8 CSV Export / Import
+## 5.8 XLSX Export / Import
 
-- Export: fetch all transactions for a space, map to flat CSV rows, download as .csv
-- Import: parse uploaded CSV, validate rows, batch-write to Firestore
-- CSV format documented and versioned to ensure round-trip integrity
+*(Not CSV — the format is a styled multi-sheet .xlsx workbook. Implemented in `src/shared/utils/sheet*.ts`.)*
+
+**Export** (`buildSpaceWorkbook()` → `exportSpaceToXlsx()`), five visible sheets plus one hidden:
+
+| Sheet | Contents |
+| --- | --- |
+| ⚙️ Parameters | Main currency, member slots, exchange rate table |
+| 📃 Expenses | One row per transaction. Column layout is **config-driven** — see below |
+| ⚖️ Balance | Per-member cost/paid/balance, VLOOKUP'd from Expenses by row index |
+| 💸 Balance Summary | Per-member totals |
+| 📊 Analysis | **Generated from `config.dashboardCards`** — 1D blocks and 2D cross-tabs, live SUMPRODUCT. Omitted entirely when no card survives |
+| `_globeexpenses` | Hidden. JSON payload carrying format version, space identity, the full resolved `SpaceConfig` (field + option ids), and the member list |
+
+- **Columns**: `columnMapForConfig()` emits no column for a disabled built-in, and one column per exported custom field (`select` → option label, `boolean` → `yes`/`no`, `text` → raw). Column *numbers* shift accordingly, so every formula reference is derived from the map, never from a fixed letter.
+- **Disabled fields holding data**: detected by `findOrphanedFields()` and warned about before the file is generated, with export-without (default) or include-anyway. Included fields get columns while the metadata still marks them disabled, so re-import restores both values and state.
+- **Formula cells carry their computed value.** SheetJS omits any cell whose `v` is `undefined`, so a formula alone never reaches the file; and not every consumer honours `fullCalcOnLoad` (Excel and LibreOffice do; Google Sheets may not), so the cached value must also be *correct*.
+- **Dates** are written as Excel serials computed **entirely in UTC**. The 1899 epoch predates standardised time zones, so local-time arithmetic makes the serial depend on the exporting machine's zone.
+- **No secrets** in the metadata sheet: no uids, invite ids or emails. A shared export is safe to hand to anyone already allowed to see the transactions.
+
+**Import** — three paths, chosen by the file (`selectImportPath()`):
+
+1. **Lossless** — our own export returning to the same space. Custom values map by option id, members by `travelMemberId`. One confirmation screen, then import. The hidden `txId` column makes re-import *update in place* rather than duplicate.
+2. **Foreign space** — our export going into a different space. Config is known but ids are not, so members use the existing slot-mapping step and values fall back to label matching.
+3. **Foreign file** — no GlobeExpenses structure. Columns are mapped to fields (auto-matched on header text), each `select` column gets **one** decision (create all missing options / match only existing / skip), and unmatched columns can become new custom fields with an inferred type. Capped at 10 new fields per import.
+
+Writes are chunked `writeBatch` at 500 documents with progress. Field and option creation goes through `updateSpaceConfig()` — the importer never writes config directly.
 
 # 6. Security Model
 

@@ -621,6 +621,81 @@ export function withCreatedListItems(
 }
 
 // ---------------------------------------------------------------------------
+// Creating fields from columns (Part 6)
+// ---------------------------------------------------------------------------
+
+/** Ceiling on fields creatable in one import — a malformed sheet with fifty
+ *  junk headers must not be able to create fifty fields. */
+export const MAX_NEW_FIELDS = 10
+
+export interface CreatedFields {
+  /** Definitions to append to config.customFields. */
+  definitions: CustomFieldDef[]
+  /** Mapping with every `newField` target rewritten to the real field id, so
+   *  row building has nothing special to handle. */
+  mapping: ColumnMapping
+}
+
+/** Generate an id for a newly created field. Same nanoid-shaped convention as
+ *  the Fields editor — never derived from the label, so renaming is free. */
+function newFieldId(): string {
+  return `cf-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+/**
+ * Turn every `newField` column into a real CustomFieldDef.
+ *
+ * Pure: it decides WHAT to create and how the mapping should be rewritten. The
+ * caller writes the config through updateSpaceConfig(), so the importer never
+ * owns field definitions.
+ *
+ * Columns beyond MAX_NEW_FIELDS are dropped to `ignore` rather than silently
+ * created, and a field whose label collides with an existing one is dropped
+ * too — two fields with the same name would be indistinguishable everywhere.
+ */
+export function resolveNewFields(
+  sheet: ForeignSheet,
+  mapping: ColumnMapping,
+  existingFields: CustomFieldDef[],
+): CreatedFields {
+  const definitions: CustomFieldDef[] = []
+  const next: ColumnMapping = { ...mapping }
+  const takenLabels = new Set(existingFields.map((f) => normalise(f.label)))
+
+  for (const col of sheet.columns) {
+    const target = mapping[col.index]
+    if (target?.kind !== 'newField') continue
+
+    const label = target.label.trim() || col.header
+    const key = normalise(label)
+
+    if (definitions.length >= MAX_NEW_FIELDS || key === '' || takenLabels.has(key)) {
+      next[col.index] = { kind: 'ignore' }
+      continue
+    }
+    takenLabels.add(key)
+
+    const id = newFieldId()
+    const def: CustomFieldDef = {
+      id,
+      label,
+      type: target.type,
+      enabled: true,
+      ...(target.type === 'select' && {
+        // Seed from the column's own values, so the field arrives usable
+        // rather than empty. Nothing is unmatched afterwards.
+        options: col.distinctValues.map((value) => ({ id: newOptionId('opt'), label: value })),
+      }),
+    }
+
+    definitions.push(def)
+    next[col.index] = { kind: 'custom', fieldId: id }
+  }
+
+  return { definitions, mapping: next }
+}
+
+// ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------
 

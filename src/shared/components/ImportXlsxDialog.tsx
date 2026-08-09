@@ -18,16 +18,20 @@ import {
   buildForeignRows,
   collectPendingOptions,
   readForeignSheet,
+  resolveNewFields,
   summariseSelectColumn,
   validateMapping,
   withCreatedListItems,
   withCreatedOptions,
+  MAX_NEW_FIELDS,
   type ColumnMapping,
   type ForeignSheet,
   type SelectDecisions,
 } from '@/shared/utils/foreignSheet'
 import { ColumnMappingStep } from '@/shared/components/import/ColumnMappingStep'
+import { NewFieldsStep, newFieldDrafts } from '@/shared/components/import/NewFieldsStep'
 import { ValueDecisionStep, type SelectColumnInfo } from '@/shared/components/import/ValueDecisionStep'
+import type { CustomFieldType } from '@/spaces/types'
 import type { ParsedSheetRow } from '@/shared/utils/sheetImport'
 import { CollapsibleCard } from '@/spaces/components/CollapsibleCard'
 import { getFlagForCountry } from '@/shared/data/pickerData'
@@ -587,7 +591,7 @@ export function ImportXlsxDialog({
   //   lossless      upload → confirm → result
   //   foreignSpace  upload → mapping → preview → result   (member slots)
   //   foreignFile   upload → columns → values  → result   (arbitrary grid)
-  type Step = 'upload' | 'confirm' | 'mapping' | 'preview' | 'columns' | 'values' | 'result'
+  type Step = 'upload' | 'confirm' | 'mapping' | 'preview' | 'columns' | 'fields' | 'values' | 'result'
   const [step, setStep]                 = useState<Step>('upload')
   const [parseResult, setParseResult]   = useState<ParseResult | null>(null)
   const [importPath, setImportPath]     = useState<ImportPath | null>(null)
@@ -732,6 +736,18 @@ export function ImportXlsxDialog({
     [foreignSheet, columnMapping],
   )
 
+  /** Columns the user chose to turn into new fields. */
+  const fieldDrafts = useMemo(
+    () => (foreignSheet ? newFieldDrafts(foreignSheet.columns, columnMapping) : []),
+    [foreignSheet, columnMapping],
+  )
+
+  function updateFieldDraft(columnIndex: number, patch: { label?: string; type?: CustomFieldType }) {
+    const target = columnMapping[columnIndex]
+    if (target?.kind !== 'newField') return
+    setColumnMapping({ ...columnMapping, [columnIndex]: { ...target, ...patch } })
+  }
+
   /** Built-in list options, for value matching and creation. */
   const builtInOptions = useMemo(() => ({
     country:       space.countries      ?? [],
@@ -779,14 +795,22 @@ export function ImportXlsxDialog({
     setStep('result')
 
     try {
+      // 1. Materialise any columns the user turned into new fields. This
+      //    rewrites their mapping entries to real field ids, so everything
+      //    downstream sees ordinary custom columns.
+      const created = resolveNewFields(foreignSheet, columnMapping, config.customFields)
+      const effectiveMapping = created.mapping
+      const fieldsAfterCreation = [...config.customFields, ...created.definitions]
+
+      // 2. Options to add to fields that already existed.
       const pending = collectPendingOptions(
-        foreignSheet, columnMapping, selectDecisions, config.customFields, builtInOptions,
+        foreignSheet, effectiveMapping, selectDecisions, fieldsAfterCreation, builtInOptions,
       )
 
-      // Custom field options go through updateSpaceConfig — the importer must
-      // never write config itself, so field definitions have one owner.
-      const updatedFields = withCreatedOptions(config.customFields, pending)
-      if (Object.keys(pending.custom).length > 0) {
+      // Both go through updateSpaceConfig — the importer must never write
+      // config itself, so field definitions keep one owner.
+      const updatedFields = withCreatedOptions(fieldsAfterCreation, pending)
+      if (created.definitions.length > 0 || Object.keys(pending.custom).length > 0) {
         await updateSpaceConfig(space.spaceId, { ...config, customFields: updatedFields })
       }
 
@@ -816,7 +840,7 @@ export function ImportXlsxDialog({
 
       const { rows } = buildForeignRows({
         sheet: foreignSheet,
-        mapping: columnMapping,
+        mapping: effectiveMapping,
         decisions: selectDecisions,
         customFields: updatedFields,
         builtInOptions: mergedBuiltIns,
@@ -851,8 +875,9 @@ export function ImportXlsxDialog({
     confirm: 'Step 2 of 2 — Confirm',
     mapping: 'Step 2 of 4 — Member mapping',
     preview: 'Step 3 of 4 — Data preview',
-    columns: 'Step 2 of 3 — Match columns',
-    values:  'Step 3 of 3 — New values',
+    columns: 'Step 2 — Match columns',
+    fields:  'Step 3 — New fields',
+    values:  'Last step — New values',
     result:  'Done',
   }
 
@@ -876,7 +901,17 @@ export function ImportXlsxDialog({
             config={config}
             rowCount={foreignSheet.rows.length}
             errors={mappingErrors}
-            canCreateFields={false}
+            canCreateFields={fieldDrafts.length < MAX_NEW_FIELDS}
+          />
+        )}
+
+        {step === 'fields' && (
+          <NewFieldsStep
+            drafts={fieldDrafts}
+            onChange={updateFieldDraft}
+            onRemove={(columnIndex) =>
+              setColumnMapping({ ...columnMapping, [columnIndex]: { kind: 'ignore' } })
+            }
           />
         )}
 
@@ -942,16 +977,27 @@ export function ImportXlsxDialog({
                 Back
               </Button>
               <Button
-                onClick={() => setStep('values')}
+                onClick={() => setStep(fieldDrafts.length > 0 ? 'fields' : 'values')}
                 disabled={mappingErrors.length > 0}
               >
                 Next
               </Button>
             </>
           )}
-          {step === 'values' && (
+          {step === 'fields' && (
             <>
               <Button variant="outline" onClick={() => setStep('columns')}>
+                Back
+              </Button>
+              <Button onClick={() => setStep('values')}>Next</Button>
+            </>
+          )}
+          {step === 'values' && (
+            <>
+              <Button
+                variant="outline"
+                onClick={() => setStep(fieldDrafts.length > 0 ? 'fields' : 'columns')}
+              >
                 Back
               </Button>
               <Button onClick={handleForeignImport}>Import</Button>

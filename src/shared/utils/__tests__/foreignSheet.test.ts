@@ -12,10 +12,12 @@ import {
   inferColumnType,
   matchOption,
   readForeignSheet,
+  resolveNewFields,
   summariseSelectColumn,
   validateMapping,
   withCreatedListItems,
   withCreatedOptions,
+  MAX_NEW_FIELDS,
   type ColumnMapping,
   type SelectDecisions,
 } from '../foreignSheet'
@@ -370,6 +372,115 @@ describe('withCreatedListItems', () => {
     const existing = [labeled('c1', 'Food')]
     expect(withCreatedListItems(existing, undefined, 'cat')).toBe(existing)
     expect(withCreatedListItems(existing, [], 'cat')).toBe(existing)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Creating fields from columns
+// ---------------------------------------------------------------------------
+
+describe('resolveNewFields', () => {
+  function resolve(grid: unknown[][], mapping: ColumnMapping, existing = [CUSTOM_SELECT]) {
+    const sheet = readForeignSheet(workbookOf(grid))
+    return { sheet, ...resolveNewFields(sheet, mapping, existing) }
+  }
+
+  it('creates a text field and rewrites the mapping to its id', () => {
+    const { definitions, mapping } = resolve(
+      [['Receipt'], ['R-1'], ['R-2']],
+      { 1: { kind: 'newField', type: 'text', label: 'Receipt ref' } },
+    )
+    expect(definitions).toHaveLength(1)
+    expect(definitions[0]).toMatchObject({ label: 'Receipt ref', type: 'text', enabled: true })
+    expect(definitions[0].options).toBeUndefined()
+    // Row building sees an ordinary custom column, with nothing special to do.
+    expect(mapping[1]).toEqual({ kind: 'custom', fieldId: definitions[0].id })
+  })
+
+  it('seeds a select field with options from the column values', () => {
+    const { definitions } = resolve(
+      [['Leg'], ['North'], ['South'], ['North']],
+      { 1: { kind: 'newField', type: 'select', label: 'Leg' } },
+    )
+    expect(definitions[0].options?.map((o) => o.label)).toEqual(['North', 'South'])
+    // Ids are generated, never derived from the label.
+    expect(definitions[0].options?.every((o) => o.id && o.id !== o.label)).toBe(true)
+  })
+
+  it('creates no options for a boolean field', () => {
+    const { definitions } = resolve(
+      [['Paid back'], ['yes'], ['no']],
+      { 1: { kind: 'newField', type: 'boolean', label: 'Paid back' } },
+    )
+    expect(definitions[0].type).toBe('boolean')
+    expect(definitions[0].options).toBeUndefined()
+  })
+
+  it('falls back to the column header when the label is blank', () => {
+    const { definitions } = resolve(
+      [['Widget'], ['a']],
+      { 1: { kind: 'newField', type: 'text', label: '   ' } },
+    )
+    expect(definitions[0].label).toBe('Widget')
+  })
+
+  // Two fields with the same name would be indistinguishable everywhere.
+  it('drops a field whose name collides with an existing one', () => {
+    const { definitions, mapping } = resolve(
+      [['Trip leg'], ['x']],
+      { 1: { kind: 'newField', type: 'text', label: 'Trip leg' } },
+    )
+    expect(definitions).toHaveLength(0)
+    expect(mapping[1]).toEqual({ kind: 'ignore' })
+  })
+
+  it('drops a field colliding with another one created in the same import', () => {
+    const { definitions } = resolve(
+      [['A', 'B'], ['x', 'y']],
+      {
+        1: { kind: 'newField', type: 'text', label: 'Same' },
+        2: { kind: 'newField', type: 'text', label: 'same' },
+      },
+    )
+    expect(definitions).toHaveLength(1)
+  })
+
+  it('caps creation at MAX_NEW_FIELDS and ignores the rest', () => {
+    const count = MAX_NEW_FIELDS + 5
+    const headers = Array.from({ length: count }, (_, i) => `F${i}`)
+    const mapping: ColumnMapping = {}
+    headers.forEach((h, i) => { mapping[i + 1] = { kind: 'newField', type: 'text', label: h } })
+
+    const { definitions, mapping: next } = resolve([headers, headers.map(() => 'v')], mapping)
+
+    expect(definitions).toHaveLength(MAX_NEW_FIELDS)
+    // A malformed sheet with fifty junk headers cannot create fifty fields.
+    for (let i = MAX_NEW_FIELDS; i < count; i++) {
+      expect(next[i + 1]).toEqual({ kind: 'ignore' })
+    }
+  })
+
+  it('leaves non-newField targets untouched', () => {
+    const { mapping } = resolve(
+      [['Amount', 'Ref'], [10, 'R-1']],
+      {
+        1: { kind: 'core', field: 'totalAmount' },
+        2: { kind: 'newField', type: 'text', label: 'Ref' },
+      },
+    )
+    expect(mapping[1]).toEqual({ kind: 'core', field: 'totalAmount' })
+  })
+
+  it('produces unique ids for every created field', () => {
+    const { definitions } = resolve(
+      [['A', 'B', 'C'], ['x', 'y', 'z']],
+      {
+        1: { kind: 'newField', type: 'text', label: 'One' },
+        2: { kind: 'newField', type: 'text', label: 'Two' },
+        3: { kind: 'newField', type: 'text', label: 'Three' },
+      },
+    )
+    expect(new Set(definitions.map((d) => d.id)).size).toBe(3)
   })
 })
 

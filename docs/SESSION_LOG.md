@@ -2640,3 +2640,80 @@ Why this is the right shape:
 ⚠️ The consequence to carry into the prompt: month is **genuinely a different shape from every other dimension**. Every other dimension produces `FilterSelection` entries; this one produces a `range` override instead. `FilterRequest` already carries both `selections` and `range`, so the payload needs no change — but `computePivot`'s grouping key and the drill-down translation are no longer the same mechanism, and the design has to say so up front.
 
 Once it exists, the bespoke **"Day by day"** card (carry-in 0.3) and its overlap with "Spending over time" can finally fold into ordinary card definitions.
+
+---
+
+## ✨ Working Session 026 — 9 August 2026
+
+**Type**: Feature — Space refactor Phase 8 (import / export). **Completes the refactor.**
+**Tools used**: Claude Code (claude-code CLI)
+
+### Context
+
+Final phase. Every other surface already reads `getSpaceConfig()`; the spreadsheet did not. Export hard-coded country and category, emitted every built-in column unconditionally, and knew nothing about custom fields. Seven commits (six planned, plus one for the cached-formula-values fix).
+
+### What shipped
+
+| Commit | Scope |
+| --- | --- |
+| 1 | Hidden `_globeexpenses` metadata sheet — format version, space identity, full resolved `SpaceConfig` with field + option ids, member list |
+| 2 | Config-driven export columns; disabled-fields-holding-data warning |
+| 3 | Analysis sheet generated from `config.dashboardCards` |
+| 3b | Real computed values cached in every formula cell; truncation disclosure |
+| 4 | Lossless import path via the metadata sheet |
+| 5 | Foreign-spreadsheet import: column mapping, per-column select decisions |
+| 6 | New custom fields from unmatched columns; completeness sweep; doc corrections |
+
+Tests: **387 → 613**.
+
+### Four pre-existing bugs, all silent
+
+None threw. Each produced a plausible-looking wrong file, which is why they survived this long.
+
+**1. Country totals were always zero.** `buildAnalysisSheet` built its SUMPRODUCT filter as `emoji + ' ' + label` for *both* blocks. `Transaction.category` genuinely is stored emoji-prefixed (`effectiveCategories` maps to the concatenation and the select's value *is* that string), so category worked. `Transaction.country` is stored **bare** — `SmartCountrySelect` calls `onChange(name)` and the flag goes to `Space.countries[].emoji`. So country compared `"🇯🇵 Japan"` against `"Japan"` and matched nothing. Confirms audit finding **F7**; the architecture doc's claim of a flag prefix was wrong and is now corrected.
+
+The fix is structural, not a patched string: `dimensionCellText()` is the single function producing both the exported cell and the formula's filter value, so they cannot drift again.
+
+**2. No exported file contained any formulas.** `fml()` omitted the cached `v`, with a comment explaining it was to avoid caching a stale value. But SheetJS 0.18.5 skips any cell whose `v` is `undefined` — formula included. Isolated:
+
+```
+{ t:'n', f:'SUM(B1:B2)' }        → cell absent from the file
+{ t:'n', v:0, f:'SUM(B1:B2)' }   → written
+```
+
+This affected Balance, Balance Summary, the ✔/✅ check columns and Analysis — everything, not just the sheet being rewritten.
+
+**3. The first fix would have shown a grid of zeros.** A `v: 0` placeholder plus `fullCalcOnLoad` works in Excel and LibreOffice, but Google Sheets is a plausible destination and may render the cached value as-is. Rather than ship on an assumption I could not test from here, every formula now carries its **correct** computed result; `fullCalcOnLoad` became belt, not braces.
+
+**4. Every re-imported file shifted every date back one day.** The Excel epoch (1899-12-30) predates standardised time zones — Europe/Paris was on LMT, `+00:09:21` — so the gap between it and a modern *local* midnight is not a whole number of days. Export survived via `Math.round`; import did not, and SheetJS returned `10-06-2026` as `09-06-2026 23:59:39`.
+
+⚠️ The first fix here was also wrong, and only cross-timezone testing caught it: rounding to the nearest local midnight handles Paris but not `Pacific/Kiritimati`, which was **−10:40** in 1899 and is **+14:00** today — over 24 hours of drift, which no ±12h rounding absorbs. Both directions now convert **entirely in UTC**, and `parseSheetFile` reads raw serials with `cellDates: false` rather than letting SheetJS construct Dates. Verified green under UTC, New_York, Kolkata, Chatham, Kiritimati and Apia.
+
+**Data consequence**: transactions from files imported before this fix have dates one day early in Firestore. The mechanism is fixed; already-imported rows are not.
+
+### `pnpm tsc --noEmit` was a no-op — in every phase
+
+The root `tsconfig.json` has `"files": []` and only project references, so `--noEmit` type-checks **nothing** and exits 0. It was verification step 1 in all eight phase prompts. Coverage was not actually lost — `pnpm build` runs `tsc -b` and was also run each phase — but the cited command was worthless. `CLAUDE.md` now documents `pnpm tsc -b` as the convention.
+
+### Design decisions
+
+**Analysis is generated from dashboard cards, not a second config surface.** The user already declared which breakdowns matter by building cards. A card whose dimension has no exported column is skipped; no card surviving omits the sheet entirely rather than emitting an empty one.
+
+**Blocks are capped, and say so.** 60 rows for 1D, 25×15 for pivots, ranked by spend. Deliberately *not* the dashboard's top-5/top-8 — that is a small-screen readability affordance, this is a file-size and recalculation-cost limit. Different constraint, different numbers. Each capped block carries a note (`Top 60 of 78 by spend — 18 more not shown`): a spreadsheet implies completeness in a way a phone card does not, and someone reconciling a total would otherwise find an unexplainable gap.
+
+**Optional built-in columns are typed `number | undefined`.** Making absence a type-level fact forced every consumer to handle it, which is how the two unguarded reads in `sheetImport.ts` surfaced. Column widths are now assigned *by column number* rather than pushed in order — pushing meant one disabled built-in shifted every later width by one.
+
+**Import has three paths, chosen by the file.** Lossless (our export, same space — ids match, one confirmation, nothing to ask); foreign space (our export elsewhere — config known, ids not); foreign file (no structure — column mapping). A **partial** member-id match is treated as foreign: importing half the splits by id and silently orphaning the rest is worse than asking.
+
+**The GlobeExpenses layout is still tried first.** Routing every metadata-less file through column mapping was tempting, but pre-Phase-8 exports have no metadata sheet *and* the hidden `txId` column has no header text — auto-matching would ignore it, so re-importing an old export would duplicate every transaction instead of updating in place.
+
+**Select decisions are per column, never per value.** Importing into a near-empty space leaves nearly every value unmatched; that is the main case, not an edge case.
+
+**Rows with no per-member columns** attribute the full amount to the signed-in user's slot. Otherwise a bank or personal-budget export imports with empty splits — visible in the list, invisible in every balance.
+
+### Not done / still open
+
+- **No data-preview step on the foreign path.** The two decision screens already show counts and samples; a third read-only screen felt like friction. Reconsider if imports go wrong in practice.
+- **Google Sheets `fullCalcOnLoad` behaviour is still unverified** — worked around rather than confirmed. The cached values make it moot, but the flag's actual support is unknown.
+- **Dates already corrupted by bug 4** are not repaired.
+- **`space.countries` entries storing `'🌍'`** — unchanged, see the open country-canonicalisation bug from Session 025. Phase 8 made the *export* correct without touching stored data.

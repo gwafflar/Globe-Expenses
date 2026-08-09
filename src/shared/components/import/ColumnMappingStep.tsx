@@ -8,11 +8,12 @@ import {
   OPTIONAL_BUILT_INS,
   type OptionalBuiltIn,
 } from '@/shared/utils/sheetColumns'
-import type {
-  ColumnMapping,
-  ColumnTarget,
-  CoreField,
-  ForeignColumn,
+import {
+  inferColumnType,
+  type ColumnMapping,
+  type ColumnTarget,
+  type CoreField,
+  type ForeignColumn,
 } from '@/shared/utils/foreignSheet'
 
 const CORE_LABELS: Record<CoreField, string> = {
@@ -45,7 +46,7 @@ export function targetToValue(target: ColumnTarget): string {
   }
 }
 
-export function valueToTarget(value: string, header: string): ColumnTarget {
+export function valueToTarget(value: string, col: ForeignColumn): ColumnTarget {
   const [kind, rest] = value.split(':', 2)
   switch (kind) {
     case 'core':     return { kind: 'core', field: rest as CoreField }
@@ -53,9 +54,9 @@ export function valueToTarget(value: string, header: string): ColumnTarget {
     case 'custom':   return { kind: 'custom', fieldId: rest }
     case 'cost':     return { kind: 'memberCost', travelMemberId: rest }
     case 'paid':     return { kind: 'memberPaid', travelMemberId: rest }
-    // Type and label are refined in the field-creation step (Part 6); this is
-    // just the initial guess so the row shows something sensible immediately.
-    case 'newField': return { kind: 'newField', type: 'text', label: header }
+    // Seed the type from the column's own values; the next step shows the
+    // inference with its evidence so the user can overrule it.
+    case 'newField': return { kind: 'newField', type: inferColumnType(col).type, label: col.header }
     default:         return { kind: 'ignore' }
   }
 }
@@ -87,7 +88,7 @@ export function ColumnMappingStep({
   const isSolo = space.members.length < 2
 
   function setTarget(col: ForeignColumn, value: string) {
-    onChange({ ...mapping, [col.index]: valueToTarget(value, col.header) })
+    onChange({ ...mapping, [col.index]: valueToTarget(value, col) })
   }
 
   return (
