@@ -192,14 +192,26 @@ function parseFsDate(d: string): Date {
   return new Date(yyyy, mm - 1, dd)
 }
 
+/** Milliseconds in a day. */
+const MS_PER_DAY = 24 * 60 * 60 * 1000
+
 /**
- * Convert a JS Date to an Excel date serial number.
- * Excel epoch is 1899-12-30 (not 1900-01-01) due to the intentional 1900 leap year bug.
+ * Convert a "DD-MM-YYYY" transaction date to an Excel date serial.
+ *
+ * ⚠️ Computed entirely in UTC. The Excel epoch (1899-12-30) predates
+ * standardised time zones, so the offset between it and a modern LOCAL
+ * midnight is not a whole number of days — Europe/Paris was on LMT (+00:09:21)
+ * in 1899, and Pacific/Kiritimati was on −10:40 while today it is +14:00, a
+ * difference of more than a day. Doing this arithmetic on local Dates made the
+ * serial depend on the exporting machine's time zone; in UTC it is exact
+ * integer arithmetic with nothing to round.
+ *
+ * Excel's epoch is 1899-12-30 rather than 1900-01-01 because of the
+ * intentional 1900-leap-year bug it inherited from Lotus 1-2-3.
  */
-function dateToSerial(date: Date): number {
-  const excelEpoch = new Date(1899, 11, 30) // 1899-12-30
-  const msPerDay = 24 * 60 * 60 * 1000
-  return Math.round((date.getTime() - excelEpoch.getTime()) / msPerDay)
+export function fsDateToSerial(d: string): number {
+  const [dd, mm, yyyy] = d.split('-').map(Number)
+  return (Date.UTC(yyyy, mm - 1, dd) - Date.UTC(1899, 11, 30)) / MS_PER_DAY
 }
 
 /**
@@ -207,10 +219,9 @@ function dateToSerial(date: Date): number {
  * SheetJS (with cellDates:true) will re-read this as a JS Date object.
  */
 function dat(ws: WS, col: number, row: number, dateStr: string, s?: S) {
-  const jsDate = parseFsDate(dateStr)
   const cell: WS[string] = {
     t: 'n',
-    v: dateToSerial(jsDate),
+    v: fsDateToSerial(dateStr),
     z: 'DD/MM/YYYY',
   }
   if (s) cell.s = { ...s, numFmt: 'DD/MM/YYYY' }

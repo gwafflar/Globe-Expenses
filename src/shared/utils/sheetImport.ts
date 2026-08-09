@@ -10,9 +10,17 @@
 import * as XLSX from 'xlsx'
 import { collection, doc, writeBatch, serverTimestamp } from 'firebase/firestore'
 import { db } from '@/services/firebase'
-import { buildColumnMap, colLetter } from '@/shared/utils/sheetColumns'
+import {
+  buildColumnMap,
+  colLetter,
+  columnMapForConfig,
+  parseBooleanCell,
+  type ColumnMap,
+} from '@/shared/utils/sheetColumns'
 import { getExchangeRate } from '@/shared/utils/exchangeRates'
 import { SHEET_PARAMS, SHEET_EXPENSES } from '@/shared/utils/sheetExport'
+import { parseMetaSheet, type MetaPayload } from '@/shared/utils/sheetMeta'
+import type { CustomFieldDef, CustomValue, Space } from '@/spaces/types'
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -22,6 +30,9 @@ export interface SheetMemberSlot {
   slotIndex: number       // 0-based (0 = Member_1)
   nameInSheet: string     // display name read from the Parameters tab
   rowCount: number        // number of data rows involving this slot (non-zero amounts)
+  /** From the metadata sheet only. Lets a re-import into the SAME space map
+   *  slots by stable id instead of by display name. */
+  travelMemberId?: string
 }
 
 export interface ParsedSheetRow {
@@ -40,6 +51,14 @@ export interface ParsedSheetRow {
   paidPerSlot: (number | undefined)[]   // length = nMembersInSheet
   exchangeRate?: number   // present when col I contains a numeric rate; undefined for older files
   txId?: string           // Firestore doc ID from a previous export (for re-import dedup)
+  /** Custom field values keyed by the FILE's CustomFieldDef.id, with select
+   *  values already resolved to OPTION IDS via the metadata sheet. Only
+   *  populated on the lossless path. */
+  custom?: Record<string, CustomValue>
+  /** Raw cell text per custom column, keyed by the file's field id. Kept
+   *  alongside `custom` so the foreign path (Part 5) can label-match without
+   *  re-reading the workbook. */
+  customText?: Record<string, string>
 }
 
 export interface ParseResult {
@@ -47,6 +66,15 @@ export interface ParseResult {
   slots: SheetMemberSlot[]  // only slots with rowCount > 0
   mainCurrency: string
   nMembersInSheet: number
+  /** The metadata sheet's payload when the file carried a readable one.
+   *  Its presence is what selects the lossless import path. */
+  meta: MetaPayload | null
+  /** Set when a metadata sheet was present but could not be used — shown to
+   *  the user so a silent downgrade to label matching is never invisible. */
+  metaWarning?: string
+  /** Custom field definitions the file exported, in column order. Empty on a
+   *  foreign file. */
+  customFields: CustomFieldDef[]
 }
 
 // ---------------------------------------------------------------------------
@@ -91,14 +119,21 @@ function asNumber(v: unknown): number {
 export function parseDate(raw: unknown): string | undefined {
   let date: Date | undefined
 
-  if (raw instanceof Date) {
-    // SheetJS correctly identified a date cell — use directly
+  if (typeof raw === 'number' && raw > 0) {
+    // Raw Excel serial → calendar date, entirely in UTC.
+    //
+    // ⚠️ Never do this with local Dates. The Excel epoch (1899-12-30) predates
+    // standardised time zones, so the offset to a modern local midnight is not
+    // a whole number of days: Europe/Paris was on LMT (+00:09:21) in 1899, and
+    // Pacific/Kiritimati was on −10:40 then versus +14:00 now — over a day of
+    // drift. Local arithmetic made the parsed date depend on the importing
+    // machine's time zone and silently shifted every transaction by a day.
+    return formatUtcDate(new Date(Date.UTC(1899, 11, 30) + Math.round(raw) * 86400000))
+  } else if (raw instanceof Date) {
+    // A Date only reaches here from a workbook read elsewhere with cellDates
+    // on; parseSheetFile deliberately reads raw serials instead. SheetJS builds
+    // these so the LOCAL calendar fields carry the intended date.
     date = raw
-  } else if (typeof raw === 'number' && raw > 0) {
-    // Raw Excel serial — convert using the Excel epoch (1899-12-30).
-    // This handles files exported before the date format fix was applied.
-    const excelEpoch = new Date(1899, 11, 30)
-    date = new Date(excelEpoch.getTime() + raw * 24 * 60 * 60 * 1000)
   } else if (typeof raw === 'string') {
     const trimmed = raw.trim()
     // Try DD/MM/YYYY (our sheet display format)
@@ -125,6 +160,14 @@ export function parseDate(raw: unknown): string | undefined {
   return `${dd}-${mm}-${yyyy}`
 }
 
+/** "DD-MM-YYYY" from a Date's UTC fields. */
+function formatUtcDate(d: Date): string | undefined {
+  if (isNaN(d.getTime())) return undefined
+  const dd   = String(d.getUTCDate()).padStart(2, '0')
+  const mm   = String(d.getUTCMonth() + 1).padStart(2, '0')
+  return `${dd}-${mm}-${d.getUTCFullYear()}`
+}
+
 // ---------------------------------------------------------------------------
 // Step 1 — Parse
 // ---------------------------------------------------------------------------
@@ -140,8 +183,19 @@ export function parseDate(raw: unknown): string | undefined {
 export async function parseSheetFile(file: File): Promise<ParseResult> {
   // Read file as ArrayBuffer
   const buffer = await file.arrayBuffer()
-  // cellDates: true → date-formatted numeric cells become JS Date objects
-  const wb = XLSX.read(buffer, { cellDates: true })
+  // ⚠️ cellDates is deliberately OFF. Letting SheetJS build Date objects makes
+  // the parsed day depend on the importing machine's time zone, because the
+  // 1899 Excel epoch predates standardised offsets (see parseDate). Reading the
+  // raw serial and converting in UTC is exact. Cells that were already stored
+  // as text still arrive as strings and are handled by parseDate's string
+  // branch — including the numFmtId=164 / "General" case, which has always
+  // yielded raw integers here.
+  const wb = XLSX.read(buffer, { cellDates: false })
+
+  // ── Metadata sheet — decides which import path we are on ──────────────────
+  const metaResult = parseMetaSheet(wb)
+  const meta = metaResult.status === 'ok' ? metaResult.payload : null
+  const metaWarning = metaResult.status === 'unsupported' ? metaResult.reason : undefined
 
   // ── Read Parameters sheet ──────────────────────────────────────────────────
   const wsParams = wb.Sheets[SHEET_PARAMS]
@@ -160,7 +214,19 @@ export async function parseSheetFile(file: File): Promise<ParseResult> {
   }
 
   const nMembersInSheet = Math.max(1, slotNames.length)
-  const cm = buildColumnMap(nMembersInSheet)
+
+  // The column layout. With metadata we know it exactly, including which
+  // built-ins were omitted and which custom fields were emitted. Without it we
+  // fall back to the historical all-built-ins layout, which is what every
+  // pre-Phase-8 file uses.
+  let cm: ColumnMap
+  let customFields: CustomFieldDef[] = []
+  if (meta) {
+    cm = columnMapForConfig(nMembersInSheet, meta.config, meta.includedDisabledFields ?? [])
+    customFields = cm.customFields
+  } else {
+    cm = buildColumnMap(nMembersInSheet)
+  }
 
   // ── Read Expenses sheet ───────────────────────────────────────────────────
   const wsExpenses = wb.Sheets[SHEET_EXPENSES]
@@ -213,6 +279,34 @@ export async function parseSheetFile(file: File): Promise<ParseResult> {
     // Read the hidden txId column (present in GlobeExpenses exports for re-import dedup)
     const txId = asString(getCellValue(wsExpenses, cm.txId, r))
 
+    // Custom field columns. `customText` keeps the raw cell for the foreign
+    // path; `custom` is the resolved value and is only meaningful when the
+    // definitions came from the metadata sheet.
+    const customText: Record<string, string> = {}
+    const custom: Record<string, CustomValue> = {}
+    for (const def of customFields) {
+      const raw = asString(getCellValue(wsExpenses, cm.custom[def.id], r))
+      if (raw !== undefined) customText[def.id] = raw
+
+      if (def.type === 'boolean') {
+        // ⚠️ Only `true` is stored. buildCustomPayload() omits false entirely,
+        // so writing `false` here would produce documents that differ from
+        // ones the app itself creates.
+        if (parseBooleanCell(raw)) custom[def.id] = true
+      } else if (raw !== undefined && raw !== '') {
+        if (def.type === 'select') {
+          // The cell holds the option LABEL; the metadata carries the id↔label
+          // mapping, so this is a deterministic lookup, not a guess.
+          const option = def.options?.find(
+            (o) => o.label.toLowerCase() === raw.toLowerCase(),
+          )
+          if (option) custom[def.id] = option.id
+        } else {
+          custom[def.id] = raw
+        }
+      }
+    }
+
     rows.push({
       date:          parseDate(rawDate) || new Date().toLocaleDateString('fr-FR').replace(/\//g, '-'),
       country:       asString(getOptionalCellValue(wsExpenses, cm.country,       r)),
@@ -229,10 +323,14 @@ export async function parseSheetFile(file: File): Promise<ParseResult> {
       paidPerSlot,
       ...(exchangeRate !== undefined && { exchangeRate }),
       ...(txId && { txId }),
+      ...(Object.keys(custom).length > 0 && { custom }),
+      ...(Object.keys(customText).length > 0 && { customText }),
     })
   }
 
-  // Build slot list — only include slots with at least 1 non-zero amount
+  // Build slot list — only include slots with at least 1 non-zero amount.
+  // Slot i corresponds to Member_{i+1} in the Parameters sheet, which is the
+  // same position the metadata sheet wrote its member list in.
   const slots: SheetMemberSlot[] = slotNames
     .map((nameInSheet, slotIndex) => {
       const rowCount = rows.filter(
@@ -240,11 +338,91 @@ export async function parseSheetFile(file: File): Promise<ParseResult> {
           (row.costPerSlot[slotIndex] ?? 0) !== 0 ||
           (row.paidPerSlot[slotIndex] ?? 0) !== 0,
       ).length
-      return { slotIndex, nameInSheet, rowCount }
+      const travelMemberId = meta?.members[slotIndex]?.travelMemberId
+      return { slotIndex, nameInSheet, rowCount, ...(travelMemberId && { travelMemberId }) }
     })
     .filter((s) => s.rowCount > 0)
 
-  return { rows, slots, mainCurrency, nMembersInSheet }
+  return {
+    rows,
+    slots,
+    mainCurrency,
+    nMembersInSheet,
+    meta,
+    customFields,
+    ...(metaWarning && { metaWarning }),
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Import path selection
+// ---------------------------------------------------------------------------
+
+export type ImportPath =
+  /** Our own export, coming back into the space it came from. Ids match: no
+   *  member mapping, no label matching, nothing to ask the user. */
+  | { kind: 'lossless'; slotToTravelMemberId: Record<number, string | undefined> }
+  /** Our own export, going into a DIFFERENT space. The config is known but the
+   *  ids are foreign, so members and custom fields both need mapping. */
+  | { kind: 'foreignSpace' }
+  /** No usable metadata: a spreadsheet from elsewhere, or a heavily edited one. */
+  | { kind: 'foreignFile'; reason?: string }
+
+/**
+ * Decide how this file should be imported into this space.
+ *
+ * The lossless path requires that EVERY slot carrying data resolves to a member
+ * that still exists in the target space. A partial match is treated as a
+ * different space: silently importing half the splits by id and leaving the
+ * rest unassigned would be worse than asking.
+ */
+export function selectImportPath(parseResult: ParseResult, space: Space): ImportPath {
+  if (!parseResult.meta) {
+    return { kind: 'foreignFile', ...(parseResult.metaWarning && { reason: parseResult.metaWarning }) }
+  }
+
+  const known = new Set(space.members.map((m) => m.travelMemberId))
+  const active = parseResult.slots
+  const allResolve = active.length > 0
+    && active.every((s) => s.travelMemberId !== undefined && known.has(s.travelMemberId))
+
+  if (!allResolve) return { kind: 'foreignSpace' }
+
+  const slotToTravelMemberId: Record<number, string | undefined> = {}
+  for (const slot of active) slotToTravelMemberId[slot.slotIndex] = slot.travelMemberId
+
+  return { kind: 'lossless', slotToTravelMemberId }
+}
+
+/**
+ * Custom values that can be written into the TARGET space as they stand.
+ *
+ * A field id survives only when the target space defines the same field, and a
+ * `select` value only when the target still has that option id. Anything else
+ * is dropped here rather than written as a dangling reference — the foreign
+ * path maps those by label instead (Part 5).
+ */
+export function resolveCustomForSpace(
+  custom: Record<string, CustomValue> | undefined,
+  targetFields: CustomFieldDef[],
+): Record<string, CustomValue> | undefined {
+  if (!custom) return undefined
+  const byId = new Map(targetFields.map((f) => [f.id, f]))
+  const out: Record<string, CustomValue> = {}
+
+  for (const [fieldId, value] of Object.entries(custom)) {
+    const def = byId.get(fieldId)
+    if (!def) continue
+    if (def.type === 'select') {
+      if (def.options?.some((o) => o.id === value)) out[fieldId] = value
+    } else if (def.type === 'boolean') {
+      if (value === true) out[fieldId] = true
+    } else {
+      out[fieldId] = value
+    }
+  }
+
+  return Object.keys(out).length > 0 ? out : undefined
 }
 
 // ---------------------------------------------------------------------------
@@ -278,6 +456,9 @@ export async function importParsedRows(
   mainCurrency: string,
   /** Called after each batch commit with (committedSoFar, totalToCommit). */
   onProgress?: (committed: number, total: number) => void,
+  /** The TARGET space's custom field definitions. Values are filtered against
+   *  these so a foreign field id is never written as a dangling reference. */
+  targetCustomFields: CustomFieldDef[] = [],
 ): Promise<ImportResult> {
   let imported = 0
   let updated = 0
@@ -370,6 +551,10 @@ export async function importParsedRows(
       ...(row.city          !== undefined && { city:          row.city }),
       ...(row.notes         !== undefined && { notes:         row.notes }),
     }
+
+    // Custom values, filtered to fields the target space actually defines.
+    const custom = resolveCustomForSpace(row.custom, targetCustomFields)
+    if (custom) data.custom = custom
 
     // Use existing doc ref if txId is present (re-import dedup), otherwise generate a new ID.
     // For new documents, also set createdAt.

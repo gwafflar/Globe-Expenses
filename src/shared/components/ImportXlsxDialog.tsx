@@ -25,9 +25,12 @@ import { Button } from '@/components/ui/button'
 import {
   parseSheetFile,
   importParsedRows,
+  selectImportPath,
+  type ImportPath,
   type ParseResult,
   type ImportResult,
 } from '@/shared/utils/sheetImport'
+import { getSpaceConfig } from '@/spaces/config'
 
 // ---------------------------------------------------------------------------
 // Props
@@ -321,6 +324,88 @@ function ResultStep({
 }
 
 // ---------------------------------------------------------------------------
+// Lossless path — confirmation instead of a wizard
+// ---------------------------------------------------------------------------
+
+/** What the file turned out to be, shown before a one-tap import.
+ *  Deliberately short: on this path there is nothing to decide, so the screen
+ *  exists to confirm the file is the one the user meant, not to gather input. */
+function LosslessConfirmStep({
+  parseResult,
+  space,
+}: {
+  parseResult: ParseResult
+  space: Space
+}) {
+  const meta = parseResult.meta!
+  const fieldCount = meta.config.customFields.filter((f) => f.enabled).length
+  const sameName = meta.space.name === space.name
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="rounded-md bg-green-50 px-3 py-2 text-sm text-green-800 dark:bg-green-900/30 dark:text-green-300">
+        This is a GlobeExpenses export of this space. Everything maps
+        automatically — no matching needed.
+      </div>
+
+      <dl className="flex flex-col divide-y rounded-lg border text-sm">
+        <div className="flex items-center justify-between gap-3 px-3 py-2">
+          <dt className="text-muted-foreground">Space</dt>
+          <dd className="min-w-0 truncate font-medium">
+            {meta.space.emoji ? `${meta.space.emoji} ` : ''}{meta.space.name}
+          </dd>
+        </div>
+        <div className="flex items-center justify-between gap-3 px-3 py-2">
+          <dt className="text-muted-foreground">Transactions</dt>
+          <dd className="font-medium">{parseResult.rows.length}</dd>
+        </div>
+        <div className="flex items-center justify-between gap-3 px-3 py-2">
+          <dt className="text-muted-foreground">Members</dt>
+          <dd className="font-medium">{parseResult.slots.length}</dd>
+        </div>
+        {fieldCount > 0 && (
+          <div className="flex items-center justify-between gap-3 px-3 py-2">
+            <dt className="text-muted-foreground">Custom fields</dt>
+            <dd className="font-medium">{fieldCount}</dd>
+          </div>
+        )}
+        <div className="flex items-center justify-between gap-3 px-3 py-2">
+          <dt className="text-muted-foreground">Exported</dt>
+          <dd className="font-medium">
+            {new Date(meta.exportedAt).toLocaleDateString()}
+          </dd>
+        </div>
+      </dl>
+
+      {/* The space was renamed since the export. Ids still match, so the import
+          is still lossless — but say so rather than letting it look wrong. */}
+      {!sameName && (
+        <p className="rounded-md bg-blue-50 px-3 py-2 text-xs text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+          The space was called “{meta.space.name}” when this file was exported.
+          It is the same space, so the import is unaffected.
+        </p>
+      )}
+
+      <p className="text-xs text-muted-foreground">
+        Rows that came from this space are updated in place rather than
+        duplicated.
+      </p>
+    </div>
+  )
+}
+
+/** Shown when the file is one of ours but belongs to a different space. */
+function ForeignSpaceNotice({ parseResult }: { parseResult: ParseResult }) {
+  return (
+    <div className="rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+      This file was exported from <strong>{parseResult.meta?.space.name}</strong>, a
+      different space. Its members and field values don’t have matching ids here,
+      so you’ll be asked to match them below.
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Step 2.5 — Data preview (read-only)
 // ---------------------------------------------------------------------------
 
@@ -457,9 +542,12 @@ export function ImportXlsxDialog({
   space,
   currentUserUid,
 }: ImportXlsxDialogProps) {
-  type Step = 'upload' | 'mapping' | 'preview' | 'result'
+  // 'confirm' is the lossless path's single screen; 'mapping'/'preview' are the
+  // wizard the other two paths still go through.
+  type Step = 'upload' | 'confirm' | 'mapping' | 'preview' | 'result'
   const [step, setStep]                 = useState<Step>('upload')
   const [parseResult, setParseResult]   = useState<ParseResult | null>(null)
+  const [importPath, setImportPath]     = useState<ImportPath | null>(null)
   // Maps sheet slot index → travelMemberId (the stable ID used in Split[])
   const [slotToTravelMemberId, setSlotToTravelMemberId] = useState<Record<number, string | undefined>>({})
   const [importResult, setImportResult] = useState<ImportResult | null>(null)
@@ -472,6 +560,7 @@ export function ImportXlsxDialog({
     if (!nextOpen) {
       setStep('upload')
       setParseResult(null)
+      setImportPath(null)
       setSlotToTravelMemberId({})
       setImportResult(null)
       setIsImporting(false)
@@ -480,16 +569,25 @@ export function ImportXlsxDialog({
     onOpenChange(nextOpen)
   }
 
-  // Step 1 → 2
+  // Step 1 → 2. The file itself decides which path we take.
   const handleParsed = useCallback(
     (result: ParseResult) => {
       setParseResult(result)
-      // Auto-match slot names to space member display names
-      const autoMapping = buildInitialMapping(result.slots, space.members)
-      setSlotToTravelMemberId(autoMapping)
+      const path = selectImportPath(result, space)
+      setImportPath(path)
+
+      if (path.kind === 'lossless') {
+        // Ids match: slots are already resolved, so there is nothing to ask.
+        setSlotToTravelMemberId(path.slotToTravelMemberId)
+        setStep('confirm')
+        return
+      }
+
+      // Auto-match slot names to space member display names; the user corrects.
+      setSlotToTravelMemberId(buildInitialMapping(result.slots, space.members))
       setStep('mapping')
     },
-    [space.members],
+    [space],
   )
 
   // Step 2 (mapping) → preview
@@ -512,6 +610,7 @@ export function ImportXlsxDialog({
       currentUserUid,
       mainCurrency,
       (committed, total) => setImportProgress({ committed, total }),
+      getSpaceConfig(space).customFields,
     )
 
     // ── Sync space lists ───────────────────────────────────────────────────
@@ -567,11 +666,14 @@ export function ImportXlsxDialog({
   const assignedIds = Object.values(slotToTravelMemberId).filter((id): id is string => id !== undefined)
   const hasDuplicates = assignedIds.length !== new Set(assignedIds).size
 
+  // The lossless path is two steps, not four — labelling it "Step 2 of 4" would
+  // promise work that never comes.
   const stepLabel: Record<Step, string> = {
-    upload:  'Step 1 of 4 — Upload',
+    upload:  importPath?.kind === 'lossless' ? 'Step 1 of 2 — Upload' : 'Step 1 of 4 — Upload',
+    confirm: 'Step 2 of 2 — Confirm',
     mapping: 'Step 2 of 4 — Member mapping',
     preview: 'Step 3 of 4 — Data preview',
-    result:  'Step 4 of 4 — Done',
+    result:  importPath?.kind === 'lossless' ? 'Done' : 'Step 4 of 4 — Done',
   }
 
   return (
@@ -585,13 +687,29 @@ export function ImportXlsxDialog({
         {/* Step content */}
         {step === 'upload' && <UploadStep onParsed={handleParsed} />}
 
+        {step === 'confirm' && parseResult && (
+          <LosslessConfirmStep parseResult={parseResult} space={space} />
+        )}
+
         {step === 'mapping' && parseResult && (
-          <MappingStep
-            parseResult={parseResult}
-            space={space}
-            slotToTravelMemberId={slotToTravelMemberId}
-            onChange={setSlotToTravelMemberId}
-          />
+          <div className="flex flex-col gap-4">
+            {/* Say plainly why matching is being asked for, rather than
+                dropping the user into a table with no explanation. */}
+            {importPath?.kind === 'foreignSpace' && (
+              <ForeignSpaceNotice parseResult={parseResult} />
+            )}
+            {importPath?.kind === 'foreignFile' && importPath.reason && (
+              <div className="rounded-md bg-yellow-50 px-3 py-2 text-sm text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300">
+                {importPath.reason} Values will be matched by name instead.
+              </div>
+            )}
+            <MappingStep
+              parseResult={parseResult}
+              space={space}
+              slotToTravelMemberId={slotToTravelMemberId}
+              onChange={setSlotToTravelMemberId}
+            />
+          </div>
         )}
 
         {step === 'preview' && parseResult && (
@@ -608,6 +726,14 @@ export function ImportXlsxDialog({
             <Button variant="outline" onClick={() => handleOpenChange(false)}>
               Cancel
             </Button>
+          )}
+          {step === 'confirm' && (
+            <>
+              <Button variant="outline" onClick={() => setStep('upload')}>
+                Back
+              </Button>
+              <Button onClick={handleImport}>Import</Button>
+            </>
           )}
           {step === 'mapping' && (
             <>
