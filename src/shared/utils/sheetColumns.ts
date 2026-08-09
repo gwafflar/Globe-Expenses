@@ -214,6 +214,39 @@ export function customCellValue(def: CustomFieldDef, raw: CustomValue | undefine
   return String(raw)
 }
 
+/**
+ * The exact text a transaction writes into one dimension's column.
+ *
+ * ⚠️ THE function the Analysis sheet's formulas depend on. A SUMPRODUCT filter
+ * value that differs by so much as an emoji from what the column holds sums
+ * silently to zero — no #REF!, no error, just a wrong number. Deriving both the
+ * cell and the formula's filter from this one place is what prevents that.
+ *
+ * The built-ins are NOT uniform, and that is stored reality rather than a
+ * choice made here: `category` and `paymentMethod` store the emoji-prefixed
+ * display string the picker offered, while `country` stores the bare name and
+ * keeps its flag in the space's country list. See audit finding F7.
+ *
+ * Returns '' when the transaction has no value for the dimension.
+ */
+export function dimensionCellText(
+  tx: { country?: string; city?: string; category?: string; paymentMethod?: string; currency?: string; custom?: Record<string, CustomValue> },
+  key: string,
+  customFields: CustomFieldDef[],
+): string {
+  switch (key) {
+    case 'country':       return tx.country ?? ''
+    case 'city':          return tx.city ?? ''
+    case 'category':      return tx.category ?? ''
+    case 'paymentMethod': return tx.paymentMethod ?? ''
+    case 'currency':      return tx.currency ?? ''
+    default: {
+      const def = customFields.find((f) => f.id === key)
+      return def ? customCellValue(def, tx.custom?.[key]) : ''
+    }
+  }
+}
+
 /** Accepted spellings for a boolean cell on import, including the locale forms
  *  the importer already tolerates elsewhere. Anything unrecognised is `false`
  *  (SPEC §9bis: "anything unrecognised is no"), including blanks. */

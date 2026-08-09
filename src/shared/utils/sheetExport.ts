@@ -14,19 +14,27 @@
 import XLSXStyleRaw from 'xlsx-js-style'
 import type * as XLSXTypes from 'xlsx'
 const XLSXStyle = XLSXStyleRaw as unknown as typeof XLSXTypes
-import type { Space, SpaceMember } from '@/spaces/types'
+import type { CustomFieldDef, Space, SpaceConfig, SpaceMember } from '@/spaces/types'
 import { getSpaceMainCurrency } from '@/spaces/types'
 import { getSpaceConfig } from '@/spaces/config'
 import type { Transaction } from '@/transactions/types'
 import { EXCHANGE_RATES } from '@/shared/utils/exchangeRates'
 import {
   colLetter,
+  columnForDimension,
   columnMapForConfig,
   customCellValue,
+  dimensionCellText,
   OPTIONAL_BUILT_INS,
   type ColumnMap,
   type OptionalBuiltIn,
 } from '@/shared/utils/sheetColumns'
+import {
+  breakdownDimensions,
+  cardTitle,
+  resolveDashboardCards,
+  visibleDashboardCards,
+} from '@/spaces/utils/dashboardCards'
 import { SHEET_META, buildMetaSheet, hideSheet } from '@/shared/utils/sheetMeta'
 
 // ---------------------------------------------------------------------------
@@ -133,9 +141,17 @@ function str(ws: WS, col: number, row: number, v: string, s?: S) {
 function num(ws: WS, col: number, row: number, v: number, s?: S) {
   ws[addr(col, row)] = s ? { t: 'n', v, s } : { t: 'n', v }
 }
-// Formula — omit v so xlsx-js-style doesn't cache a stale value
+/**
+ * Formula cell.
+ *
+ * ⚠️ `v: 0` is REQUIRED, not a stale cached value. SheetJS 0.18.5 skips any
+ * cell whose `v` is undefined when serialising — formula and all — so writing
+ * `{ t:'n', f }` alone produced files with the formula silently missing. The
+ * placeholder is never shown: buildSpaceWorkbook() sets fullCalcOnLoad, so
+ * Excel and LibreOffice recompute every formula when the file is opened.
+ */
 function fml(ws: WS, col: number, row: number, formula: string, s?: S) {
-  ws[addr(col, row)] = s ? { t: 'n', f: formula, s } : { t: 'n', f: formula }
+  ws[addr(col, row)] = s ? { t: 'n', v: 0, f: formula, s } : { t: 'n', v: 0, f: formula }
 }
 // Apply (or update) a style on an existing or empty cell
 function sty(ws: WS, col: number, row: number, s: S) {
@@ -614,11 +630,99 @@ function buildBalanceSummarySheet(space: Space, N: number): WS {
 // ---------------------------------------------------------------------------
 // 📊 Analysis sheet
 // ---------------------------------------------------------------------------
-function buildAnalysisSheet(space: Space, N: number, cm: ColumnMap): unknown {
+
+/** Row label for a transaction with no value on a dimension. Matches empty
+ *  cells via `=""`, which also matches the unused rows below the data — those
+ *  contribute 0 because their cost cells are empty too, so the total is right. */
+const NONE_LABEL = '(none)'
+
+/** Caps on generated block size. The dashboard's own top-N (5 rows, 8 sections)
+ *  is a small-screen affordance; a spreadsheet can afford far more, but a
+ *  dimension with 300 distinct values must still not generate a 300-row block
+ *  or a 300×300 grid. Values are ranked by spend, so a cap keeps the largest. */
+const MAX_1D_ROWS = 60
+const MAX_PIVOT_ROWS = 25
+const MAX_PIVOT_COLS = 15
+
+/** Distinct values of one dimension across the exported transactions, ranked by
+ *  total spend descending — the same ordering the dashboard card uses, so the
+ *  sheet reads like the app. `hasBlank` drives the optional "(none)" entry. */
+function rankedDimensionValues(
+  transactions: Transaction[],
+  key: string,
+  customFields: CustomFieldDef[],
+  limit: number,
+): { values: string[]; hasBlank: boolean } {
+  const totals = new Map<string, number>()
+  let hasBlank = false
+
+  for (const tx of transactions) {
+    const text = dimensionCellText(tx, key, customFields)
+    if (text === '') {
+      hasBlank = true
+      continue
+    }
+    totals.set(text, (totals.get(text) ?? 0) + Math.abs(tx.totalAmountMain ?? 0))
+  }
+
+  const values = Array.from(totals.entries())
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, limit)
+    .map(([value]) => value)
+
+  return { values, hasBlank }
+}
+
+/** Escape a value for use inside an Excel string literal in a formula. */
+function fmlString(v: string): string {
+  return v.replace(/"/g, '""')
+}
+
+/**
+ * 📊 Analysis sheet — GENERATED from config.dashboardCards (SPEC §9bis).
+ *
+ * The old sheet hard-coded a country block and a category block because the app
+ * began as a travel app. The user has already declared which breakdowns matter
+ * by building dashboard cards, so those are reused rather than adding a second
+ * place to configure the same thing.
+ *
+ *   - 1D card  → a single-axis block, one row per value.
+ *   - 2D pivot → a cross-tab, primary down and secondary across.
+ *   - a card whose dimension has no exported column is SKIPPED, not emitted
+ *     broken. That is the disabled-field case that used to yield #REF!.
+ *   - no cards survive → returns null and the sheet is omitted entirely.
+ *
+ * Formulas stay live (real SUMPRODUCT over the Expenses sheet) rather than
+ * pasted values: the point of this sheet is that it recalculates when the user
+ * edits the data. Every cell reference is derived from the column map, never
+ * from a fixed letter.
+ */
+function buildAnalysisSheet(
+  space: Space,
+  N: number,
+  cm: ColumnMap,
+  config: SpaceConfig,
+  transactions: Transaction[],
+): unknown | null {
+  // Which cards the dashboard would show, then which of those have columns here.
+  const dimensions = breakdownDimensions(space, config)
+  const visible = visibleDashboardCards(resolveDashboardCards(config), dimensions)
+  const cards = visible
+    .map(({ card, dims }) => ({
+      card,
+      dims,
+      cols: dims.map((d) => columnForDimension(cm, d.key)),
+    }))
+    .filter((entry): entry is typeof entry & { cols: number[] } =>
+      entry.cols.every((c): c is number => c !== undefined),
+    )
+
+  if (cards.length === 0) return null
+
   const ws: WS = {}
   const members = space.members
 
-  // B1: member selector
+  // B1: member selector — every formula below is scoped to whoever is named here.
   str(ws, 1, 1, 'Member:', hdrDark(C.NAVY))
   str(ws, 2, 1, members[0]?.displayName ?? '', dataCell())
 
@@ -629,44 +733,76 @@ function buildAnalysisSheet(space: Space, N: number, cm: ColumnMap): unknown {
       return `'${SHEET_EXPENSES}'!${l}$3:${l}$${EXPENSES_LAST_ROW}`
     })
     .join(',')
-  function sumproductFml(filterCol: string, filterVal: string): string {
-    const fRange = `'${SHEET_EXPENSES}'!${filterCol}$3:${filterCol}$${EXPENSES_LAST_ROW}`
-    return `SUMPRODUCT((${fRange}="${filterVal}")*N(CHOOSE(MATCH($B$1,${memberNamesRange},0),${memberCostRanges})))`
+  const memberCost = `N(CHOOSE(MATCH($B$1,${memberNamesRange},0),${memberCostRanges}))`
+
+  /** The comparison term for one dimension column against one value. */
+  const term = (col: number, value: string) => {
+    const letter = colLetter(col)
+    const range = `'${SHEET_EXPENSES}'!${letter}$3:${letter}$${EXPENSES_LAST_ROW}`
+    return `(${range}="${fmlString(value === NONE_LABEL ? '' : value)}")`
   }
+
+  /** SUMPRODUCT over one or two dimension filters, scoped to the B1 member. */
+  const sumproduct = (filters: { col: number; value: string }[]) =>
+    `SUMPRODUCT(${filters.map((f) => term(f.col, f.value)).join('*')}*${memberCost})`
 
   let row = 3
+  let widestCol = 2
 
-  /** One block: a header pair, then one row per value with a live SUMPRODUCT.
-   *  Skipped entirely when the dimension has no exported column — a formula
-   *  pointing at a column that does not exist resolves to #REF!. */
-  function block(title: string, col: number | undefined, values: string[], bg: string) {
-    if (col === undefined || values.length === 0) return
-    const letter = colLetter(col)
-    str(ws, 1, row, title,                 hdrDark(bg))
-    str(ws, 2, row, 'Spending (main ccy)', hdrDark(bg))
-    row++
-    for (const value of values) {
-      str(ws, 1, row, value,                          dataCell())
-      fml(ws, 2, row, sumproductFml(letter, value),   formulaCell())
+  for (const { card, dims, cols } of cards) {
+    const title = cardTitle(card, dims)
+
+    if (dims.length === 1) {
+      // ── 1D block ──────────────────────────────────────────────────────────
+      const { values, hasBlank } = rankedDimensionValues(
+        transactions, dims[0].key, cm.customFields, MAX_1D_ROWS,
+      )
+      const rows = hasBlank ? [...values, NONE_LABEL] : values
+      if (rows.length === 0) continue
+
+      str(ws, 1, row, title,                 hdrDark(C.NAVY2))
+      str(ws, 2, row, 'Spending (main ccy)', hdrDark(C.NAVY2))
       row++
+      for (const value of rows) {
+        str(ws, 1, row, value, dataCell())
+        fml(ws, 2, row, sumproduct([{ col: cols[0], value }]), formulaCell())
+        row++
+      }
+    } else {
+      // ── 2D cross-tab ──────────────────────────────────────────────────────
+      const primary   = rankedDimensionValues(transactions, dims[0].key, cm.customFields, MAX_PIVOT_ROWS)
+      const secondary = rankedDimensionValues(transactions, dims[1].key, cm.customFields, MAX_PIVOT_COLS)
+      const rowVals = primary.hasBlank   ? [...primary.values, NONE_LABEL]   : primary.values
+      const colVals = secondary.hasBlank ? [...secondary.values, NONE_LABEL] : secondary.values
+      if (rowVals.length === 0 || colVals.length === 0) continue
+
+      // Header row: the card title in the corner, secondary values across.
+      str(ws, 1, row, title, hdrDark(C.PURPLE))
+      colVals.forEach((value, i) => str(ws, 2 + i, row, value, hdrDark(C.PURPLE)))
+      widestCol = Math.max(widestCol, 1 + colVals.length)
+      row++
+
+      for (const rowVal of rowVals) {
+        str(ws, 1, row, rowVal, dataCell())
+        colVals.forEach((colVal, i) => {
+          fml(
+            ws, 2 + i, row,
+            sumproduct([{ col: cols[0], value: rowVal }, { col: cols[1], value: colVal }]),
+            formulaCell(),
+          )
+        })
+        row++
+      }
     }
-    row++ // blank separator
+
+    row++ // blank separator between cards
   }
 
-  // ⚠️ Values come from the space's LISTS, and must be rendered exactly as the
-  // Expenses column stores them or the SUMPRODUCT silently sums to zero.
-  // country is stored BARE; category is stored WITH its emoji prefix. That
-  // asymmetry is real — see audit finding F7.
-  block('Country', cm.country, space.countries.map((c) => c.label), C.NAVY2)
-  block(
-    'Category',
-    cm.category,
-    space.categories.map((c) => (c.emoji ? `${c.emoji} ${c.label}` : c.label)),
-    C.PURPLE,
-  )
-
-  setRef(ws, 2, Math.max(row - 1, 4))
-  ;(ws as Record<string, unknown>)['!cols'] = [{ wch: 28 }, { wch: 22 }]
+  setRef(ws, widestCol, Math.max(row - 1, 4))
+  ;(ws as Record<string, unknown>)['!cols'] = [
+    { wch: 28 },
+    ...Array.from({ length: Math.max(1, widestCol - 1) }, () => ({ wch: 22 })),
+  ]
   ;(ws as Record<string, unknown>)['!rows'] = [{ hpt: 20 }]
   return ws
 }
@@ -777,7 +913,11 @@ export function buildSpaceWorkbook(
   XLSXStyle.utils.book_append_sheet(wb, buildExpensesSheet(space, transactions, N, cm)   as WB_WS, SHEET_EXPENSES)
   XLSXStyle.utils.book_append_sheet(wb, buildBalanceSheet(space, N, cm)                  as WB_WS, SHEET_BALANCE)
   XLSXStyle.utils.book_append_sheet(wb, buildBalanceSummarySheet(space, N)               as WB_WS, SHEET_BALANCE_SUMMARY)
-  XLSXStyle.utils.book_append_sheet(wb, buildAnalysisSheet(space, N, cm)                 as WB_WS, SHEET_ANALYSIS)
+
+  // Omitted entirely when no dashboard card survives — an empty Analysis tab is
+  // worse than no tab, and the old one emitted #REF! in exactly this case.
+  const analysis = buildAnalysisSheet(space, N, cm, config, transactions)
+  if (analysis) XLSXStyle.utils.book_append_sheet(wb, analysis as WB_WS, SHEET_ANALYSIS)
 
   // Metadata sheet last, then hidden: it is machine-read only, and a visible
   // tab of JSON invites a user to "fix" it.
@@ -790,6 +930,15 @@ export function buildSpaceWorkbook(
     SHEET_META,
   )
   hideSheet(wb, SHEET_META)
+
+  // Every formula cell carries a placeholder cached value of 0 (see fml()).
+  // fullCalcOnLoad tells Excel and LibreOffice to recompute the whole workbook
+  // on open, so the user never sees those placeholders — and the sheet stays
+  // live when they edit the data, which is the point of the Analysis tab.
+  // CalcPr is written by SheetJS but missing from its bundled WBProps type,
+  // hence the narrow cast rather than a loosened workbook type.
+  wb.Workbook ??= {}
+  ;(wb.Workbook as { CalcPr?: { fullCalcOnLoad?: boolean } }).CalcPr = { fullCalcOnLoad: true }
 
   return wb
 }
