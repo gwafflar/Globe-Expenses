@@ -16,9 +16,11 @@ import type * as XLSXTypes from 'xlsx'
 const XLSXStyle = XLSXStyleRaw as unknown as typeof XLSXTypes
 import type { Space, SpaceMember } from '@/spaces/types'
 import { getSpaceMainCurrency } from '@/spaces/types'
+import { getSpaceConfig } from '@/spaces/config'
 import type { Transaction } from '@/transactions/types'
 import { EXCHANGE_RATES } from '@/shared/utils/exchangeRates'
 import { buildColumnMap, colLetter } from '@/shared/utils/sheetColumns'
+import { SHEET_META, buildMetaSheet, hideSheet } from '@/shared/utils/sheetMeta'
 
 // ---------------------------------------------------------------------------
 // Sheet name constants (re-exported for sheetImport.ts)
@@ -629,12 +631,29 @@ function buildAnalysisSheet(space: Space, N: number): unknown {
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
-export async function exportSpaceToXlsx(
+export interface ExportOptions {
+  /** Disabled fields the user chose to export anyway, after the warning.
+   *  Keys are built-in field names ('country', …) or CustomFieldDef ids. */
+  includedDisabledFields?: string[]
+  /** Injectable for deterministic tests. */
+  now?: Date
+}
+
+/**
+ * Assemble the workbook without writing it.
+ *
+ * Split out from exportSpaceToXlsx() so tests can inspect and re-parse the
+ * workbook in memory — writeFile() touches the DOM and cannot run in the
+ * round-trip tests that are this phase's core deliverable.
+ */
+export function buildSpaceWorkbook(
   space: Space,
   transactions: Transaction[],
-): Promise<void> {
+  options: ExportOptions = {},
+): XLSXTypes.WorkBook {
   const N            = Math.max(1, space.members.length)
   const mainCurrency = getSpaceMainCurrency(space)
+  const config       = getSpaceConfig(space)
   const allCodes = new Set([...Object.keys(EXCHANGE_RATES), ...Object.keys(space.defaultRates ?? {})])
   const numCurrencies = allCodes.size
   const ratesDataStart = N + 8
@@ -650,8 +669,33 @@ export async function exportSpaceToXlsx(
   XLSXStyle.utils.book_append_sheet(wb, buildBalanceSummarySheet(space, N)                                 as WB_WS, SHEET_BALANCE_SUMMARY)
   XLSXStyle.utils.book_append_sheet(wb, buildAnalysisSheet(space, N)                                       as WB_WS, SHEET_ANALYSIS)
 
-  XLSXStyle.writeFile(
+  // Metadata sheet last, then hidden: it is machine-read only, and a visible
+  // tab of JSON invites a user to "fix" it.
+  XLSXStyle.utils.book_append_sheet(
     wb,
-    `GlobeExpenses_${space.name}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+    buildMetaSheet(space, config, mainCurrency, {
+      includedDisabledFields: options.includedDisabledFields,
+      now: options.now,
+    }),
+    SHEET_META,
   )
+  hideSheet(wb, SHEET_META)
+
+  return wb
+}
+
+/** Filename for an exported space. Derived from the space name, with characters
+ *  that are illegal in a filename on Windows/macOS replaced. */
+export function exportFileName(space: Space, now: Date = new Date()): string {
+  const safeName = space.name.replace(/[\\/:*?"<>|]/g, '-').trim() || 'Space'
+  return `GlobeExpenses_${safeName}_${now.toISOString().slice(0, 10)}.xlsx`
+}
+
+export async function exportSpaceToXlsx(
+  space: Space,
+  transactions: Transaction[],
+  options: ExportOptions = {},
+): Promise<void> {
+  const wb = buildSpaceWorkbook(space, transactions, options)
+  XLSXStyle.writeFile(wb, exportFileName(space, options.now))
 }
