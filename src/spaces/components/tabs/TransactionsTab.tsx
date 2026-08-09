@@ -9,7 +9,8 @@ import type { Space, LabeledItem } from '@/spaces/types'
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
-import { exportSpaceToXlsx } from '@/shared/utils/sheetExport'
+import { exportSpaceToXlsx, findOrphanedFields, type OrphanedField } from '@/shared/utils/sheetExport'
+import { DisabledFieldsExportDialog } from '@/shared/components/DisabledFieldsExportDialog'
 import { ImportXlsxDialog } from '@/shared/components/ImportXlsxDialog'
 import { normalizeTransactionSplits, parseTxDate } from '@/spaces/components/tabs/dashboardHelpers'
 import { useTransactionFilters } from '@/transactions/hooks/useTransactionFilters'
@@ -854,11 +855,16 @@ export function TransactionsTab({
 
   const [isExporting, setIsExporting] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
+  // Disabled fields still holding values — populated only when the user hits
+  // Export and there is something to warn about, so the dialog stays closed in
+  // the overwhelmingly common case.
+  const [orphanedFields, setOrphanedFields] = useState<OrphanedField[]>([])
 
-  async function handleExport() {
+  async function runExport(includedDisabledFields: string[]) {
+    setOrphanedFields([])
     setIsExporting(true)
     try {
-      await exportSpaceToXlsx(space, transactions)
+      await exportSpaceToXlsx(space, transactions, { includedDisabledFields })
     } catch (err) {
       console.error('[TransactionsTab] export failed:', err)
     } finally {
@@ -866,8 +872,28 @@ export function TransactionsTab({
     }
   }
 
+  async function handleExport() {
+    // Check BEFORE generating: the choice changes which columns are built, so
+    // it cannot be applied after the fact.
+    const orphaned = findOrphanedFields(space, transactions)
+    if (orphaned.length > 0) {
+      setOrphanedFields(orphaned)
+      return
+    }
+    await runExport([])
+  }
+
   return (
     <div className="flex flex-col gap-3">
+      {/* Pre-export warning — only mounted when there is something to warn about */}
+      <DisabledFieldsExportDialog
+        open={orphanedFields.length > 0}
+        onOpenChange={(next) => { if (!next) setOrphanedFields([]) }}
+        fields={orphanedFields}
+        onExportWithout={() => runExport([])}
+        onExportWith={() => runExport(orphanedFields.map((f) => f.key))}
+      />
+
       {/* Import dialog (portal, rendered outside the flex flow) */}
       <ImportXlsxDialog
         open={importOpen}

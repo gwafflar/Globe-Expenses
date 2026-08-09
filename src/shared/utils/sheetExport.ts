@@ -19,7 +19,14 @@ import { getSpaceMainCurrency } from '@/spaces/types'
 import { getSpaceConfig } from '@/spaces/config'
 import type { Transaction } from '@/transactions/types'
 import { EXCHANGE_RATES } from '@/shared/utils/exchangeRates'
-import { buildColumnMap, colLetter } from '@/shared/utils/sheetColumns'
+import {
+  colLetter,
+  columnMapForConfig,
+  customCellValue,
+  OPTIONAL_BUILT_INS,
+  type ColumnMap,
+  type OptionalBuiltIn,
+} from '@/shared/utils/sheetColumns'
 import { SHEET_META, buildMetaSheet, hideSheet } from '@/shared/utils/sheetMeta'
 
 // ---------------------------------------------------------------------------
@@ -135,6 +142,13 @@ function sty(ws: WS, col: number, row: number, s: S) {
   const a = addr(col, row)
   if (!ws[a]) ws[a] = { t: 'z', v: undefined }
   ws[a].s = s
+}
+/** Write a config-gated cell: nothing at all when the column does not exist,
+ *  a styled-but-empty cell when the column exists and the value does not. */
+function optionalCell(ws: WS, col: number | undefined, row: number, v: string | undefined) {
+  if (col === undefined) return
+  if (v) str(ws, col, row, v, dataCell())
+  else   sty(ws, col, row, dataCell())
 }
 
 function setRef(ws: Record<string, unknown>, endCol: number, endRow: number) {
@@ -275,18 +289,27 @@ function buildExpensesSheet(
   space: Space,
   transactions: Transaction[],
   N: number,
+  cm: ColumnMap,
 ): unknown {
-  const cm = buildColumnMap(N)
   const ws: WS = {}
   const members = space.members
-  const amtLetter  = colLetter(cm.amountLocal) // col G
+  const amtLetter  = colLetter(cm.amountLocal)
+
+  // The "DETAILS" banner spans payment method, notes and the custom field
+  // columns — all allocated contiguously in that order. Any of them may be
+  // absent, so the span is derived from whichever actually exist rather than
+  // from fixed endpoints. All three gone → no banner at all.
+  const detailCols = [cm.paymentMethod, cm.notes, ...Object.values(cm.custom)]
+    .filter((c): c is number => c !== undefined)
+  const detailsStart = detailCols.length > 0 ? Math.min(...detailCols) : undefined
+  const detailsEnd   = detailCols.length > 0 ? Math.max(...detailCols) : undefined
 
   // ── Row 1: section group headers ─────────────────────────────────────────
   str(ws, cm.rowIndex,           1, '#',                hdrDark(C.NAVY))
   str(ws, cm.date,               1, 'FILL IN',          hdrDark(C.NAVY))
   str(ws, cm.costLocal[0],       1, 'COST (local)',      hdrDark(C.NAVY2))
   str(ws, cm.paidLocal[0],       1, 'PAID (local)',      hdrDark(C.GREEN_DARK))
-  str(ws, cm.paymentMethod,      1, 'DETAILS',          hdrDark(C.NAVY))
+  if (detailsStart !== undefined) str(ws, detailsStart, 1, 'DETAILS', hdrDark(C.NAVY))
   str(ws, cm.costMainPerMember[0], 1, 'COST (main ccy)', hdrDark(C.PURPLE))
   str(ws, cm.checkCost,          1, 'CHECKS',           hdrDark(C.BROWN))
 
@@ -294,26 +317,36 @@ function buildExpensesSheet(
   for (let c = cm.date + 1; c <= cm.paidByLabel; c++) sty(ws, c, 1, hdrDark(C.NAVY))
   for (let c = cm.costLocal[0] + 1; c <= cm.costLocal[N - 1]; c++) sty(ws, c, 1, hdrDark(C.NAVY2))
   for (let c = cm.paidLocal[0] + 1; c <= cm.paidLocal[N - 1]; c++) sty(ws, c, 1, hdrDark(C.GREEN_DARK))
-  sty(ws, cm.notes, 1, hdrDark(C.NAVY))
+  if (detailsStart !== undefined && detailsEnd !== undefined) {
+    for (let c = detailsStart + 1; c <= detailsEnd; c++) sty(ws, c, 1, hdrDark(C.NAVY))
+  }
   for (let c = cm.costMainPerMember[0] + 1; c <= cm.costMainPerMember[N - 1]; c++) sty(ws, c, 1, hdrDark(C.PURPLE))
   sty(ws, cm.checkPaid, 1, hdrDark(C.BROWN))
   sty(ws, cm.allGood,   1, hdrDark(C.BROWN))
 
   // ── Row 2: column headers ─────────────────────────────────────────────────
-  str(ws, cm.rowIndex,     2, '#',                    hdrDark(C.NAVY))
-  str(ws, cm.date,         2, 'Date',                 hdrDark(C.NAVY))
-  str(ws, cm.country,      2, 'Country',              hdrDark(C.NAVY))
-  str(ws, cm.city,         2, 'City',                 hdrDark(C.NAVY))
-  str(ws, cm.category,     2, 'Category',             hdrDark(C.NAVY))
-  str(ws, cm.name,         2, 'Description',          hdrDark(C.NAVY))
-  str(ws, cm.amountLocal,  2, 'Amount (local)',        hdrDark(C.NAVY))
-  str(ws, cm.currency,     2, 'Currency',             hdrDark(C.NAVY))
-  str(ws, cm.exchangeRate, 2, 'Exch. rate',           hdrDark(C.NAVY))
+  // Disabled built-ins produce NO column, so each optional header is written
+  // only when the map claimed a slot for it.
+  const navy = hdrDark(C.NAVY)
+  str(ws, cm.rowIndex,     2, '#',                    navy)
+  str(ws, cm.date,         2, 'Date',                 navy)
+  if (cm.country  !== undefined) str(ws, cm.country,  2, 'Country',  navy)
+  if (cm.city     !== undefined) str(ws, cm.city,     2, 'City',     navy)
+  if (cm.category !== undefined) str(ws, cm.category, 2, 'Category', navy)
+  str(ws, cm.name,         2, 'Description',          navy)
+  str(ws, cm.amountLocal,  2, 'Amount (local)',        navy)
+  str(ws, cm.currency,     2, 'Currency',             navy)
+  str(ws, cm.exchangeRate, 2, 'Exch. rate',           navy)
   str(ws, cm.costMain,     2, `Cost (${space.currencies[0] ?? 'main'})`, hdrDark(C.NAVY2))
-  str(ws, cm.splitLabel,   2, 'Split',                hdrDark(C.NAVY))
-  str(ws, cm.paidByLabel,  2, 'Paid by',              hdrDark(C.NAVY))
-  str(ws, cm.paymentMethod, 2, 'Payment method',      hdrDark(C.NAVY))
-  str(ws, cm.notes,        2, 'Notes',                hdrDark(C.NAVY))
+  str(ws, cm.splitLabel,   2, 'Split',                navy)
+  str(ws, cm.paidByLabel,  2, 'Paid by',              navy)
+  if (cm.paymentMethod !== undefined) str(ws, cm.paymentMethod, 2, 'Payment method', navy)
+  if (cm.notes         !== undefined) str(ws, cm.notes,         2, 'Notes',          navy)
+  // Custom field headers: the field's label, with its emoji when set — this is
+  // also the text the foreign-import path auto-matches on.
+  for (const def of cm.customFields) {
+    str(ws, cm.custom[def.id], 2, def.emoji ? `${def.emoji} ${def.label}` : def.label, navy)
+  }
   str(ws, cm.checkCost,    2, '✔ Cost',               hdrDark(C.BROWN))
   str(ws, cm.checkPaid,    2, '✔ Paid',               hdrDark(C.BROWN))
   str(ws, cm.allGood,      2, '✅ OK?',               hdrDark(C.BROWN))
@@ -326,15 +359,18 @@ function buildExpensesSheet(
     str(ws, cm.costMainPerMember[i], 2, `Cost ${m.displayName} (main ccy)`, pastel)
   })
 
-  // Merge definitions (0-indexed r, c)
-  const merges = [
-    { s: { r: 0, c: cm.date - 1      }, e: { r: 0, c: cm.paidByLabel - 1 } },
-    { s: { r: 0, c: cm.costLocal[0] - 1  }, e: { r: 0, c: cm.costLocal[N - 1] - 1 } },
-    { s: { r: 0, c: cm.paidLocal[0] - 1  }, e: { r: 0, c: cm.paidLocal[N - 1] - 1 } },
-    { s: { r: 0, c: cm.paymentMethod - 1 }, e: { r: 0, c: cm.notes - 1 } },
-    { s: { r: 0, c: cm.costMainPerMember[0] - 1 }, e: { r: 0, c: cm.costMainPerMember[N - 1] - 1 } },
-    { s: { r: 0, c: cm.checkCost - 1 }, e: { r: 0, c: cm.allGood - 1 } },
-  ]
+  // Merge definitions (0-indexed r, c). A single-column span is not merged —
+  // Excel rejects a merge whose start equals its end.
+  const merges: { s: { r: number; c: number }; e: { r: number; c: number } }[] = []
+  const merge = (startCol: number, endCol: number) => {
+    if (endCol > startCol) merges.push({ s: { r: 0, c: startCol - 1 }, e: { r: 0, c: endCol - 1 } })
+  }
+  merge(cm.date, cm.paidByLabel)
+  merge(cm.costLocal[0], cm.costLocal[N - 1])
+  merge(cm.paidLocal[0], cm.paidLocal[N - 1])
+  if (detailsStart !== undefined && detailsEnd !== undefined) merge(detailsStart, detailsEnd)
+  merge(cm.costMainPerMember[0], cm.costMainPerMember[N - 1])
+  merge(cm.checkCost, cm.allGood)
 
   // ── Data rows ─────────────────────────────────────────────────────────────
   const sorted = [...transactions].sort(
@@ -348,12 +384,11 @@ function buildExpensesSheet(
     // Fixed input columns
     num(ws, cm.rowIndex,    r, rowNum,                 dataCell(C.LABEL_ALT))
     dat(ws, cm.date,        r, tx.date,                dataCell())
-    if (tx.country) str(ws, cm.country,  r, tx.country,       dataCell())
-    else            sty(ws, cm.country,  r,                   dataCell())
-    if (tx.city)    str(ws, cm.city,     r, tx.city,          dataCell())
-    else            sty(ws, cm.city,     r,                   dataCell())
-    if (tx.category) str(ws, cm.category, r, tx.category,     dataCell())
-    else             sty(ws, cm.category, r,                  dataCell())
+    // Optional built-ins: write the value when the column exists, and style the
+    // cell even when the value is empty so the grid stays visually complete.
+    optionalCell(ws, cm.country,  r, tx.country)
+    optionalCell(ws, cm.city,     r, tx.city)
+    optionalCell(ws, cm.category, r, tx.category)
     str(ws, cm.name,        r, tx.name,                dataCell())
     num(ws, cm.amountLocal, r, tx.totalAmount,          dataCell())
     str(ws, cm.currency,    r, tx.currency,             dataCell())
@@ -381,10 +416,15 @@ function buildExpensesSheet(
     })
 
     // Payment method, notes
-    if (tx.paymentMethod) str(ws, cm.paymentMethod, r, tx.paymentMethod, dataCell())
-    else                  sty(ws, cm.paymentMethod, r,                   dataCell())
-    if (tx.notes) str(ws, cm.notes, r, tx.notes, dataCell())
-    else          sty(ws, cm.notes, r,            dataCell())
+    optionalCell(ws, cm.paymentMethod, r, tx.paymentMethod)
+    optionalCell(ws, cm.notes,         r, tx.notes)
+
+    // Custom fields. select → option label, boolean → yes/no, text → raw
+    // (see customCellValue). A boolean always writes a value: absent means
+    // `no`, never blank, so the column reads unambiguously.
+    for (const def of cm.customFields) {
+      optionalCell(ws, cm.custom[def.id], r, customCellValue(def, tx.custom?.[def.id]))
+    }
 
     // Cost main per member (formula → pastel + formula overlay)
     members.forEach((_m, i) => {
@@ -420,28 +460,32 @@ function buildExpensesSheet(
   setRef(ws, cm.totalCols, endRow)
   ;(ws as Record<string, unknown>)['!merges'] = merges
 
-  // Column widths (match template)
-  const colWidths: number[] = [
-    5,   // A  #
-    12,  // B  Date
-    20,  // C  Country
-    16,  // D  City
-    18,  // E  Category
-    30,  // F  Description
-    14,  // G  Amount
-    10,  // H  Currency
-    12,  // I  Exch. rate
-    14,  // J  Cost main total
-    14,  // K  Split label
-    16,  // L  Paid by label
-  ]
-  // N cost-local, N paid-local, paymentMethod, notes, N cost-main, 3 checks
-  for (let i = 0; i < N; i++)  colWidths.push(14)
-  for (let i = 0; i < N; i++)  colWidths.push(14)
-  colWidths.push(18, 25)       // payment method, notes
-  for (let i = 0; i < N; i++)  colWidths.push(14)
-  colWidths.push(10, 10, 9)    // checks
-  colWidths.push(0)            // txId — hidden column (width 0)
+  // Column widths. Assigned BY COLUMN NUMBER rather than by pushing in a fixed
+  // order, so a disabled built-in shifts every following width automatically
+  // instead of silently applying the Category width to the Description column.
+  const colWidths: number[] = new Array(cm.totalCols).fill(14)
+  const setWidth = (col: number | undefined, wch: number) => {
+    if (col !== undefined) colWidths[col - 1] = wch
+  }
+  setWidth(cm.rowIndex, 5)
+  setWidth(cm.date, 12)
+  setWidth(cm.country, 20)
+  setWidth(cm.city, 16)
+  setWidth(cm.category, 18)
+  setWidth(cm.name, 30)
+  setWidth(cm.amountLocal, 14)
+  setWidth(cm.currency, 10)
+  setWidth(cm.exchangeRate, 12)
+  setWidth(cm.costMain, 14)
+  setWidth(cm.splitLabel, 14)
+  setWidth(cm.paidByLabel, 16)
+  setWidth(cm.paymentMethod, 18)
+  setWidth(cm.notes, 25)
+  for (const def of cm.customFields) setWidth(cm.custom[def.id], 18)
+  setWidth(cm.checkCost, 10)
+  setWidth(cm.checkPaid, 10)
+  setWidth(cm.allGood, 9)
+  setWidth(cm.txId, 0)         // hidden column
 
   ;(ws as Record<string, unknown>)['!cols'] = colWidths.map((wch) => ({ wch }))
 
@@ -464,10 +508,8 @@ function balanceMemberCols(i: number) {
 function buildBalanceSheet(
   space: Space,
   N: number,
-  _ratesDataStart: number,
-  _ratesDataEnd: number,
+  cm: ColumnMap,
 ): unknown {
-  const cm = buildColumnMap(N)
   const ws: WS = {}
   const members = space.members
   const lastExpCol    = colLetter(cm.totalCols)
@@ -572,8 +614,7 @@ function buildBalanceSummarySheet(space: Space, N: number): WS {
 // ---------------------------------------------------------------------------
 // 📊 Analysis sheet
 // ---------------------------------------------------------------------------
-function buildAnalysisSheet(space: Space, N: number): unknown {
-  const cm = buildColumnMap(N)
+function buildAnalysisSheet(space: Space, N: number, cm: ColumnMap): unknown {
   const ws: WS = {}
   const members = space.members
 
@@ -588,9 +629,6 @@ function buildAnalysisSheet(space: Space, N: number): unknown {
       return `'${SHEET_EXPENSES}'!${l}$3:${l}$${EXPENSES_LAST_ROW}`
     })
     .join(',')
-  const countryLetter  = colLetter(cm.country)
-  const categoryLetter = colLetter(cm.category)
-
   function sumproductFml(filterCol: string, filterVal: string): string {
     const fRange = `'${SHEET_EXPENSES}'!${filterCol}$3:${filterCol}$${EXPENSES_LAST_ROW}`
     return `SUMPRODUCT((${fRange}="${filterVal}")*N(CHOOSE(MATCH($B$1,${memberNamesRange},0),${memberCostRanges})))`
@@ -598,29 +636,34 @@ function buildAnalysisSheet(space: Space, N: number): unknown {
 
   let row = 3
 
-  // Countries block
-  str(ws, 1, row, 'Country',              hdrDark(C.NAVY2))
-  str(ws, 2, row, 'Spending (main ccy)',  hdrDark(C.NAVY2))
-  row++
-  space.countries.forEach((c) => {
-    const display = (c.emoji ? c.emoji + ' ' : '') + c.label
-    str(ws, 1, row, display,                dataCell())
-    fml(ws, 2, row, sumproductFml(countryLetter, display), formulaCell())
+  /** One block: a header pair, then one row per value with a live SUMPRODUCT.
+   *  Skipped entirely when the dimension has no exported column — a formula
+   *  pointing at a column that does not exist resolves to #REF!. */
+  function block(title: string, col: number | undefined, values: string[], bg: string) {
+    if (col === undefined || values.length === 0) return
+    const letter = colLetter(col)
+    str(ws, 1, row, title,                 hdrDark(bg))
+    str(ws, 2, row, 'Spending (main ccy)', hdrDark(bg))
     row++
-  })
+    for (const value of values) {
+      str(ws, 1, row, value,                          dataCell())
+      fml(ws, 2, row, sumproductFml(letter, value),   formulaCell())
+      row++
+    }
+    row++ // blank separator
+  }
 
-  row++ // blank separator
-
-  // Categories block
-  str(ws, 1, row, 'Category',             hdrDark(C.PURPLE))
-  str(ws, 2, row, 'Spending (main ccy)',  hdrDark(C.PURPLE))
-  row++
-  space.categories.forEach((c) => {
-    const display = (c.emoji ? c.emoji + ' ' : '') + c.label
-    str(ws, 1, row, display,               dataCell())
-    fml(ws, 2, row, sumproductFml(categoryLetter, display), formulaCell())
-    row++
-  })
+  // ⚠️ Values come from the space's LISTS, and must be rendered exactly as the
+  // Expenses column stores them or the SUMPRODUCT silently sums to zero.
+  // country is stored BARE; category is stored WITH its emoji prefix. That
+  // asymmetry is real — see audit finding F7.
+  block('Country', cm.country, space.countries.map((c) => c.label), C.NAVY2)
+  block(
+    'Category',
+    cm.category,
+    space.categories.map((c) => (c.emoji ? `${c.emoji} ${c.label}` : c.label)),
+    C.PURPLE,
+  )
 
   setRef(ws, 2, Math.max(row - 1, 4))
   ;(ws as Record<string, unknown>)['!cols'] = [{ wch: 28 }, { wch: 22 }]
@@ -631,6 +674,72 @@ function buildAnalysisSheet(space: Space, N: number): unknown {
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Disabled fields that still hold data
+// ---------------------------------------------------------------------------
+
+/** A field that is switched off but still has stored values. */
+export interface OrphanedField {
+  /** Built-in field name ('country', …) or a CustomFieldDef.id. */
+  key: string
+  label: string
+  /** How many transactions carry a value for it. */
+  count: number
+  source: 'builtIn' | 'custom'
+}
+
+const BUILT_IN_LABELS: Record<OptionalBuiltIn, string> = {
+  country: 'Country',
+  city: 'City',
+  category: 'Category',
+  paymentMethod: 'Payment method',
+  notes: 'Notes',
+}
+
+/**
+ * Find disabled fields that still hold values on at least one transaction.
+ *
+ * The user cannot see these fields in the app, so exporting without them would
+ * silently drop data — hence the warning before the file is generated
+ * (SPEC §9bis). Returns [] when there is nothing to warn about, which is the
+ * overwhelmingly common case.
+ */
+export function findOrphanedFields(space: Space, transactions: Transaction[]): OrphanedField[] {
+  const config = getSpaceConfig(space)
+  const out: OrphanedField[] = []
+
+  for (const key of OPTIONAL_BUILT_INS) {
+    if (config.builtInFields[key]) continue
+    // ⚠️ Test for a present value, not a truthy one: '' is not stored, but
+    // filtering by truthiness is the habit that drops `false` and `0` elsewhere.
+    const count = transactions.filter((tx) => {
+      const v = tx[key]
+      return v !== undefined && v !== ''
+    }).length
+    if (count > 0) out.push({ key, label: BUILT_IN_LABELS[key], count, source: 'builtIn' })
+  }
+
+  for (const def of config.customFields) {
+    if (def.enabled) continue
+    const count = transactions.filter((tx) => {
+      const v = tx.custom?.[def.id]
+      // `false` is never stored (buildCustomPayload omits it), so an absent key
+      // on a boolean field is not orphaned data — nothing would be lost.
+      return v !== undefined && v !== ''
+    }).length
+    if (count > 0) {
+      out.push({
+        key: def.id,
+        label: def.emoji ? `${def.emoji} ${def.label}` : def.label,
+        count,
+        source: 'custom',
+      })
+    }
+  }
+
+  return out
+}
+
 export interface ExportOptions {
   /** Disabled fields the user chose to export anyway, after the warning.
    *  Keys are built-in field names ('country', …) or CustomFieldDef ids. */
@@ -654,20 +763,21 @@ export function buildSpaceWorkbook(
   const N            = Math.max(1, space.members.length)
   const mainCurrency = getSpaceMainCurrency(space)
   const config       = getSpaceConfig(space)
-  const allCodes = new Set([...Object.keys(EXCHANGE_RATES), ...Object.keys(space.defaultRates ?? {})])
-  const numCurrencies = allCodes.size
-  const ratesDataStart = N + 8
-  const ratesDataEnd   = ratesDataStart + numCurrencies - 1
+
+  // ONE column map for the whole workbook. The Balance sheet's VLOOKUPs index
+  // into the Expenses sheet by column number, so a second, differently-derived
+  // map would produce formulas that read the wrong column.
+  const cm = columnMapForConfig(N, config, options.includedDisabledFields ?? [])
 
   // Use xlsx-js-style's book_new so the workbook carries style metadata
   const wb = XLSXStyle.utils.book_new()
 
   type WB_WS = XLSXTypes.WorkSheet
-  XLSXStyle.utils.book_append_sheet(wb, buildParamsSheet(space, mainCurrency, N)                           as WB_WS, SHEET_PARAMS)
-  XLSXStyle.utils.book_append_sheet(wb, buildExpensesSheet(space, transactions, N) as WB_WS, SHEET_EXPENSES)
-  XLSXStyle.utils.book_append_sheet(wb, buildBalanceSheet(space, N, ratesDataStart, ratesDataEnd)          as WB_WS, SHEET_BALANCE)
-  XLSXStyle.utils.book_append_sheet(wb, buildBalanceSummarySheet(space, N)                                 as WB_WS, SHEET_BALANCE_SUMMARY)
-  XLSXStyle.utils.book_append_sheet(wb, buildAnalysisSheet(space, N)                                       as WB_WS, SHEET_ANALYSIS)
+  XLSXStyle.utils.book_append_sheet(wb, buildParamsSheet(space, mainCurrency, N)         as WB_WS, SHEET_PARAMS)
+  XLSXStyle.utils.book_append_sheet(wb, buildExpensesSheet(space, transactions, N, cm)   as WB_WS, SHEET_EXPENSES)
+  XLSXStyle.utils.book_append_sheet(wb, buildBalanceSheet(space, N, cm)                  as WB_WS, SHEET_BALANCE)
+  XLSXStyle.utils.book_append_sheet(wb, buildBalanceSummarySheet(space, N)               as WB_WS, SHEET_BALANCE_SUMMARY)
+  XLSXStyle.utils.book_append_sheet(wb, buildAnalysisSheet(space, N, cm)                 as WB_WS, SHEET_ANALYSIS)
 
   // Metadata sheet last, then hidden: it is machine-read only, and a visible
   // tab of JSON invites a user to "fix" it.
@@ -687,7 +797,10 @@ export function buildSpaceWorkbook(
 /** Filename for an exported space. Derived from the space name, with characters
  *  that are illegal in a filename on Windows/macOS replaced. */
 export function exportFileName(space: Space, now: Date = new Date()): string {
-  const safeName = space.name.replace(/[\\/:*?"<>|]/g, '-').trim() || 'Space'
+  const sanitised = space.name.replace(/[\\/:*?"<>|]/g, '-').trim()
+  // A name made only of illegal characters sanitises to "---", which is a
+  // legal filename but a useless one — fall back to a placeholder instead.
+  const safeName = /[^-\s]/.test(sanitised) ? sanitised : 'Space'
   return `GlobeExpenses_${safeName}_${now.toISOString().slice(0, 10)}.xlsx`
 }
 

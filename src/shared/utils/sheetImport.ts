@@ -59,6 +59,13 @@ function getCellValue(ws: XLSX.WorkSheet, col: number, row: number): unknown {
   return cell?.v ?? undefined
 }
 
+/** Read a cell from a column that may not exist in this sheet.
+ *  A disabled built-in produces NO column (Phase 8a), so `undefined` here means
+ *  "the sheet has no such field", which reads identically to an empty cell. */
+function getOptionalCellValue(ws: XLSX.WorkSheet, col: number | undefined, row: number): unknown {
+  return col === undefined ? undefined : getCellValue(ws, col, row)
+}
+
 /** Coerce a raw cell value to a string or undefined. */
 function asString(v: unknown): string | undefined {
   if (v === null || v === undefined || v === '') return undefined
@@ -208,14 +215,14 @@ export async function parseSheetFile(file: File): Promise<ParseResult> {
 
     rows.push({
       date:          parseDate(rawDate) || new Date().toLocaleDateString('fr-FR').replace(/\//g, '-'),
-      country:       asString(getCellValue(wsExpenses, cm.country,       r)),
-      city:          asString(getCellValue(wsExpenses, cm.city,          r)),
-      category:      asString(getCellValue(wsExpenses, cm.category,      r)),
+      country:       asString(getOptionalCellValue(wsExpenses, cm.country,       r)),
+      city:          asString(getOptionalCellValue(wsExpenses, cm.city,          r)),
+      category:      asString(getOptionalCellValue(wsExpenses, cm.category,      r)),
       name:          name || '(unnamed)',
       totalAmount,
       currency:      rawCurrency ?? mainCurrency,
-      paymentMethod: asString(getCellValue(wsExpenses, cm.paymentMethod, r)),
-      notes:         asString(getCellValue(wsExpenses, cm.notes,         r)),
+      paymentMethod: asString(getOptionalCellValue(wsExpenses, cm.paymentMethod, r)),
+      notes:         asString(getOptionalCellValue(wsExpenses, cm.notes,         r)),
       splitLabel:    asString(getCellValue(wsExpenses, cm.splitLabel,    r)),
       paidByLabel:   asString(getCellValue(wsExpenses, cm.paidByLabel,   r)),
       costPerSlot,

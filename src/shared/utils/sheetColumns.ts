@@ -1,62 +1,231 @@
-// sheetColumns.ts — shared column layout for GlobeExpenses Standard Sheet.
+// sheetColumns.ts — shared column layout for the GlobeExpenses Standard Sheet.
 //
-// The Expenses tab has a DYNAMIC column layout that scales with the number of
-// space members (N). Fixed cols A–L are always present; then N cost-local cols,
-// N paid-local cols, 2 detail cols, N cost-main cols, and 3 check cols.
+// The Expenses tab has a DYNAMIC column layout. It scales with:
+//   - the number of space members (N), and
+//   - the space's config: disabled built-in fields produce NO column, and each
+//     exported custom field produces one (Phase 8a, SPEC §9bis).
 //
-// This module is imported by BOTH sheetExport.ts and sheetImport.ts so the
-// column layout is computed exactly once from N and stays consistent.
+// Imported by BOTH sheetExport.ts and sheetImport.ts so the layout is computed
+// exactly once and the two can never drift.
+//
+// ⚠️ Optional built-in columns are `number | undefined`. That is deliberate:
+// making absence a type-level fact means every consumer has to decide what to
+// do about it, instead of silently reading column 0.
+
+import type { CustomFieldDef, CustomValue, SpaceConfig } from '@/spaces/types'
+import { resolveOptionLabel } from '@/spaces/config'
+
+/** Built-in fields that can be toggled off, in their column order. */
+export const OPTIONAL_BUILT_INS = ['country', 'city', 'category', 'paymentMethod', 'notes'] as const
+export type OptionalBuiltIn = (typeof OPTIONAL_BUILT_INS)[number]
 
 export interface ColumnMap {
-  // Fixed columns (1-based col numbers, col A = 1)
-  rowIndex: number      // col A  — sequential row index (1, 2, 3…)
-  date: number          // col B  — date "DD/MM/YYYY"
-  country: number       // col C
-  city: number          // col D
-  category: number      // col E
-  name: number          // col F  — Transaction.name (description)
-  amountLocal: number   // col G  — totalAmount
-  currency: number      // col H  — ISO 4217 code
-  exchangeRate: number  // col I  — exchange rate locked at transaction creation time
-  costMain: number      // col J  — totalAmountMain (=G*I formula on export)
-  splitLabel: number    // col K  — derived split label
-  paidByLabel: number   // col L  — derived paid-by label
+  // ── Always present ───────────────────────────────────────────────────────
+  rowIndex: number      // sequential row index (1, 2, 3…)
+  date: number          // "DD/MM/YYYY"
+  name: number          // Transaction.name (description)
+  amountLocal: number   // totalAmount
+  currency: number      // ISO 4217 code
+  exchangeRate: number  // rate locked at transaction creation time
+  costMain: number      // totalAmountMain (=amount*rate formula on export)
+  splitLabel: number    // derived split label
+  paidByLabel: number   // derived paid-by label
 
-  // Dynamic columns — arrays of length N (one entry per space member)
-  costLocal: number[]           // cols 13…12+N   — beneficiaries[i].amount
-  paidLocal: number[]           // cols 13+N…12+2N — paidBy[i].amount
+  // ── Config-gated built-ins: undefined when the field is not exported ──────
+  country?: number
+  city?: number
+  category?: number
+  paymentMethod?: number
+  notes?: number
 
-  // More fixed cols (position depends on N)
-  paymentMethod: number         // col 13+2N
-  notes: number                 // col 14+2N
+  // ── Dynamic: one entry per space member ──────────────────────────────────
+  costLocal: number[]           // beneficiaries[i].amount
+  paidLocal: number[]           // paidBy[i].amount
+  costMainPerMember: number[]   // formula on export
 
-  // Dynamic — cost in main ccy per member (formula on export)
-  costMainPerMember: number[]   // cols 15+2N…14+3N
+  /** CustomFieldDef.id → column number, for every exported custom field. */
+  custom: Record<string, number>
+  /** The custom field definitions backing `custom`, in column order. Carried on
+   *  the map so writers and the Analysis generator agree on which definition
+   *  owns which column without re-deriving it from config. */
+  customFields: CustomFieldDef[]
 
-  // Check columns (formulas on export, ignored on import)
-  checkCost: number             // col 15+3N
-  checkPaid: number             // col 16+3N
-  allGood: number               // col 17+3N
+  // ── Check columns (formulas on export, ignored on import) ────────────────
+  checkCost: number
+  checkPaid: number
+  allGood: number
 
-  // Hidden column: Firestore transaction ID (for round-trip re-import dedup)
-  txId: number                  // col 18+3N — hidden on export, read on import
+  /** Firestore transaction ID — hidden on export, read on import for dedup. */
+  txId: number
 
-  totalCols: number             // = txId (total width of the sheet)
+  totalCols: number     // = txId (total width of the sheet)
+}
+
+export interface ColumnMapOptions {
+  /** Which built-in fields get a column. Defaults to ALL of them, so existing
+   *  callers and legacy spaces keep the pre-refactor layout exactly. */
+  builtIns?: Partial<Record<OptionalBuiltIn, boolean>>
+  /** Custom fields to emit, in column order. Normally the enabled ones, plus
+   *  any disabled ones the user chose to include anyway. */
+  customFields?: CustomFieldDef[]
 }
 
 /**
- * Computes the full column layout for a given number of space members.
- * All column numbers are 1-based (col A = 1, col B = 2, …).
+ * Compute the full column layout. All column numbers are 1-based (col A = 1).
  *
- * Example with N=2:
- *   costLocal  = [13, 14]   → cols M, N
- *   paidLocal  = [15, 16]   → cols O, P
- *   paymentMethod = 17      → col Q
- *   notes         = 18      → col R
- *   costMainPerMember = [19, 20] → cols S, T
- *   checkCost = 21, checkPaid = 22, allGood = 23 → cols U, V, W
- *   txId = 24               → col X (hidden)
+ * Order:
+ *   #, date, [country] [city] [category], description, amount, currency,
+ *   rate, cost-main, split, paid-by,
+ *   N×cost-local, N×paid-local,
+ *   [payment method] [notes], custom fields…,
+ *   N×cost-main-per-member, 3 checks, txId
+ *
+ * Custom fields sit after the built-in optional columns (SPEC §9bis) — grouped
+ * with paymentMethod/notes under the sheet's existing "DETAILS" banner rather
+ * than pushed between amount and currency.
+ *
+ * With every built-in enabled and no custom fields this reproduces the
+ * pre-Phase-8 layout column for column, which is what keeps old exports and
+ * old tests valid.
  */
+export function buildColumnMap(nMembers: number, options: ColumnMapOptions = {}): ColumnMap {
+  // Guard: minimum 1 member so the per-member arrays are never empty.
+  const n = Math.max(1, nMembers)
+  const enabled = (key: OptionalBuiltIn) => options.builtIns?.[key] ?? true
+  const customFields = options.customFields ?? []
+
+  let col = 1
+  const next = () => col++
+  /** Claim a column only when the field is exported; undefined otherwise. */
+  const optional = (key: OptionalBuiltIn) => (enabled(key) ? next() : undefined)
+
+  const rowIndex = next()
+  const date = next()
+  const country = optional('country')
+  const city = optional('city')
+  const category = optional('category')
+  const name = next()
+  const amountLocal = next()
+  const currency = next()
+  const exchangeRate = next()
+  const costMain = next()
+  const splitLabel = next()
+  const paidByLabel = next()
+
+  const costLocal = Array.from({ length: n }, () => next())
+  const paidLocal = Array.from({ length: n }, () => next())
+
+  const paymentMethod = optional('paymentMethod')
+  const notes = optional('notes')
+
+  const custom: Record<string, number> = {}
+  for (const def of customFields) custom[def.id] = next()
+
+  const costMainPerMember = Array.from({ length: n }, () => next())
+
+  const checkCost = next()
+  const checkPaid = next()
+  const allGood = next()
+  const txId = next()
+
+  return {
+    rowIndex,
+    date,
+    country,
+    city,
+    category,
+    name,
+    amountLocal,
+    currency,
+    exchangeRate,
+    costMain,
+    splitLabel,
+    paidByLabel,
+    costLocal,
+    paidLocal,
+    paymentMethod,
+    notes,
+    custom,
+    customFields,
+    costMainPerMember,
+    checkCost,
+    checkPaid,
+    allGood,
+    txId,
+    totalCols: txId,
+  }
+}
+
+/** The column map implied by a space's config, for `n` members.
+ *  `includedDisabledFields` are field keys the user chose to export despite
+ *  being disabled — see the disabled-data warning in sheetExport.ts. */
+export function columnMapForConfig(
+  n: number,
+  config: SpaceConfig,
+  includedDisabledFields: string[] = [],
+): ColumnMap {
+  const included = new Set(includedDisabledFields)
+
+  const builtIns: Partial<Record<OptionalBuiltIn, boolean>> = {}
+  for (const key of OPTIONAL_BUILT_INS) {
+    builtIns[key] = config.builtInFields[key] || included.has(key)
+  }
+
+  const customFields = config.customFields.filter((f) => f.enabled || included.has(f.id))
+
+  return buildColumnMap(n, { builtIns, customFields })
+}
+
+/** Column number for a filter/dashboard dimension key, or undefined when that
+ *  dimension has no column in this sheet. Built-in keys resolve to their fixed
+ *  slot; anything else is looked up as a custom field id.
+ *
+ *  This is what lets the Analysis generator skip a card on a disabled field
+ *  instead of emitting a formula that resolves to #REF!. */
+export function columnForDimension(cm: ColumnMap, key: string): number | undefined {
+  switch (key) {
+    case 'country':       return cm.country
+    case 'city':          return cm.city
+    case 'category':      return cm.category
+    case 'paymentMethod': return cm.paymentMethod
+    case 'currency':      return cm.currency
+    default:              return cm.custom[key]
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Cell value rendering
+// ---------------------------------------------------------------------------
+
+/** Cell text for a custom field's stored value (SPEC §9bis).
+ *
+ *   select  → the option LABEL, so the sheet reads naturally. Nothing is lost:
+ *             the metadata sheet carries the id↔label mapping.
+ *   boolean → 'yes' / 'no'. An ABSENT value is 'no' — buildCustomPayload()
+ *             omits `false` entirely, so absence is the normal way to store it.
+ *   text    → the raw string.
+ *
+ * Returns '' when a select/text value is absent, so the cell is left blank
+ * rather than reading "undefined". */
+export function customCellValue(def: CustomFieldDef, raw: CustomValue | undefined): string {
+  if (def.type === 'boolean') return raw === true ? 'yes' : 'no'
+  if (raw === undefined || raw === '') return ''
+  if (def.type === 'select') return resolveOptionLabel(def, raw)
+  return String(raw)
+}
+
+/** Accepted spellings for a boolean cell on import, including the locale forms
+ *  the importer already tolerates elsewhere. Anything unrecognised is `false`
+ *  (SPEC §9bis: "anything unrecognised is no"), including blanks. */
+const BOOLEAN_TRUE = new Set(['yes', 'y', 'true', '1', 'oui', 'vrai', 'x', '✓', '✔', '✔️'])
+
+export function parseBooleanCell(raw: unknown): boolean {
+  if (typeof raw === 'boolean') return raw
+  if (typeof raw === 'number') return raw === 1
+  if (typeof raw !== 'string') return false
+  return BOOLEAN_TRUE.has(raw.trim().toLowerCase())
+}
+
 /**
  * Convert a 1-based column number to an Excel column letter (A, B, …, Z, AA, …).
  * Used by both sheetExport.ts and sheetImport.ts.
@@ -69,44 +238,4 @@ export function colLetter(n: number): string {
     n = Math.floor((n - 1) / 26)
   }
   return s
-}
-
-export function buildColumnMap(nMembers: number): ColumnMap {
-  // Guard: minimum 1 member so arrays are never empty
-  const n = Math.max(1, nMembers)
-
-  const costLocal         = Array.from({ length: n }, (_, i) => 13 + i)
-  const paidLocal         = Array.from({ length: n }, (_, i) => 13 + n + i)
-  const paymentMethod     = 13 + 2 * n
-  const notes             = 14 + 2 * n
-  const costMainPerMember = Array.from({ length: n }, (_, i) => 15 + 2 * n + i)
-  const checkCost         = 15 + 3 * n
-  const checkPaid         = 16 + 3 * n
-  const allGood           = 17 + 3 * n
-  const txId              = 18 + 3 * n
-
-  return {
-    rowIndex: 1,
-    date: 2,
-    country: 3,
-    city: 4,
-    category: 5,
-    name: 6,
-    amountLocal: 7,
-    currency: 8,
-    exchangeRate: 9,
-    costMain: 10,
-    splitLabel: 11,
-    paidByLabel: 12,
-    costLocal,
-    paidLocal,
-    paymentMethod,
-    notes,
-    costMainPerMember,
-    checkCost,
-    checkPaid,
-    allGood,
-    txId,
-    totalCols: txId,
-  }
 }
