@@ -5,11 +5,17 @@ import * as XLSX from 'xlsx'
 import type { SpaceConfig } from '@/spaces/types'
 import { getSpaceConfig } from '@/spaces/config'
 import { columnMapForConfig, colLetter } from '../sheetColumns'
-import { buildSpaceWorkbook, SHEET_ANALYSIS, SHEET_EXPENSES } from '../sheetExport'
+import {
+  buildSpaceWorkbook,
+  SHEET_ANALYSIS,
+  SHEET_BALANCE_SUMMARY,
+  SHEET_EXPENSES,
+} from '../sheetExport'
 import {
   CUSTOM_SELECT,
   customFieldsSpace,
   legacySpace,
+  makeTx,
   soloSpace,
   travelSpace,
 } from './sheetFixtures'
@@ -29,6 +35,26 @@ function formulas(ws: XLSX.WorkSheet | undefined): string[] {
     .filter(([k]) => !k.startsWith('!'))
     .map(([, cell]) => cell.f)
     .filter((f): f is string => typeof f === 'string')
+}
+
+/** The cached values of every formula cell in a sheet. */
+function valuesOfFormulaCells(ws: XLSX.WorkSheet | undefined): unknown[] {
+  if (!ws) return []
+  return Object.entries(ws as Record<string, { f?: string; v?: unknown }>)
+    .filter(([k, cell]) => !k.startsWith('!') && typeof cell.f === 'string')
+    .map(([, cell]) => cell.v)
+}
+
+function cellValue(ws: XLSX.WorkSheet, address: string): unknown {
+  return (ws as Record<string, { v?: unknown } | undefined>)[address]?.v
+}
+
+/** The row number whose column A holds `label`. */
+function rowOfLabel(ws: XLSX.WorkSheet, label: string): number {
+  for (let r = 1; r <= 200; r++) {
+    if (cellValue(ws, `A${r}`) === label) return r
+  }
+  throw new Error(`label ${label} not found in column A`)
 }
 
 /** Every text cell in column A, top to bottom. */
@@ -99,10 +125,86 @@ describe('formula serialisation', () => {
     }
   })
 
-  it('asks Excel to recalculate on load, so the placeholder values are never shown', () => {
+  it('asks Excel to recalculate on load', () => {
     const { space, transactions } = travelSpace()
     const wb = buildSpaceWorkbook(space, transactions)
     expect((wb.Workbook as { CalcPr?: { fullCalcOnLoad?: boolean } }).CalcPr?.fullCalcOnLoad).toBe(true)
+  })
+
+  // fullCalcOnLoad is honoured by Excel and LibreOffice, but a viewer that
+  // only renders cached values (Google Sheets, quick-look tools) must still
+  // show the RIGHT numbers — not a grid of zeros.
+  it('caches the correct value in every formula cell, not a placeholder', () => {
+    const { space, transactions } = travelSpace()
+    const wb = writeRead(buildSpaceWorkbook(space, transactions))
+
+    const analysisValues = valuesOfFormulaCells(wb.Sheets[SHEET_ANALYSIS])
+    expect(analysisValues.length).toBeGreaterThan(0)
+    expect(analysisValues.some((v) => typeof v === 'number' && v !== 0)).toBe(true)
+  })
+
+  it('caches Analysis totals matching the first member’s actual spend', () => {
+    const { space, transactions } = travelSpace()
+    const ws = writeRead(buildSpaceWorkbook(space, transactions)).Sheets[SHEET_ANALYSIS]
+
+    // Alice (members[0]) is the default in B1. Her share of the two Food
+    // transactions: 60/3 = 20 and 9/3 = 3, both at rate 1.
+    const foodRow = rowOfLabel(ws, '🍽️ Food')
+    expect(cellValue(ws, `B${foodRow}`)).toBeCloseTo(23, 5)
+
+    // Lodging: 90 GBP split three ways at rate 1.17 → 30 * 1.17 = 35.1
+    const lodgingRow = rowOfLabel(ws, '🏨 Lodging')
+    expect(cellValue(ws, `B${lodgingRow}`)).toBeCloseTo(35.1, 5)
+  })
+
+  it('caches Balance Summary totals matching each member’s actual spend', () => {
+    const { space, transactions } = travelSpace()
+    const ws = writeRead(buildSpaceWorkbook(space, transactions)).Sheets[SHEET_BALANCE_SUMMARY]
+
+    // Alice: cost 20 + 30*1.17 + 3 = 58.1, paid 60.
+    expect(cellValue(ws, 'B2')).toBeCloseTo(58.1, 5)
+    expect(cellValue(ws, 'C2')).toBeCloseTo(60, 5)
+    expect(cellValue(ws, 'D2')).toBeCloseTo(1.9, 5)
+  })
+
+  it('caches the check columns as their computed marks', () => {
+    const { space, transactions } = travelSpace()
+    const ws = writeRead(buildSpaceWorkbook(space, transactions)).Sheets[SHEET_EXPENSES]
+    const cm = columnMapForConfig(space.members.length, getSpaceConfig(space))
+    // Every fixture transaction splits exactly, so all three checks pass.
+    expect(cellValue(ws, `${colLetter(cm.checkCost)}3`)).toBe('✔️')
+    expect(cellValue(ws, `${colLetter(cm.checkPaid)}3`)).toBe('✔️')
+    expect(cellValue(ws, `${colLetter(cm.allGood)}3`)).toBe('✅')
+  })
+})
+
+describe('Analysis sheet — truncation disclosure', () => {
+  it('discloses how many values were left out when a block is capped', () => {
+    const { space } = soloSpace()
+    // 70 distinct categories, more than the 60-row cap.
+    const many = Array.from({ length: 70 }, (_, i) =>
+      makeTx({
+        txId: `t${i}`,
+        name: `Item ${i}`,
+        totalAmount: 100 - i,
+        totalAmountMain: 100 - i,
+        category: `Cat ${i}`,
+        paidBy: [{ travelMemberId: 'm1', amount: 100 - i }],
+        beneficiaries: [{ travelMemberId: 'm1', amount: 100 - i }],
+      }),
+    )
+
+    const labels = columnA(writeRead(buildSpaceWorkbook(space, many)).Sheets[SHEET_ANALYSIS], 200)
+    expect(labels).toContain('Top 60 of 70 by spend — 10 more not shown')
+    // Ranked by spend, so the largest survive and the smallest are cut.
+    expect(labels).toContain('Cat 0')
+    expect(labels).not.toContain('Cat 69')
+  })
+
+  it('adds no note when nothing was truncated', () => {
+    const { space, transactions } = soloSpace()
+    const labels = columnA(writeRead(buildSpaceWorkbook(space, transactions)).Sheets[SHEET_ANALYSIS])
+    expect(labels.some((l) => l.includes('not shown'))).toBe(false)
   })
 })
 

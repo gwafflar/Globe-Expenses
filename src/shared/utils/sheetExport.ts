@@ -142,16 +142,29 @@ function num(ws: WS, col: number, row: number, v: number, s?: S) {
   ws[addr(col, row)] = s ? { t: 'n', v, s } : { t: 'n', v }
 }
 /**
- * Formula cell.
+ * Numeric formula cell, with its value computed here and cached.
  *
- * ⚠️ `v: 0` is REQUIRED, not a stale cached value. SheetJS 0.18.5 skips any
- * cell whose `v` is undefined when serialising — formula and all — so writing
- * `{ t:'n', f }` alone produced files with the formula silently missing. The
- * placeholder is never shown: buildSpaceWorkbook() sets fullCalcOnLoad, so
- * Excel and LibreOffice recompute every formula when the file is opened.
+ * ⚠️ The cached `v` is REQUIRED and must be CORRECT, for two separate reasons:
+ *
+ *  1. SheetJS 0.18.5 skips any cell whose `v` is undefined when serialising —
+ *     formula and all. Writing `{ t:'n', f }` alone produced files with the
+ *     formula silently missing.
+ *  2. Not every consumer recalculates on open. Excel and LibreOffice honour
+ *     the workbook's fullCalcOnLoad flag, but Google Sheets and lightweight
+ *     viewers may simply render the cached value. A placeholder of 0 would
+ *     show them a grid of zeros — worse than the blank cells this replaced.
+ *
+ * So the caller passes the value it would compute anyway. fullCalcOnLoad stays
+ * on top of this, to keep the sheet live once the user edits the data.
  */
-function fml(ws: WS, col: number, row: number, formula: string, s?: S) {
-  ws[addr(col, row)] = s ? { t: 'n', v: 0, f: formula, s } : { t: 'n', v: 0, f: formula }
+function fml(ws: WS, col: number, row: number, formula: string, value: number, s?: S) {
+  const v = Number.isFinite(value) ? value : 0
+  ws[addr(col, row)] = s ? { t: 'n', v, f: formula, s } : { t: 'n', v, f: formula }
+}
+
+/** String-valued formula cell (the ✔/❌ check columns). Same caching rule. */
+function fmlStr(ws: WS, col: number, row: number, formula: string, value: string, s?: S) {
+  ws[addr(col, row)] = s ? { t: 'str', v: value, f: formula, s } : { t: 'str', v: value, f: formula }
 }
 // Apply (or update) a style on an existing or empty cell
 function sty(ws: WS, col: number, row: number, s: S) {
@@ -202,6 +215,34 @@ function dat(ws: WS, col: number, row: number, dateStr: string, s?: S) {
   }
   if (s) cell.s = { ...s, numFmt: 'DD/MM/YYYY' }
   ws[addr(col, row)] = cell
+}
+
+// ---------------------------------------------------------------------------
+// Cached formula values
+// ---------------------------------------------------------------------------
+//
+// Every formula the workbook writes also has its result computed here, so the
+// file is correct even in a viewer that never recalculates. These mirror the
+// formulas exactly; a change to one requires the same change to the other.
+
+/** The amount a member is liable for, in local currency. */
+function memberCostLocal(tx: Transaction, travelMemberId: string): number {
+  return tx.beneficiaries.find((b) => b.travelMemberId === travelMemberId)?.amount ?? 0
+}
+
+/** The amount a member actually paid, in local currency. */
+function memberPaidLocal(tx: Transaction, travelMemberId: string): number {
+  return tx.paidBy.find((p) => p.travelMemberId === travelMemberId)?.amount ?? 0
+}
+
+/** Mirrors the Expenses sheet's per-member cost-in-main-currency formula. */
+function memberCostMain(tx: Transaction, travelMemberId: string): number {
+  return memberCostLocal(tx, travelMemberId) * tx.exchangeRate
+}
+
+/** Mirrors the ✔ check formulas: splits must sum to the transaction total. */
+function checkMark(sum: number, total: number): string {
+  return Math.round((sum - total) * 10000) / 10000 === 0 ? '✔️' : '❌'
 }
 
 // ---------------------------------------------------------------------------
@@ -303,7 +344,8 @@ function buildParamsSheet(space: Space, mainCurrency: string, N: number): WS {
 // ---------------------------------------------------------------------------
 function buildExpensesSheet(
   space: Space,
-  transactions: Transaction[],
+  /** Date-sorted by the caller. */
+  sorted: Transaction[],
   N: number,
   cm: ColumnMap,
 ): unknown {
@@ -389,10 +431,7 @@ function buildExpensesSheet(
   merge(cm.checkCost, cm.allGood)
 
   // ── Data rows ─────────────────────────────────────────────────────────────
-  const sorted = [...transactions].sort(
-    (a, b) => parseFsDate(a.date).getTime() - parseFsDate(b.date).getTime(),
-  )
-
+  // Already date-sorted by the caller — see the note in buildSpaceWorkbook().
   sorted.forEach((tx, idx) => {
     const r    = EXPENSES_FIRST_DATA_ROW + idx
     const rowNum = idx + 1
@@ -417,6 +456,7 @@ function buildExpensesSheet(
     const exchLetter = colLetter(cm.exchangeRate)
     fml(ws, cm.costMain, r,
       `${amtLetter}${r}*${exchLetter}${r}`,
+      tx.totalAmount * tx.exchangeRate,
       formulaCell())
 
     // Cols J, K: split and paidBy labels
@@ -443,13 +483,14 @@ function buildExpensesSheet(
     }
 
     // Cost main per member (formula → pastel + formula overlay)
-    members.forEach((_m, i) => {
+    members.forEach((m, i) => {
       const paramCell = `'${SHEET_PARAMS}'!$B$${5 + i}`
       const cLoc      = colLetter(cm.costLocal[i])
       // Use member pastel with blue-ish text to signal "computed"
       const fStyle: S = { font: fontBlue(), fill: fill(memberPastel(i)), border: thinBorder(C.BORDER_LIGHT), alignment: LEFT }
       fml(ws, cm.costMainPerMember[i], r,
         `IF(${paramCell}="",0,IFERROR(${cLoc}${r}*${exchLetter}${r},0))`,
+        memberCostMain(tx, m.travelMemberId),
         fStyle)
     })
 
@@ -458,15 +499,22 @@ function buildExpensesSheet(
     const paidRange = `${colLetter(cm.paidLocal[0])}${r}:${colLetter(cm.paidLocal[N - 1])}${r}`
     const ckStyle   = formulaCell()
 
-    fml(ws, cm.checkCost, r,
+    // Cached values mirror the formulas: sum the per-member columns as WRITTEN
+    // (only this space's members have columns), not the raw split arrays.
+    const costSum = members.reduce((s, m) => s + memberCostLocal(tx, m.travelMemberId), 0)
+    const paidSum = members.reduce((s, m) => s + memberPaidLocal(tx, m.travelMemberId), 0)
+    const costOk  = checkMark(costSum, tx.totalAmount)
+    const paidOk  = checkMark(paidSum, tx.totalAmount)
+
+    fmlStr(ws, cm.checkCost, r,
       `IF(${amtLetter}${r}="","",IF(ROUND(SUM(${costRange})-${amtLetter}${r},4)=0,"✔️","❌"))`,
-      ckStyle)
-    fml(ws, cm.checkPaid, r,
+      costOk, ckStyle)
+    fmlStr(ws, cm.checkPaid, r,
       `IF(${amtLetter}${r}="","",IF(ROUND(SUM(${paidRange})-${amtLetter}${r},4)=0,"✔️","❌"))`,
-      ckStyle)
-    fml(ws, cm.allGood, r,
+      paidOk, ckStyle)
+    fmlStr(ws, cm.allGood, r,
       `IF(${amtLetter}${r}="","",IF(AND(${colLetter(cm.checkCost)}${r}="✔️",${colLetter(cm.checkPaid)}${r}="✔️"),"✅","❌"))`,
-      ckStyle)
+      costOk === '✔️' && paidOk === '✔️' ? '✅' : '❌', ckStyle)
 
     // Hidden txId column — Firestore document ID for round-trip re-import
     str(ws, cm.txId, r, tx.txId, dataCell())
@@ -525,6 +573,10 @@ function buildBalanceSheet(
   space: Space,
   N: number,
   cm: ColumnMap,
+  /** The SAME date-sorted list the Expenses sheet wrote. The VLOOKUPs below key
+   *  on the Expenses row index, so a differently ordered list would cache
+   *  values against the wrong rows. */
+  sorted: Transaction[],
 ): unknown {
   const ws: WS = {}
   const members = space.members
@@ -564,7 +616,11 @@ function buildBalanceSheet(
     const rowIdx = r - 2
     num(ws, 1, r, rowIdx, dataCell(C.LABEL_ALT))
 
-    members.forEach((_, i) => {
+    // The Expenses row this VLOOKUP resolves to, or undefined past the data —
+    // where every formula yields 0 because the lookup fails into IFERROR.
+    const tx = sorted[rowIdx - 1]
+
+    members.forEach((m, i) => {
       const cols         = balanceMemberCols(i)
       const paramCell    = `'${SHEET_PARAMS}'!$B$${5 + i}`
       const paidLocLtr   = colLetter(cols.paidLocal)
@@ -572,16 +628,26 @@ function buildBalanceSheet(
       const paidMainLtr  = colLetter(cols.paidMain)
       const fStyle       = formulaCell()
 
+      const costLocalV = tx ? memberCostLocal(tx, m.travelMemberId) : 0
+      const paidLocalV = tx ? memberPaidLocal(tx, m.travelMemberId) : 0
+      const costMainV  = tx ? memberCostMain(tx, m.travelMemberId) : 0
+      const paidMainV  = tx ? paidLocalV * tx.exchangeRate : 0
+
       fml(ws, cols.costLocal, r,
-        `IF(${paramCell}="",0,IFERROR(VLOOKUP($A${r},${expRange},${cm.costLocal[i]},FALSE),0))`, fStyle)
+        `IF(${paramCell}="",0,IFERROR(VLOOKUP($A${r},${expRange},${cm.costLocal[i]},FALSE),0))`,
+        costLocalV, fStyle)
       fml(ws, cols.paidLocal, r,
-        `IF(${paramCell}="",0,IFERROR(VLOOKUP($A${r},${expRange},${cm.paidLocal[i]},FALSE),0))`, fStyle)
+        `IF(${paramCell}="",0,IFERROR(VLOOKUP($A${r},${expRange},${cm.paidLocal[i]},FALSE),0))`,
+        paidLocalV, fStyle)
       fml(ws, cols.costMain, r,
-        `IF(${paramCell}="",0,IFERROR(VLOOKUP($A${r},${expRange},${cm.costMainPerMember[i]},FALSE),0))`, fStyle)
+        `IF(${paramCell}="",0,IFERROR(VLOOKUP($A${r},${expRange},${cm.costMainPerMember[i]},FALSE),0))`,
+        costMainV, fStyle)
       fml(ws, cols.paidMain, r,
-        `IF(${paramCell}="",0,IFERROR(${paidLocLtr}${r}*VLOOKUP($A${r},${expRange},${cm.exchangeRate},FALSE),0))`, fStyle)
+        `IF(${paramCell}="",0,IFERROR(${paidLocLtr}${r}*VLOOKUP($A${r},${expRange},${cm.exchangeRate},FALSE),0))`,
+        paidMainV, fStyle)
       fml(ws, cols.balance, r,
         `${paidMainLtr}${r}-${costMainLtr}${r}`,
+        paidMainV - costMainV,
         { font: fontDark(true), fill: fill(memberPastel(i)), border: thinBorder(C.BORDER_LIGHT), alignment: LEFT })
     })
   }
@@ -601,7 +667,7 @@ function buildBalanceSheet(
 // ---------------------------------------------------------------------------
 // 💸 Balance Summary sheet
 // ---------------------------------------------------------------------------
-function buildBalanceSummarySheet(space: Space, N: number): WS {
+function buildBalanceSummarySheet(space: Space, N: number, transactions: Transaction[]): WS {
   const ws: WS = {}
   const members = space.members
   const balLastRow = 2 + MAX_DATA_ROWS
@@ -611,13 +677,24 @@ function buildBalanceSummarySheet(space: Space, N: number): WS {
   str(ws, 3, 1, 'Total paid (main ccy)', hdrDark(C.GREEN_DARK))
   str(ws, 4, 1, 'Balance',              hdrDark(C.PURPLE))
 
-  members.forEach((_m, i) => {
+  members.forEach((m, i) => {
     const cols = balanceMemberCols(i)
     const r    = 2 + i
-    fml(ws, 1, r, `'${SHEET_PARAMS}'!$B$${5 + i}`,                                              dataCell())
-    fml(ws, 2, r, `SUM('${SHEET_BALANCE}'!${colLetter(cols.costMain)}3:${colLetter(cols.costMain)}${balLastRow})`, formulaCell())
-    fml(ws, 3, r, `SUM('${SHEET_BALANCE}'!${colLetter(cols.paidMain)}3:${colLetter(cols.paidMain)}${balLastRow})`, formulaCell())
+
+    const costTotal = transactions.reduce((s, tx) => s + memberCostMain(tx, m.travelMemberId), 0)
+    const paidTotal = transactions.reduce(
+      (s, tx) => s + memberPaidLocal(tx, m.travelMemberId) * tx.exchangeRate, 0,
+    )
+
+    // The member name is a formula pointing at the Parameters sheet, so
+    // renaming there updates this — its cached value is the name itself.
+    fmlStr(ws, 1, r, `'${SHEET_PARAMS}'!$B$${5 + i}`, m.displayName, dataCell())
+    fml(ws, 2, r, `SUM('${SHEET_BALANCE}'!${colLetter(cols.costMain)}3:${colLetter(cols.costMain)}${balLastRow})`,
+      costTotal, formulaCell())
+    fml(ws, 3, r, `SUM('${SHEET_BALANCE}'!${colLetter(cols.paidMain)}3:${colLetter(cols.paidMain)}${balLastRow})`,
+      paidTotal, formulaCell())
     fml(ws, 4, r, `C${r}-B${r}`,
+      paidTotal - costTotal,
       { font: fontDark(true), fill: fill(memberPastel(i)), border: thinBorder(C.BORDER_LIGHT), alignment: LEFT })
   })
 
@@ -652,7 +729,7 @@ function rankedDimensionValues(
   key: string,
   customFields: CustomFieldDef[],
   limit: number,
-): { values: string[]; hasBlank: boolean } {
+): { values: string[]; hasBlank: boolean; distinct: number } {
   const totals = new Map<string, number>()
   let hasBlank = false
 
@@ -670,7 +747,16 @@ function rankedDimensionValues(
     .slice(0, limit)
     .map(([value]) => value)
 
-  return { values, hasBlank }
+  return { values, hasBlank, distinct: totals.size }
+}
+
+/** Note appended to a block whose values were capped.
+ *
+ *  A spreadsheet implies completeness in a way a phone card does not: someone
+ *  reconciling a total against 60 listed countries when there were 78 would
+ *  find a gap they cannot explain. Costs one row, prevents that. */
+function truncationNote(shown: number, distinct: number): string | null {
+  return distinct > shown ? `Top ${shown} of ${distinct} by spend — ${distinct - shown} more not shown` : null
 }
 
 /** Escape a value for use inside an Excel string literal in a formula. */
@@ -746,6 +832,20 @@ function buildAnalysisSheet(
   const sumproduct = (filters: { col: number; value: string }[]) =>
     `SUMPRODUCT(${filters.map((f) => term(f.col, f.value)).join('*')}*${memberCost})`
 
+  // Cached value mirroring that SUMPRODUCT, for the member the selector starts
+  // on. Scoped to members[0] because that is what B1 holds on open.
+  const defaultMemberId = members[0]?.travelMemberId
+  const sumproductValue = (filters: { key: string; value: string }[]) => {
+    if (!defaultMemberId) return 0
+    return transactions.reduce((sum, tx) => {
+      const matches = filters.every(({ key, value }) => {
+        const text = dimensionCellText(tx, key, cm.customFields)
+        return value === NONE_LABEL ? text === '' : text === value
+      })
+      return matches ? sum + memberCostMain(tx, defaultMemberId) : sum
+    }, 0)
+  }
+
   let row = 3
   let widestCol = 2
 
@@ -754,7 +854,7 @@ function buildAnalysisSheet(
 
     if (dims.length === 1) {
       // ── 1D block ──────────────────────────────────────────────────────────
-      const { values, hasBlank } = rankedDimensionValues(
+      const { values, hasBlank, distinct } = rankedDimensionValues(
         transactions, dims[0].key, cm.customFields, MAX_1D_ROWS,
       )
       const rows = hasBlank ? [...values, NONE_LABEL] : values
@@ -765,9 +865,15 @@ function buildAnalysisSheet(
       row++
       for (const value of rows) {
         str(ws, 1, row, value, dataCell())
-        fml(ws, 2, row, sumproduct([{ col: cols[0], value }]), formulaCell())
+        fml(ws, 2, row,
+          sumproduct([{ col: cols[0], value }]),
+          sumproductValue([{ key: dims[0].key, value }]),
+          formulaCell())
         row++
       }
+
+      const note = truncationNote(values.length, distinct)
+      if (note) { str(ws, 1, row, note, formulaCell()); row++ }
     } else {
       // ── 2D cross-tab ──────────────────────────────────────────────────────
       const primary   = rankedDimensionValues(transactions, dims[0].key, cm.customFields, MAX_PIVOT_ROWS)
@@ -788,11 +894,21 @@ function buildAnalysisSheet(
           fml(
             ws, 2 + i, row,
             sumproduct([{ col: cols[0], value: rowVal }, { col: cols[1], value: colVal }]),
+            sumproductValue([
+              { key: dims[0].key, value: rowVal },
+              { key: dims[1].key, value: colVal },
+            ]),
             formulaCell(),
           )
         })
         row++
       }
+
+      // Both axes can be capped independently, so both are disclosed.
+      const rowNote = truncationNote(primary.values.length, primary.distinct)
+      if (rowNote) { str(ws, 1, row, rowNote, formulaCell()); row++ }
+      const colNote = truncationNote(secondary.values.length, secondary.distinct)
+      if (colNote) { str(ws, 1, row, `${dims[1].label}: ${colNote}`, formulaCell()); row++ }
     }
 
     row++ // blank separator between cards
@@ -909,10 +1025,17 @@ export function buildSpaceWorkbook(
   const wb = XLSXStyle.utils.book_new()
 
   type WB_WS = XLSXTypes.WorkSheet
+  // Sorted ONCE here: the Expenses sheet writes rows in this order and the
+  // Balance sheet's VLOOKUPs key on that row index, so both must see the same
+  // ordering or the cached values land against the wrong rows.
+  const sorted = [...transactions].sort(
+    (a, b) => parseFsDate(a.date).getTime() - parseFsDate(b.date).getTime(),
+  )
+
   XLSXStyle.utils.book_append_sheet(wb, buildParamsSheet(space, mainCurrency, N)         as WB_WS, SHEET_PARAMS)
-  XLSXStyle.utils.book_append_sheet(wb, buildExpensesSheet(space, transactions, N, cm)   as WB_WS, SHEET_EXPENSES)
-  XLSXStyle.utils.book_append_sheet(wb, buildBalanceSheet(space, N, cm)                  as WB_WS, SHEET_BALANCE)
-  XLSXStyle.utils.book_append_sheet(wb, buildBalanceSummarySheet(space, N)               as WB_WS, SHEET_BALANCE_SUMMARY)
+  XLSXStyle.utils.book_append_sheet(wb, buildExpensesSheet(space, sorted, N, cm)         as WB_WS, SHEET_EXPENSES)
+  XLSXStyle.utils.book_append_sheet(wb, buildBalanceSheet(space, N, cm, sorted)          as WB_WS, SHEET_BALANCE)
+  XLSXStyle.utils.book_append_sheet(wb, buildBalanceSummarySheet(space, N, sorted)       as WB_WS, SHEET_BALANCE_SUMMARY)
 
   // Omitted entirely when no dashboard card survives — an empty Analysis tab is
   // worse than no tab, and the old one emitted #REF! in exactly this case.
