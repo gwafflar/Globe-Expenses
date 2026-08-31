@@ -2717,3 +2717,73 @@ The root `tsconfig.json` has `"files": []` and only project references, so `--no
 - **Google Sheets `fullCalcOnLoad` behaviour is still unverified** — worked around rather than confirmed. The cached values make it moot, but the flag's actual support is unknown.
 - **Dates already corrupted by bug 4** are not repaired.
 - **`space.countries` entries storing `'🌍'`** — unchanged, see the open country-canonicalisation bug from Session 025. Phase 8 made the *export* correct without touching stored data.
+
+> ⬇️ **Two items below were recovered from the session transcript in Session 027** — they were
+> reported at the time but never written here, so the entry above read as if the phase had been
+> fully verified.
+
+### ⚠️ Manual verification was NOT performed
+
+Only step 1 of the phase prompt's Verification ran (`pnpm tsc -b`, `pnpm test` 613/613, `pnpm build`). **Steps 2–9 are all manual, all need a browser and a real Firebase session, and none were done**: desktop-spreadsheet open, round-trip into a fresh space, solo export, foreign-sheet mapping, 500+ row batching, offline import, the disabled-field warning, and 375px. Written up as `docs/MANUAL_TEST_PLAN.md` in Session 027.
+
+### Inherited debt in the import path
+
+Named at the time because Phase 8 was the last phase, so unresolved awkwardness becomes permanent:
+
+- **`ParsedSheetRow` carries both `custom` and `customText`.** The lossless path needs resolved values, the foreign path needs raw cells. One row type serving two paths is the seam; two row types from the start would have been cleaner.
+- **Two parallel write functions.** `importParsedRows` (slot→member mapping) and `importForeignRows` (splits pre-resolved) duplicate the batching and payload construction. Made siblings rather than one function with a mode flag — the duplication is real and will drift.
+- **Built-in fields are not uniform and never will be.** `country` stores bare, `category`/`paymentMethod` emoji-prefixed. `dimensionCellText()` funnels it into one place but does not fix the stored inconsistency — the Session 025 country-canonicalisation bug is the proper fix and is still open.
+- **`space.categories` and `config.customFields` are two different option-list mechanisms** — top-level array vs. nested in config, different write paths (`updateSpaceList` vs `updateSpaceConfig`). The importer handles both, which is why `collectPendingOptions` returns a split `{ custom, builtIn }` shape.
+
+---
+
+## 🚧 Working Session 027 — 31 August 2026
+
+**Type**: Release preparation — recover unlogged state, gate the unverified feature
+**Tools used**: Claude Code (claude-code CLI)
+
+### Context
+
+First session after Phase 8 landed. The question was what stands between the branch and a PR. Answer: nothing technical — the gap is that **no part of Phase 7b or 8 has ever run in a browser against real data**.
+
+### Verified green on `Travel-to-Space-maj-upgrade` (31 Aug)
+
+`pnpm tsc -b` clean · `pnpm test` **613/613** · `pnpm build` clean · `pnpm lint` 91 problems (85 errors) — the long-standing pre-existing count, unchanged in refactor-touched files, and not wired into CI.
+
+Branch is pushed, 20 commits ahead of `main`; `main` carries one README commit not yet in the branch.
+
+### Two gaps recovered from the Session 026 transcript
+
+Session 026 ended cleanly — the last commit at 22:35 local, the wrap-up report a minute later, nothing cut off mid-work. But two things reported in that final message never reached this log: the **skipped manual verification** and the **inherited importer debt**. Both are now appended to the Session 026 entry above.
+
+**Process note**: a session log written from inside the session can miss what the final report said, because the log is usually written *before* the report. Worth a glance at the wrap-up before closing out.
+
+### `docs/MANUAL_TEST_PLAN.md` — new
+
+Twelve tests, each with priority, reproduction, expected behaviour and the specific failure to watch for. Four are P1 and gate the PR: legacy export in a desktop spreadsheet, the same file in **Google Sheets** (the one assumption Phase 8 shipped on without being able to test it), a round-trip with dates checked explicitly, and a **501+ row** import at the `writeBatch` boundary.
+
+Two entries are documented as **expected-broken, not bugs to file**: the pivot "Other" section is deliberately non-expandable, and T11's split country rows are the known open canonicalisation bug.
+
+### Import / Export gated behind a flag
+
+`SHEETS_FEATURE_ENABLED = false` in `TransactionsTab.tsx`. One line to flip back once T1–T9 pass.
+
+**`disabled` was deliberately not used.** A disabled button swallows click events, so on mobile — no hover, therefore no `title` tooltip — a tap would do nothing at all with no explanation. The buttons stay clickable and refuse in the handler, showing an inline `role="status"` notice that auto-dismisses after 4s with timer cleanup, so repeated taps restart the countdown rather than stacking timers. Both dialogs are also gated at their `open` prop, so they cannot mount even if the state were set another way.
+
+⚠️ **This gates T1–T9 only.** The Dashboard is untouched, so T10 (pivot cards), T11 (country split rows) and T12 (375px) ship live and unverified. T11 is user-visible today.
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `src/spaces/components/tabs/TransactionsTab.tsx` | Feature gate, greyed buttons, coming-soon notice (+62/−8) |
+| `docs/MANUAL_TEST_PLAN.md` | **New** — 12 manual tests, P1–P3 |
+| `docs/SESSION_LOG.md` | Session 026 gaps recovered; this entry |
+
+Verified after the change: `tsc -b` clean, 613/613, `build` clean, and `eslint` on the touched file reports the **same 4 pre-existing errors** as the committed version — none added.
+
+### Not done / still open
+
+- **The manual test plan itself** — nothing in it has been run.
+- **Country canonicalisation** (Session 025) — still the highest-value open bug, and now the main unverified thing shipping live.
+- `docs/Devprofile.md` is an untracked stray duplicate of `docs/Developer profile.md` (both 111 lines). Left alone; delete when confirmed redundant.

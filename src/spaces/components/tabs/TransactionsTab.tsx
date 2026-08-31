@@ -21,6 +21,20 @@ import type { CustomFieldDef, SpaceConfig } from '@/spaces/types'
 import { getSpaceConfig, enabledCustomFields, resolveOptionLabel } from '@/spaces/config'
 
 // ---------------------------------------------------------------------------
+// Feature gate — spreadsheet import / export
+// ---------------------------------------------------------------------------
+//
+// Flip to `true` to re-enable Import and Export. The code path is complete and
+// covered by tests, but the round-trip has never been exercised in a browser
+// against real data (docs/MANUAL_TEST_PLAN.md, T1-T9). Until those pass, the
+// buttons render greyed out and explain themselves instead of shipping a
+// feature that can silently produce a wrong file.
+
+const SHEETS_FEATURE_ENABLED = false
+
+const SHEETS_COMING_SOON = 'This feature is coming back soon'
+
+// ---------------------------------------------------------------------------
 // Currency symbol helpers
 // ---------------------------------------------------------------------------
 
@@ -855,6 +869,25 @@ export function TransactionsTab({
 
   const [isExporting, setIsExporting] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
+  // Set to true to bring Import/Export back — see docs/MANUAL_TEST_PLAN.md T1-T9.
+  // Temporarily gated: the spreadsheet round-trip has never been verified in a
+  // real browser against real data, so it ships greyed out rather than delaying
+  // everything else in the Space refactor.
+  const sheetsEnabled = SHEETS_FEATURE_ENABLED
+  // Shown when the user taps a greyed-out button. `disabled` swallows click
+  // events entirely, so the buttons stay clickable and refuse in the handler —
+  // otherwise a tap on mobile (where there is no hover, so no title tooltip)
+  // would do nothing at all with no explanation.
+  const [showComingSoon, setShowComingSoon] = useState(false)
+
+  // Auto-dismiss the notice a few seconds after the last tap. The cleanup
+  // clears the pending timer so repeated taps restart the countdown rather
+  // than stacking timers that each fire and hide it early.
+  useEffect(() => {
+    if (!showComingSoon) return
+    const timer = setTimeout(() => setShowComingSoon(false), 4000)
+    return () => clearTimeout(timer)
+  }, [showComingSoon])
   // Disabled fields still holding values — populated only when the user hits
   // Export and there is something to warn about, so the dialog stays closed in
   // the overwhelmingly common case.
@@ -887,7 +920,7 @@ export function TransactionsTab({
     <div className="flex flex-col gap-3">
       {/* Pre-export warning — only mounted when there is something to warn about */}
       <DisabledFieldsExportDialog
-        open={orphanedFields.length > 0}
+        open={sheetsEnabled && orphanedFields.length > 0}
         onOpenChange={(next) => { if (!next) setOrphanedFields([]) }}
         fields={orphanedFields}
         onExportWithout={() => runExport([])}
@@ -896,7 +929,7 @@ export function TransactionsTab({
 
       {/* Import dialog (portal, rendered outside the flex flow) */}
       <ImportXlsxDialog
-        open={importOpen}
+        open={sheetsEnabled && importOpen}
         onOpenChange={setImportOpen}
         space={space}
         currentUserUid={currentUserUid}
@@ -916,23 +949,44 @@ export function TransactionsTab({
           {error && <p className="text-xs text-destructive">{error}</p>}
           <button
             type="button"
-            onClick={() => setImportOpen(true)}
-            className="rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors"
+            onClick={() => (sheetsEnabled ? setImportOpen(true) : setShowComingSoon(true))}
+            aria-disabled={!sheetsEnabled}
+            title={sheetsEnabled ? undefined : SHEETS_COMING_SOON}
+            className={
+              sheetsEnabled
+                ? 'rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors'
+                : 'rounded-md border border-input bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground opacity-60 cursor-not-allowed transition-colors'
+            }
           >
             Import
           </button>
           {transactions.length > 0 && (
             <button
               type="button"
-              onClick={handleExport}
-              disabled={isExporting}
-              className="rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+              onClick={() => (sheetsEnabled ? handleExport() : setShowComingSoon(true))}
+              disabled={sheetsEnabled && isExporting}
+              aria-disabled={!sheetsEnabled}
+              title={sheetsEnabled ? undefined : SHEETS_COMING_SOON}
+              className={
+                sheetsEnabled
+                  ? 'rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors disabled:opacity-60 disabled:cursor-not-allowed'
+                  : 'rounded-md border border-input bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground opacity-60 cursor-not-allowed transition-colors'
+              }
             >
-              {isExporting ? 'Exporting…' : 'Export'}
+              {sheetsEnabled && isExporting ? 'Exporting…' : 'Export'}
             </button>
           )}
         </div>
       </div>
+
+      {/* Explains the greyed-out Import/Export buttons on tap. `role="status"`
+          makes a screen reader announce it, since the visual change is the
+          only other signal that the tap was registered. */}
+      {showComingSoon && (
+        <p role="status" className="text-right text-xs text-muted-foreground">
+          {SHEETS_COMING_SOON}
+        </p>
+      )}
 
       {/* Filter panel — slides in below toolbar when open */}
       {filterOpen && (
