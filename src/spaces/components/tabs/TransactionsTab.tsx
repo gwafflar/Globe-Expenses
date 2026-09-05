@@ -826,6 +826,8 @@ export function TransactionsTab({
     clearDimension,
     dateRange,
     clearDateRange,
+    spendingOnly,
+    clearSpendingOnly,
     clearAll,
     hasActiveFilters,
     availableOptions,
@@ -847,7 +849,8 @@ export function TransactionsTab({
   const activeFilterCount =
     Object.keys(filters).length +
     (searchQuery.trim() ? 1 : 0) +
-    (dateRange.preset !== 'all' ? 1 : 0)
+    (dateRange.preset !== 'all' ? 1 : 0) +
+    (spendingOnly ? 1 : 0)
 
   // Sort by spending date descending (most recent first), with createdAt as tiebreaker.
   // parseTxDate converts "DD-MM-YYYY" → JS Date so we don't sort lexicographically.
@@ -1001,6 +1004,8 @@ export function TransactionsTab({
           onClearDimension={clearDimension}
           dateRange={dateRange}
           onClearDateRange={clearDateRange}
+          spendingOnly={spendingOnly}
+          onClearSpendingOnly={clearSpendingOnly}
           onClearAll={clearAll}
           hasActiveFilters={hasActiveFilters}
           resultCount={resultCount}

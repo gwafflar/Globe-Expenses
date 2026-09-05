@@ -41,6 +41,11 @@ interface FilterPanelProps {
    *  ALL_TIME means "no restriction" and renders nothing. */
   dateRange: DateRange
   onClearDateRange: () => void
+  /** Spending-only restriction (also set by the drill-down, §5). Like the date
+   *  range it has no chip of its own — it arrives from outside and can only be
+   *  cleared here. */
+  spendingOnly: boolean
+  onClearSpendingOnly: () => void
   onClearAll: () => void
   hasActiveFilters: boolean
   resultCount: number
@@ -62,6 +67,8 @@ export function FilterPanel({
   onClearDimension,
   dateRange,
   onClearDateRange,
+  spendingOnly,
+  onClearSpendingOnly,
   onClearAll,
   hasActiveFilters,
   resultCount,
@@ -238,6 +245,23 @@ export function FilterPanel({
                 type="button"
                 aria-label="Remove date range filter"
                 onClick={onClearDateRange}
+                className="ml-0.5 text-primary/60 hover:text-primary"
+              >
+                ×
+              </button>
+            </span>
+          )}
+
+          {/* Spending-only badge — same class of restriction as the date range:
+              pushed in by the drill-down so the list matches the card that was
+              tapped, and clearable here to reveal the movements it excluded. */}
+          {spendingOnly && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
+              💸 Spending only
+              <button
+                type="button"
+                aria-label="Remove spending-only filter"
+                onClick={onClearSpendingOnly}
                 className="ml-0.5 text-primary/60 hover:text-primary"
               >
                 ×

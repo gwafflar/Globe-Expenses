@@ -15,8 +15,8 @@
 import { useMemo, useState, useCallback } from 'react'
 import type { TransactionWithStatus } from './useTransactions'
 import type { Space } from '@/spaces/types'
-import { getSpaceConfig } from '@/spaces/config'
-import { getTransactionType } from '@/transactions/utils/walletHelpers'
+import { getSpaceConfig, enabledCustomFields } from '@/spaces/config'
+import { getTransactionType, countsAsSpending } from '@/transactions/utils/walletHelpers'
 import {
   UNDEFINED_FILTER,
   allFilterDimensions,
@@ -72,6 +72,13 @@ export interface UseTransactionFiltersResult {
   dateRange: DateRange
   /** Drop the date-range restriction, leaving other filters alone. */
   clearDateRange: () => void
+  /** Whether the list is restricted to spending transactions (countsAsSpending).
+   *  Set by the dashboard drill-down (§5) so the drilled list contains exactly
+   *  the transactions the card counted; there is no in-panel control to switch
+   *  it on, only to clear it. */
+  spendingOnly: boolean
+  /** Drop the spending-only restriction, leaving other filters alone. */
+  clearSpendingOnly: () => void
   /** Clear ALL filters, the date range and the search in one action. */
   clearAll: () => void
   /** Whether any filter or search is currently active. */
@@ -132,6 +139,12 @@ export function useTransactionFilters(
   const [filters, setFilters] = useState<FilterState>({})
   const [searchQuery, setSearchQuery] = useState('')
   const [dateRange, setDateRange] = useState<DateRange>(ALL_TIME)
+  // Spending-only restriction, set by the dashboard drill-down. Modelled on
+  // dateRange rather than on the `type` filter: it is a restriction pushed in
+  // from outside that the panel can only display and clear, and the type
+  // dimension cannot express it anyway (a balance-only adjustment IS an
+  // adjustment but is not spending).
+  const [spendingOnly, setSpendingOnly] = useState(false)
 
   // -- External filter request (§5) --
   // Which request has already been consumed. Compared by nonce, not by value:
@@ -151,10 +164,12 @@ export function useTransactionFilters(
     for (const sel of request.selections) next[sel.dimensionKey] = new Set(sel.values)
     setFilters(next)
     setDateRange(request.range)
+    setSpendingOnly(request.spendingOnly ?? false)
     setSearchQuery('')
   }
 
   const clearDateRange = useCallback(() => setDateRange(ALL_TIME), [])
+  const clearSpendingOnly = useCallback(() => setSpendingOnly(false), [])
 
   // Legacy spaces (no space.config) resolve to travel-mode defaults, so the
   // dimension list below is identical to the old hard-coded one.
@@ -162,8 +177,10 @@ export function useTransactionFilters(
 
   // -- Observed values for the core + built-in dimensions --
   // Derived from the FULL transaction list (not the filtered one) so options
-  // stay visible while filters are active. Custom fields don't appear here:
-  // their options come from the field definition, not from the data.
+  // stay visible while filters are active. A custom select's real options come
+  // from the field definition, not from the data — the ONLY thing observed for
+  // one is whether some transaction has no value, which the definition cannot
+  // know and which the "No <field>" filter needs to exist.
   const observed = useMemo<ObservedValues>(() => {
     const types = new Set<string>()
     const cats = new Set<string>()
@@ -211,6 +228,18 @@ export function useTransactionFilters(
     const methodList = Array.from(methods).sort()
     if (hasUndefinedMethod) methodList.push(UNDEFINED_FILTER)
 
+    // Custom selects: the sentinel alone, keyed by field id. The field's own
+    // options are added by customDimensions() from the definition.
+    const customObserved: ObservedValues = {}
+    for (const def of enabledCustomFields(config)) {
+      if (def.type !== 'select') continue
+      const someMissing = transactions.some((tx) => {
+        const v = tx.custom?.[def.id]
+        return !(typeof v === 'string' && v !== '')
+      })
+      if (someMissing) customObserved[def.id] = [UNDEFINED_FILTER]
+    }
+
     return {
       // Type is ordered semantically: expense first, then transfer, withdrawal, adjustment
       type: ['expense', 'transfer', 'withdrawal', 'adjustment'].filter((t) => types.has(t)),
@@ -221,8 +250,9 @@ export function useTransactionFilters(
       paymentMethod: methodList,
       paidBy: Array.from(payers),
       beneficiaries: Array.from(beneficiaries),
+      ...customObserved,
     }
-  }, [transactions, space.members])
+  }, [transactions, space.members, config])
 
   // -- The dimension list this space can filter on --
   const dimensions = useMemo(
@@ -291,6 +321,7 @@ export function useTransactionFilters(
     setFilters({})
     setSearchQuery('')
     setDateRange(ALL_TIME)
+    setSpendingOnly(false)
   }, [])
 
   // -- Filtering logic --
@@ -314,13 +345,14 @@ export function useTransactionFilters(
       // ⚠️ Goes through isDateInRange → parseTxDate: "DD-MM-YYYY" does not
       // compare lexicographically.
       if (!isDateInRange(tx.date, dateRange)) return false
+      if (spendingOnly && !countsAsSpending(tx)) return false
       // Each active dimension is OR within, AND across.
       for (const [dim, selected] of activeDims) {
         if (!matchesDimension(tx, dim, selected)) return false
       }
       return true
     })
-  }, [transactions, activeDims, q, searchAsNumber, searchNotes, textFieldIds, dateRange])
+  }, [transactions, activeDims, q, searchAsNumber, searchNotes, textFieldIds, dateRange, spendingOnly])
 
   // -- Cross-filtered availability --
   // For each dimension, apply all OTHER filters + search, then collect which
@@ -329,7 +361,7 @@ export function useTransactionFilters(
     const result: AvailableOptions = {}
 
     // Shortcut: with nothing active every option is reachable.
-    if (activeDims.length === 0 && !q && dateRange.preset === 'all') {
+    if (activeDims.length === 0 && !q && dateRange.preset === 'all' && !spendingOnly) {
       for (const dim of dimensions) result[dim.key] = new Set(dim.options.map((o) => o.id))
       return result
     }
@@ -340,6 +372,7 @@ export function useTransactionFilters(
       for (const tx of transactions) {
         if (!matchesSearch(tx, q, searchAsNumber, searchNotes, textFieldIds)) continue
         if (!isDateInRange(tx.date, dateRange)) continue
+        if (spendingOnly && !countsAsSpending(tx)) continue
         let passesOthers = true
         for (const [dim, selected] of otherDims) {
           if (!matchesDimension(tx, dim, selected)) { passesOthers = false; break }
@@ -350,12 +383,12 @@ export function useTransactionFilters(
       result[target.key] = available
     }
     return result
-  }, [transactions, dimensions, activeDims, q, searchAsNumber, searchNotes, textFieldIds, dateRange])
+  }, [transactions, dimensions, activeDims, q, searchAsNumber, searchNotes, textFieldIds, dateRange, spendingOnly])
 
   // -- Derived --
 
   const hasActiveFilters =
-    activeDims.length > 0 || q.length > 0 || dateRange.preset !== 'all'
+    activeDims.length > 0 || q.length > 0 || dateRange.preset !== 'all' || spendingOnly
 
   return {
     filtered,
@@ -368,6 +401,8 @@ export function useTransactionFilters(
     clearDimension,
     dateRange,
     clearDateRange,
+    spendingOnly,
+    clearSpendingOnly,
     clearAll,
     hasActiveFilters,
     availableOptions,

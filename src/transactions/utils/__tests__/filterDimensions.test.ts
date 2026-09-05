@@ -270,6 +270,49 @@ describe('filter predicate — custom select', () => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// The "no value" sentinel on a custom select — the dashboard drill-down path
+// ---------------------------------------------------------------------------
+
+describe('custom select — the Undefined sentinel', () => {
+  const config: SpaceConfig = { ...configFromPreset('group'), customFields: [selectField()] }
+  const space = spaceWithConfig(config)
+  // A space where some transaction has no value for the field, as observed by
+  // the hook from the full transaction list.
+  const observed = { f_project: [UNDEFINED_FILTER] }
+
+  it('a transaction with no value reports the sentinel, not nothing', () => {
+    const dim = filterDimensions(space, config, observed).find((d) => d.key === 'f_project')!
+    expect(dimensionValues(makeTx(), dim)).toEqual([UNDEFINED_FILTER])
+    expect(dimensionValues(makeTx({ custom: { f_project: '' } }), dim)).toEqual([UNDEFINED_FILTER])
+    expect(dimensionValues(makeTx({ custom: { f_project: 'o_a' } }), dim)).toEqual(['o_a'])
+  })
+
+  it('the sentinel matches exactly the transactions the dashboard counted as missing', () => {
+    const dim = filterDimensions(space, config, observed).find((d) => d.key === 'f_project')!
+    const only = new Set([UNDEFINED_FILTER])
+    expect(matchesDimension(makeTx(), dim, only)).toBe(true)
+    expect(matchesDimension(makeTx({ custom: { f_project: 'o_a' } }), dim, only)).toBe(false)
+  })
+
+  it('is offered as an option only when some transaction lacks a value', () => {
+    const withMissing = filterDimensions(space, config, observed).find((d) => d.key === 'f_project')!
+    expect(withMissing.options.map((o) => o.id)).toEqual(['o_a', 'o_b', UNDEFINED_FILTER])
+
+    const noneMissing = filterDimensions(space, config, {}).find((d) => d.key === 'f_project')!
+    expect(noneMissing.options.map((o) => o.id)).toEqual(['o_a', 'o_b'])
+  })
+
+  it('survives reconciliation on a closed dimension', () => {
+    // ⚠️ The regression: the sentinel is not one of the field's defined options,
+    // so a closed dimension found no legal value and dropped the whole filter —
+    // the drill-down then showed every transaction rather than the missing ones.
+    const dims = filterDimensions(space, config, observed)
+    const filters: FilterState = { f_project: new Set([UNDEFINED_FILTER]) }
+    expect(reconcileFilters(filters, dims)).toBe(filters)
+  })
+})
+
 describe('filter predicate — custom boolean (absent means false)', () => {
   const config: SpaceConfig = { ...configFromPreset('group'), customFields: [booleanField()] }
   const dim = filterDimensions(spaceWithConfig(config), config).find((d) => d.key === 'f_billable')!

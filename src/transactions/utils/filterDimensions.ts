@@ -95,6 +95,16 @@ export interface FilterRequest {
   /** ⚠️ Carried deliberately: without the dashboard's date range the drilled
    *  list would not sum to the number the user tapped. */
   range: DateRange
+  /** Restrict the list to transactions that count as SPENDING (countsAsSpending:
+   *  expenses and adjustments with adjustmentMode 'expense').
+   *
+   *  ⚠️ Also carried deliberately, and for the same reason as `range`. Every
+   *  dashboard card is computed over scopeTransactions(), which drops
+   *  withdrawals, transfers and balance-only adjustments. Without this the
+   *  drilled list showed transactions the card had excluded — worst on a "No
+   *  category" row, since withdrawals and transfers never carry a category and
+   *  all land in the missing bucket. */
+  spendingOnly?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -223,7 +233,7 @@ export function filterDimensions(
   const builtIns = STATIC_META.filter((m) => m.source === 'builtIn' && m.isAvailable(config, false))
     .map((m) => staticDimension(m, space, observed))
 
-  return [...builtIns, ...customDimensions(config)]
+  return [...builtIns, ...customDimensions(config, observed)]
 }
 
 /** Everything the panel renders: core dimensions interleaved with the built-ins
@@ -237,7 +247,7 @@ export function allFilterDimensions(
   const statics = STATIC_META.filter((m) => m.isAvailable(config, isSolo))
     .map((m) => staticDimension(m, space, observed))
 
-  return [...statics, ...customDimensions(config)]
+  return [...statics, ...customDimensions(config, observed)]
 }
 
 function staticDimension(meta: StaticMeta, space: Space, observed: ObservedValues): FilterDimension {
@@ -260,21 +270,33 @@ function staticDimension(meta: StaticMeta, space: Space, observed: ObservedValue
   }
 }
 
-function customDimensions(config: SpaceConfig): FilterDimension[] {
+function customDimensions(config: SpaceConfig, observed: ObservedValues): FilterDimension[] {
   const dims: FilterDimension[] = []
   for (const def of enabledCustomFields(config)) {
     if (def.type === 'select') {
+      // Option ids, never labels (SPEC §8 invariant 6).
+      const options = (def.options ?? []).map((o) => ({
+        id: o.id,
+        label: o.emoji ? `${o.emoji} ${o.label}` : o.label,
+      }))
+      // The "no value" sentinel is appended exactly like a built-in's — when some
+      // transaction lacks a value for this field. It is NOT part of the field
+      // definition, so it has to be observed from the data.
+      //
+      // ⚠️ It must be a legal option or reconcileFilters() drops it: a custom
+      // select is optionsAreClosed, so a filter of {UNDEFINED_FILTER} was
+      // discarded whole and the dashboard's "No <field>" drill-down landed on an
+      // unfiltered list showing every transaction instead of the missing ones.
+      if ((observed[def.id] ?? []).includes(UNDEFINED_FILTER)) {
+        options.push({ id: UNDEFINED_FILTER, label: 'Undefined' })
+      }
       dims.push({
         key: def.id,
         label: def.label,
         emoji: def.emoji,
         source: 'custom',
         control: 'multi',
-        // Option ids, never labels (SPEC §8 invariant 6).
-        options: (def.options ?? []).map((o) => ({
-          id: o.id,
-          label: o.emoji ? `${o.emoji} ${o.label}` : o.label,
-        })),
+        options,
         optionsAreClosed: true,
       })
     } else if (def.type === 'boolean') {
@@ -321,7 +343,11 @@ export function dimensionValues(tx: Transaction, dim: FilterDimension): string[]
     // unticked — has no key at all and must still match the "No" filter.
     return [raw === true ? BOOL_TRUE : BOOL_FALSE]
   }
-  return typeof raw === 'string' && raw !== '' ? [raw] : []
+  // A select with no value reports the sentinel rather than nothing, exactly as
+  // a built-in does (`tx.category ?? UNDEFINED_FILTER`). Returning [] made the
+  // transaction unmatchable by any filter, so "No <field>" could never select the
+  // rows the dashboard had just counted under that label.
+  return typeof raw === 'string' && raw !== '' ? [raw] : [UNDEFINED_FILTER]
 }
 
 /** True when the transaction satisfies one dimension's active selection. */

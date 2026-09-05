@@ -366,7 +366,12 @@ export function DashboardTab({
    *  Phase 7b: `selections` carries ONE entry for a 1D row, TWO for a pivot
    *  cell (primary AND secondary). They are ANDed by the filter hook. */
   function handleRowDrillDown(selections: FilterSelection[]) {
-    onDrillDown?.({ selections, range })
+    // `spendingOnly` mirrors what scopeTransactions() already applied to build
+    // the number that was tapped: withdrawals, transfers and balance-only
+    // adjustments are not spending and were never in the card. Without it the
+    // drilled list showed rows the card had excluded — and every one of them
+    // landed under "No <dimension>", since a withdrawal carries no category.
+    onDrillDown?.({ selections, range, spendingOnly: true })
   }
 
   // ---------------------------------------------------------------------------
