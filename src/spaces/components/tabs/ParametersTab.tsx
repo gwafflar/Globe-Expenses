@@ -892,6 +892,11 @@ function MembersSection({
   // unlinkingMemberId: which member the user is trying to unlink from
   const [unlinkingMemberId, setUnlinkingMemberId] = useState<string | null>(null)
   const [unlinkNewMemberName, setUnlinkNewMemberName] = useState('')
+  // Whether the "+ Create new member" row has been swapped for its name input.
+  // ⚠️ Separate from unlinkNewMemberName: gating the input on the name being
+  // non-empty made the row unreachable — the button focused an input that had
+  // not been rendered yet, so the ref was null and nothing happened.
+  const [unlinkCreatingNew, setUnlinkCreatingNew] = useState(false)
   const [unlinkLoading, setUnlinkLoading] = useState(false)
   const unlinkNewMemberInputRef = useRef<HTMLInputElement>(null)
 
@@ -1083,7 +1088,7 @@ function MembersSection({
     // (click "This is not me" on their current slot to choose a different one)
     if (myMember && myMember.travelMemberId !== member.travelMemberId) {
       setUnlinkingMemberId(myMember.travelMemberId)
-      setUnlinkNewMemberName('')
+      resetUnlinkNewMember()
       return
     }
 
@@ -1099,10 +1104,18 @@ function MembersSection({
     })
   }
 
+  // Collapses the "create new member" sub-form back to its "+ Create new member"
+  // row. Both pieces of state move together — leaving the name behind would
+  // reopen the input pre-filled with a name from an abandoned attempt.
+  function resetUnlinkNewMember() {
+    setUnlinkNewMemberName('')
+    setUnlinkCreatingNew(false)
+  }
+
   // Opens the "This is not me" modal — forces user to choose another member or create new
   function handleThisIsNotMe(member: SpaceMember) {
     setUnlinkingMemberId(member.travelMemberId)
-    setUnlinkNewMemberName('')
+    resetUnlinkNewMember()
   }
 
   // User claims an unclaimed member from the unlink modal
@@ -1112,7 +1125,7 @@ function MembersSection({
     // If user clicked on themselves (same member), just cancel the modal
     if (myMember?.travelMemberId === unclaimedMemberId) {
       setUnlinkingMemberId(null)
-      setUnlinkNewMemberName('')
+      resetUnlinkNewMember()
       return
     }
 
@@ -1128,7 +1141,7 @@ function MembersSection({
         }),
       })
       setUnlinkingMemberId(null)
-      setUnlinkNewMemberName('')
+      resetUnlinkNewMember()
     } finally {
       setUnlinkLoading(false)
     }
@@ -1143,17 +1156,24 @@ function MembersSection({
     setUnlinkLoading(true)
     try {
       const newMember = await addUnclaimedMember(space.spaceId, trimmed, space.members)
+      // ⚠️ Both services take the CURRENT member list and write it back in full, so
+      // the second call must be given the list the first one produced. Passing the
+      // pre-add `space.members` here erased newMember on commit: nothing matched its
+      // id, and the only net effect was the user's own slot being released — leaving
+      // them with no slot at all. `space.members` is a render-time prop and does not
+      // update between the two awaits. Same shape as InvitePage.handleCreateAndClaim.
+      const withNewMember = [...space.members, newMember]
       // Claim the newly created member (old slot auto-unlinks via transfer semantics)
-      await claimSpaceMember(space.spaceId, newMember.travelMemberId, currentUser.uid, space.members)
+      await claimSpaceMember(space.spaceId, newMember.travelMemberId, currentUser.uid, withNewMember)
       onSpaceChange({
-        members: space.members.map((m) => {
+        members: withNewMember.map((m) => {
           if (m.travelMemberId === newMember.travelMemberId) return { ...m, userId: currentUser.uid }
           if (m.userId === currentUser.uid) return { ...m, userId: null }
           return m
         }),
       })
       setUnlinkingMemberId(null)
-      setUnlinkNewMemberName('')
+      resetUnlinkNewMember()
     } finally {
       setUnlinkLoading(false)
     }
@@ -1672,10 +1692,10 @@ function MembersSection({
 
               {/* Create new member option */}
               <div className="border-t pt-2 mt-2">
-                {!unlinkNewMemberName ? (
+                {!unlinkCreatingNew ? (
                   <button
                     type="button"
-                    onClick={() => unlinkNewMemberInputRef.current?.focus()}
+                    onClick={() => setUnlinkCreatingNew(true)}
                     disabled={unlinkLoading}
                     className="w-full rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent/20 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
@@ -1690,7 +1710,7 @@ function MembersSection({
                       onChange={(e) => setUnlinkNewMemberName(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' && !unlinkLoading) handleUnlinkAndCreateNew()
-                        if (e.key === 'Escape') setUnlinkNewMemberName('')
+                        if (e.key === 'Escape') resetUnlinkNewMember()
                       }}
                       disabled={unlinkLoading}
                       placeholder="Name…"
