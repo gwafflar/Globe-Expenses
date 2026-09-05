@@ -8,6 +8,7 @@ import { Timestamp } from 'firebase/firestore'
 import { TransactionForm } from '../TransactionForm'
 import { getSpaceConfig } from '@/spaces/config'
 import type { Space, SpaceConfig, SpaceMember } from '@/spaces/types'
+import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
 import { createTransaction, updateTransaction } from '@/transactions/services/transactionService'
 import { ensureMultiCurrency } from '@/spaces/services/spaceService'
 
@@ -139,6 +140,103 @@ describe('TransactionForm — solo space, wallets off', () => {
     // Solo CTA replaces the split editor — no "Paid by" row.
     expect(screen.queryByText('Paid by')).not.toBeInTheDocument()
     expect(screen.getByText(/share this expense with your friends/i)).toBeInTheDocument()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Config-disabled built-ins keep their stored values (§4 invariant)
+// ---------------------------------------------------------------------------
+
+function makeTx(overrides: Partial<TransactionWithStatus> = {}): TransactionWithStatus {
+  return {
+    txId: 'tx1',
+    isPending: false,
+    date: '01-06-2026',
+    name: 'Lunch',
+    totalAmount: 10,
+    currency: 'EUR',
+    exchangeRate: 1,
+    totalAmountMain: 10,
+    paidBy: [{ travelMemberId: 'm1', amount: 10 }],
+    beneficiaries: [{ travelMemberId: 'm1', amount: 10 }],
+    createdBy: { type: 'user', uid: 'u1' },
+    createdAt: Timestamp.now(),
+    lastModifiedAt: Timestamp.now(),
+    lastModifiedBy: 'u1',
+    ...overrides,
+  }
+}
+
+describe('TransactionForm — editing with built-in fields disabled in config', () => {
+  // Every optional built-in turned OFF after the transactions were written.
+  const strippedConfig: SpaceConfig = {
+    builtInFields: { country: false, city: false, category: false, paymentMethod: false, notes: false },
+    features: { wallets: false, multiCurrency: false },
+    customFields: [],
+  }
+
+  it('preserves category / paymentMethod / country / city / notes instead of deleting them', () => {
+    const space = makeSpace({ config: strippedConfig })
+    const initialValues = makeTx({
+      category: '🍔 Food',
+      paymentMethod: '💵 Cash',
+      country: 'Japan',
+      city: 'Tokyo',
+      notes: 'split with Bob',
+    })
+    renderForm({ space, members: space.members, initialValues })
+
+    // Fix a typo in a field that IS still enabled, then save.
+    fireEvent.change(screen.getByPlaceholderText(/dinner, taxi, hotel night/i), { target: { value: 'Dinner' } })
+    fireEvent.click(screen.getAllByRole('button', { name: 'Save' })[0])
+
+    expect(updateTransaction).toHaveBeenCalledTimes(1)
+    const [, , payload] = vi.mocked(updateTransaction).mock.calls[0]
+    expect(payload.name).toBe('Dinner')
+    expect(payload.category).toBe('🍔 Food')
+    expect(payload.paymentMethod).toBe('💵 Cash')
+    expect(payload.country).toBe('Japan')
+    expect(payload.city).toBe('Tokyo')
+    expect(payload.notes).toBe('split with Bob')
+  })
+
+  it('still clears a field that does not apply to the transaction TYPE', () => {
+    // Category is enabled here, but a withdrawal has no category (FIELD_TYPES),
+    // so switching the type must clear it — this is the case the merge must NOT cover.
+    const space = makeSpace({
+      config: {
+        builtInFields: { country: true, city: true, category: true, paymentMethod: true, notes: true },
+        features: { wallets: true, multiCurrency: false },
+        customFields: [],
+      },
+    })
+    const initialValues = makeTx({ category: '🍔 Food', paymentMethod: '💵 Cash', type: 'withdrawal' })
+    renderForm({ space, members: space.members, initialValues })
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Save' })[0])
+
+    const [, , payload] = vi.mocked(updateTransaction).mock.calls[0]
+    expect(payload.category).toBeUndefined()
+    // paymentMethod DOES apply to a withdrawal — untouched.
+    expect(payload.paymentMethod).toBe('💵 Cash')
+  })
+
+  it('clears a value the user actually blanked while the field is enabled', () => {
+    const space = makeSpace({
+      config: {
+        builtInFields: { country: true, city: true, category: true, paymentMethod: true, notes: true },
+        features: { wallets: false, multiCurrency: false },
+        customFields: [],
+      },
+    })
+    const initialValues = makeTx({ notes: 'to be removed' })
+    renderForm({ space, members: space.members, initialValues })
+
+    fireEvent.change(screen.getByPlaceholderText(/any additional details/i), { target: { value: '' } })
+    fireEvent.click(screen.getAllByRole('button', { name: 'Save' })[0])
+
+    const [, , payload] = vi.mocked(updateTransaction).mock.calls[0]
+    expect(payload.notes).toBeUndefined()
   })
 })
 

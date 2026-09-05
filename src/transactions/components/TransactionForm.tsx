@@ -573,6 +573,31 @@ export function TransactionForm({
     }
   }, [txType, config])
 
+  // Write-path counterpart of fieldVisible() for the OPTIONAL built-in fields.
+  //
+  // fieldVisible() conflates two different reasons a field is not rendered, but
+  // the payload must treat them differently — the same invariant mergeCustomPayload()
+  // implements for custom fields (§4, "disabling a field never deletes its data"):
+  //
+  //   - hidden because the field does not apply to this TYPE (a withdrawal has no
+  //     category) → genuinely not applicable, clear the stored value;
+  //   - hidden because the SPACE CONFIG disabled it → nothing rendered it, the form
+  //     holds no value for it, so keep whatever the transaction already stored.
+  //
+  // Using fieldVisible() here sent `undefined` in the second case, and
+  // updateTransaction() maps every undefined optional to deleteField() — so one
+  // member editing a typo silently wiped the category and notes of that transaction
+  // for everyone.
+  type OptionalBuiltIn = 'category' | 'paymentMethod' | 'country' | 'city' | 'notes'
+  const builtInValue = useCallback(
+    (field: OptionalBuiltIn, formValue: string | undefined): string | undefined => {
+      if (!FIELD_TYPES[field].includes(txType)) return undefined
+      if (config.builtInFields[field]) return formValue
+      return isEdit ? initialValues![field] : undefined
+    },
+    [txType, config, isEdit, initialValues],
+  )
+
   // --- Formula mode ---
   const [formulaMode, setFormulaMode] = useState(isEdit && !!initialValues?.amountFormula)
   const [formulaStr, setFormulaStr] = useState(isEdit ? (initialValues?.amountFormula ?? '') : '')
@@ -940,14 +965,14 @@ export function TransactionForm({
       currency,
       exchangeRate,
       totalAmountMain,
-      category: fieldVisible('category') ? (category || undefined) : undefined,
-      paymentMethod: fieldVisible('paymentMethod') ? (paymentMethod || undefined) : undefined,
-      country: fieldVisible('country') && country ? country : undefined,
-      city: fieldVisible('city') && city ? city : undefined,
+      category: builtInValue('category', category || undefined),
+      paymentMethod: builtInValue('paymentMethod', paymentMethod || undefined),
+      country: builtInValue('country', country || undefined),
+      city: builtInValue('city', city || undefined),
       paidBy,
       beneficiaries,
       lastModifiedBy: user.uid,
-      notes: fieldVisible('notes') ? (notes.trim() || undefined) : undefined,
+      notes: builtInValue('notes', notes.trim() || undefined),
       amountFormula: fieldVisible('formula') ? (formulaStr.trim() || undefined) : undefined,
       // Type: undefined for 'expense' (backward compat), explicit for others
       type: txType === 'expense' ? undefined : txType,
