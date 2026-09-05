@@ -71,4 +71,22 @@ describe('applyPreset', () => {
     expect(result.features).toEqual(PRESETS.travel.features)
     expect(result.customFields).toBe(customFields)
   })
+
+  it('preserves dashboardCards — a preset reset must not destroy the cards', () => {
+    const config = configFromPreset('travel')
+    const dashboardCards = [
+      { id: 'c1', dimensions: ['category'] as [string], title: 'By category' },
+    ]
+    const result = applyPreset({ ...config, dashboardCards }, 'travel')
+
+    expect(result.dashboardCards).toBe(dashboardCards)
+  })
+
+  it('leaves dashboardCards absent when it was absent (never edited)', () => {
+    // ABSENT is meaningful — it resolves to the legacy default card set — and is
+    // distinct from an empty array, which means the user deleted every card.
+    const result = applyPreset(configFromPreset('travel'), 'travel')
+
+    expect('dashboardCards' in result).toBe(false)
+  })
 })

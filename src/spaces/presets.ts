@@ -76,14 +76,22 @@ export function matchesPreset(config: SpaceConfig, id: PresetId): boolean {
   )
 }
 
-/** Re-applies a preset's toggles while preserving customFields untouched.
- *  See SPEC §5.1 — never touches categories, paymentMethods, members, etc. */
+/** Re-applies a preset's TOGGLES ONLY — builtInFields and features — leaving
+ *  every other part of the config alone.
+ *  See SPEC §5.1 — never touches categories, paymentMethods, members, etc.
+ *
+ *  ⚠️ Spread `config` first rather than listing the keys to keep. Listing them
+ *  by hand is what silently destroyed `dashboardCards`: an omitted optional key
+ *  type-checks, serialiseSpaceConfig() drops undefined keys, and
+ *  updateSpaceConfig() writes the whole config map — so "Reset to preset"
+ *  deleted every dashboard card for every member. Any key added to SpaceConfig
+ *  later is preserved for free. */
 export function applyPreset(config: SpaceConfig, id: PresetId): SpaceConfig {
   const preset = PRESETS[id]
   return {
+    ...config,
     builtInFields: { ...preset.builtInFields },
     features: { ...preset.features },
-    customFields: config.customFields,
   }
 }
 
