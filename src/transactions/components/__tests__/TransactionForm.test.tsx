@@ -279,6 +279,43 @@ describe('TransactionForm — custom select field', () => {
     const [, payload] = vi.mocked(createTransaction).mock.calls[0]
     expect(payload.custom).toEqual({ 'mood-def': 'happy-opt' })
   })
+
+  it('pre-fills a new transaction from the most recent value for the field', () => {
+    const space = makeSpace({ config: configWithCustomField })
+    const recent = makeTx({ custom: { 'mood-def': 'sad-opt' } })
+    renderForm({ space, members: space.members, existingTransactions: [recent] })
+
+    const moodSelect = screen.getByText('Mood').parentElement!.querySelector('select')!
+    expect(moodSelect.value).toBe('sad-opt')
+  })
+
+  it('does NOT pre-fill from an option deleted since that transaction was tagged', () => {
+    const space = makeSpace({ config: configWithCustomField })
+    // 'gone-opt' is no longer in the field definition.
+    const stale = makeTx({ custom: { 'mood-def': 'gone-opt' } })
+    renderForm({ space, members: space.members, existingTransactions: [stale] })
+
+    // A dangling id would render the select blank AND be saved verbatim.
+    const moodSelect = screen.getByText('Mood').parentElement!.querySelector('select')!
+    expect(moodSelect.value).toBe('')
+
+    fireEvent.change(screen.getByPlaceholderText(/dinner, taxi, hotel night/i), { target: { value: 'Lunch' } })
+    fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '10' } })
+    fireEvent.click(screen.getAllByRole('button', { name: 'Save' })[0])
+
+    const [, payload] = vi.mocked(createTransaction).mock.calls[0]
+    expect(payload.custom).toBeUndefined()
+  })
+
+  it('falls back to the most recent transaction whose value still exists', () => {
+    const space = makeSpace({ config: configWithCustomField })
+    const stale = makeTx({ txId: 'tx-stale', custom: { 'mood-def': 'gone-opt' } })
+    const valid = makeTx({ txId: 'tx-valid', custom: { 'mood-def': 'happy-opt' } })
+    renderForm({ space, members: space.members, existingTransactions: [stale, valid] })
+
+    const moodSelect = screen.getByText('Mood').parentElement!.querySelector('select')!
+    expect(moodSelect.value).toBe('happy-opt')
+  })
 })
 
 // ---------------------------------------------------------------------------

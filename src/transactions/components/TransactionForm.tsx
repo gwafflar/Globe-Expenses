@@ -707,7 +707,15 @@ export function TransactionForm({
       // this field. 'text' and 'boolean' never pre-fill — see SPEC §4 (a
       // pre-filled boolean would silently mark transactions the user never chose).
       if (def.type === 'select') {
-        const recent = existingTransactions.find((tx) => tx.custom?.[def.id] !== undefined)
+        // ⚠️ Validated against the CURRENT option list. A transaction can carry
+        // the id of an option deleted since it was tagged; seeding that id
+        // renders a blank <select> (no matching <option>), and saving without
+        // touching it stores a dangling id that resolveOptionLabel() shows as a
+        // raw nanoid and no filter can match.
+        const recent = existingTransactions.find((tx) => {
+          const v = tx.custom?.[def.id]
+          return typeof v === 'string' && def.options?.some((o) => o.id === v)
+        })
         if (recent) initial[def.id] = recent.custom![def.id]
       }
     }
