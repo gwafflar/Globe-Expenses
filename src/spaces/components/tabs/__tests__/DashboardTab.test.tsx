@@ -574,7 +574,9 @@ describe('DashboardTab — drill-down', () => {
     )
 
     const payload = onDrillDown.mock.calls[0][0]
-    expect(Object.keys(payload).sort()).toEqual(['range', 'selections'])
+    expect(Object.keys(payload).sort()).toEqual(['range', 'selections', 'spendingOnly'])
+    // The card only counted spending, so the drilled list must too (review #8).
+    expect(payload.spendingOnly).toBe(true)
     expect(payload.selections[0].dimensionKey).toBe('category')
   })
 
@@ -713,8 +715,10 @@ describe('DashboardTab — pivot cards', () => {
       { dimensionKey: 'country', values: ['JP'] },
       { dimensionKey: 'category', values: ['Hotel'] },
     ])
-    // Same asymmetry as 1D: the range travels, the member selection does not.
-    expect(Object.keys(payload).sort()).toEqual(['range', 'selections'])
+    // Same asymmetry as 1D: the range and spending scope travel, the member
+    // selection does not.
+    expect(Object.keys(payload).sort()).toEqual(['range', 'selections', 'spendingOnly'])
+    expect(payload.spendingOnly).toBe(true)
   })
 
   it('tapping a section total drills down with the PRIMARY filter only', () => {
