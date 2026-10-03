@@ -318,10 +318,13 @@ The Activity Feed is a pull-model notification center surfacing collaborative ev
 
 ## 3.11 Notifications (Phase 3)
 
+> Detailed design: see `docs/NOTIFICATIONS_SPEC.md`, which takes precedence where it differs.
+
 - Push notifications via Firebase Cloud Messaging
 - Trigger: a transaction is created or edited that lists the user as a payer or beneficiary
 - Notification content: transaction name, amount, space name, actor
 - Users can enable/disable notifications per space
+- **An XLSX import must produce at most one push notification per recipient**, never one per imported row. Every imported row still gets its own Activity Feed entry; only the push is collapsed. This must be in place before the import feature (currently gated off by `SHEETS_FEATURE_ENABLED` in `TransactionsTab.tsx`) and push notifications are both live.
 
 # 4. Non-Functional Requirements
 

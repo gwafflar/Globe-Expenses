@@ -2787,3 +2787,51 @@ Verified after the change: `tsc -b` clean, 613/613, `build` clean, and `eslint` 
 - **The manual test plan itself** — nothing in it has been run.
 - **Country canonicalisation** (Session 025) — still the highest-value open bug, and now the main unverified thing shipping live.
 - `docs/Devprofile.md` is an untracked stray duplicate of `docs/Developer profile.md` (both 111 lines). Left alone; delete when confirmed redundant.
+
+---
+
+## 📝 Working Session 028 — 3 October 2026
+
+**Type**: Feature design — push notifications & activity feed (no implementation)
+**Tools used**: Claude Code (claude-code CLI)
+
+> The code-review fix commits of 5–26 September (`fcff812` … `9d17798`, branch `fix/space-refactor-code-review`) have no session entry of their own.
+
+### Context
+
+Request: a notifications feature, understood fully before any code. Confirmed it works on both Android and iOS from one PWA codebase via FCM, with iOS restricted to 16.4+ and Home Screen installs. Decided to design push on top of the Activity Feed's event model even if push ships first, so the feed can follow without rework.
+
+### Output: `docs/NOTIFICATIONS_SPEC.md` (new, authoritative)
+
+Key decisions, all agreed during the session:
+
+- **One event model, two channels.** A Cloud Function writes `users/{uid}/activity/{eventId}` for every event and recipient from day one (snapshot names/amounts, the recipient's own share), and pushes only a subset.
+- **Event catalogue** (§4): push only what changes my money or needs my action. Material edits push (amount, currency, `exchangeRate`, payer, split, type); cosmetic edits are feed-only. Member joined/left are feed-only, except "your invite was accepted", which pushes to the inviter.
+- **Push limiter, no deferral** (§6): per (recipient, space) counter, N = 2 normal pushes, then one "more changes" push, then silent until 60 s of quiet. Lazy reset, plus reset when the recipient opens the space. Updated inside a Firestore transaction (lost-update race otherwise). Delayed exact summaries (Cloud Tasks) pushed to v2.
+- **Imports** (§7): one push per recipient via a `travels/{spaceId}/importBatches/{id}` document written after the last batch. New `importBatchId` field on `Transaction`. The no-push rule applies to the create trigger only.
+- **Space deletion** (§5 rule 5): `onTravelDeleted` cascade moves server-side and is pulled forward from v2, because the client-side cascade would emit one `tx_deleted` event per transaction.
+- **Offline bursts**: no special handling in v1, since the limiter caps them at 3 pushes. Detection via a client timestamp is a v2 item (`serverTimestamp()` can't reveal offline queuing).
+- **Preferences & UI** (§9): device toggle in Profile (master switch), per-space toggle in Parameters stored on the user (`mutedSpaceIds`), per-field preferences v2. The OS prompt only opens after a user tap. Six banner moments with a no-nagging rule (each once, stop after two "Not now"), state per device in `localStorage`.
+- **Tokens** (§2.1): deleted on sign-out. OS permission survives sign-out, so re-login re-enables silently. An explicit Profile opt-out is remembered per account in `localStorage`.
+- **Seen/read** (§3.3): badge watermark + per-entry `openedAt` + "Mark all as read" watermark.
+
+### Verified externally
+
+- Web Notification `tag` replacement **does not work on iOS Safari** (WebKit bug 258922, still open July 2026), and `silent` / `renotify` / `vibrate` are unsupported there. Every iOS push alerts, so burst control must be server-side. This killed a device-side coalescing design.
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `docs/NOTIFICATIONS_SPEC.md` | **New**: full design |
+| `docs/GlobeExpenses_Specification.md` | §3.11 points to the new spec; import rule added |
+| `docs/GlobeExpenses_Architecture.md` | §5.6 rewritten, §5.7 planned cascade, roadmap v3 row, open-questions table updated |
+| `src/spaces/components/tabs/TransactionsTab.tsx` | Comment above `SHEETS_FEATURE_ENABLED`: an import must send at most one push per recipient |
+
+Not committed in-session; the user commits on a new branch created from `fix/space-refactor-code-review` (not `main`, which lacks the import flag).
+
+### Not done / still open
+
+- **Retention** of activity documents: kept forever for now, revisit with real volumes.
+- **To confirm at implementation**: `...WithAuthContext` trigger variants for the actor; reuse of the `watchedTxId` pattern for notification taps; iOS `getNotifications()` + `close()` on a real device; the existing owner-write rule on `users/{uid}`.
+- **Prerequisite**: Firebase Blaze plan for Cloud Functions.

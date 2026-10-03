@@ -33,7 +33,7 @@ The system follows a client-first, BaaS-backed architecture:
 | Authentication | Firebase Auth | Email/password + Google OAuth |
 | Database | Cloud Firestore | Real-time sync, offline support |
 | Server logic | Firebase Cloud Functions | Currency rates, bank import agent, notifications |
-| Push notifications | Firebase Cloud Messaging | Transaction alerts (Phase 3) |
+| Push notifications | Firebase Cloud Messaging | Transaction & membership alerts, see `docs/NOTIFICATIONS_SPEC.md` |
 | Hosting | Firebase Hosting | CDN delivery of the PWA |
 
 # 3. Frontend Architecture
@@ -344,13 +344,15 @@ Firestore FieldValue transforms (arrayUnion, arrayRemove, serverTimestamp) are N
 7. User can dismiss a draft (status→'dismissed'); both states hidden from inbox but retained in Firestore
 8. When editing a transaction with a draftId, the UI offers an expandable 'View original bank data' panel fetching rawData from the linked draft on demand
 
-## 5.6 Activity Feed Flow (v2)
+## 5.6 Activity Feed & Push Notifications Flow
 
-1. When any space member creates or edits a transaction listing the current user as a payer or beneficiary, an activity event is recorded
-2. Activity events surfaced in a dedicated Activity tab (pull model in v2, push via FCM in v3)
-3. Chronological feed: new transactions, edits, settlement changes involving the current user
-4. Badge on Activity tab shows count of unseen events
-5. Each item deep-links to the relevant transaction for quick review and editing
+Full design: `docs/NOTIFICATIONS_SPEC.md` (authoritative). Summary:
+
+1. A Firestore write (transaction created/edited/deleted, invite, friend request, space deleted, import finished) fires a Cloud Function that resolves the event kind and its recipients (`travelMemberId` → `uid` via the space's `members`; the actor is never notified)
+2. The function writes one activity document per event per recipient to `users/{uid}/activity/{eventId}` (fan-out on write, snapshot of names and amounts, the recipient's own share). This happens from day one, even if push ships before the feed UI
+3. Push-worthy events go through a per-(recipient, space) limiter (`users/{uid}/pushThrottle/{spaceId}`, updated in a Firestore transaction: 2 normal pushes, then one "more changes" push, then silence until 60 s of quiet) and are sent via FCM to the user's device tokens (`users/{uid}/fcmTokens/{token}`), unless the space is in `users/{uid}.mutedSpaceIds`
+4. Feed UI (later): 🔔 header icon with unread badge (`activityLastSeenAt` watermark), entries bold until tapped (`openedAt`) or "Mark all as read" (`activityReadAllAt` watermark)
+5. Tapping an entry or a notification deep-links to the transaction or space
 
 ## 5.7 Space Leave / Delete / Archive
 
@@ -368,7 +370,9 @@ Firestore FieldValue transforms (arrayUnion, arrayRemove, serverTimestamp) are N
 2. `deleteSpace()`: batch-deletes all transactions in the subcollection (`getDocs` + `writeBatch`), then `deleteDoc` on the space document
 3. User navigated back to `/spaces`
 
-**v1 limitation:** subcollection cleanup is client-side. If the client crashes mid-deletion, orphaned transactions remain (invisible but consuming storage). A Cloud Function `onDelete` trigger is the proper fix (v2).
+**v1 limitation:** subcollection cleanup is client-side. If the client crashes mid-deletion, orphaned transactions remain (invisible but consuming storage). A single `writeBatch` is also capped at 500 writes, so a space with more than 500 transactions currently cannot be deleted.
+
+**Planned (prerequisite for notifications, `NOTIFICATIONS_SPEC.md` §5 rule 5):** `deleteSpace()` deletes only the space document. A Cloud Function `onTravelDeleted` cascade-deletes the `transactions` subcollection server-side (`recursiveDelete()`) and writes one `space_deleted` activity event per former member. Deleting the space first means each cascaded transaction delete finds no parent space and produces no event.
 
 **Archive / Unarchive (per-user):**
 1. `archivedByUids: string[]` on the space document — each member archives independently
@@ -445,7 +449,7 @@ All operations require authentication. Rules are deployed via `firestore.rules` 
 | --- | --- | --- |
 | v1 | Core (current) | PWA, offline sync, single/multi-member space, transactions with multi-payer splits, transaction editing, space emoji, per-space categories/paymentMethods/countries/cities (LabeledItem[] with smart dropdowns), friends system (nametag search, friend requests, shareable invite links), space member invitations (join via invite link), profile page with nametag claim, four-tab space detail (Transactions / Balance / Dashboard / Parameters), read-only analytics dashboard (period filter, per-member stats, category breakdown, spending-over-time), CSV export/import, hardcoded currency rates |
 | v2 | Collaborative+ | Bank import agent (Revolut webhook, Nordigen aggregator, on-chain via Alchemy/Moralis), draft transaction inbox with soft-delete and raw data audit trail, carousel space selector, AI-assisted categorization, activity feed (pull model), dynamic membership with join-date visibility cutoff, conflict detection UI, live currency rates, settlement suggestions |
-| v3 | Notifications | Push notifications (FCM) for new/edited transactions involving the user; activity feed upgraded to push model |
+| v3 | Notifications | Push notifications (FCM) for events involving the user. May ship before the v2 feed UI, but writes the feed's activity documents from day one. Requires the `onTravelDeleted` cascade function. See `docs/NOTIFICATIONS_SPEC.md` |
 | v4 | Advanced | Bank-rate currency input, cash withdrawal tracking, full conflict resolution UI, recurring/template transactions, manual fetch-new-transactions trigger, potential native app wrappers |
 
 # 8. Open Questions & Deferred Decisions
@@ -460,9 +464,10 @@ All operations require authentication. Rules are deployed via `firestore.rules` 
 | Bank import: push vs polling | Revolut/Wise support native webhooks. N26/Deblock fiat require polling via GoCardless/Nordigen. Deblock on-chain via Alchemy/Moralis. | Open (v2) |
 | Draft lifecycle: soft delete | Drafts never hard-deleted. Validated: status='validated', linkedTxId set. Dismissed: retained, hidden from inbox. | Decided (v2) |
 | Draft expiry policy | Auto-expire unreviewed drafts after N days? Duration TBD. | Open (v2) |
-| Activity feed storage | Top-level activities/{userId} collection vs derived from Firestore listeners. | Open (v2) |
-| Activity feed seen/unseen state | lastSeenAt on User document is the likely approach. | Open (v2) |
+| Activity feed storage | `users/{uid}/activity/{eventId}`, written only by Cloud Functions (fan-out on write). See `NOTIFICATIONS_SPEC.md` §3. | Decided |
+| Activity feed seen/unseen state | Two watermarks on the user document: `activityLastSeenAt` (badge) and `activityReadAllAt` ("Mark all as read"), plus per-entry `openedAt`. | Decided |
+| Activity feed retention | Kept forever for now; revisit once real volumes are known. | Open (deferred) |
 | Manual fetch trigger | On-demand webhook fallback deferred to v4. | Decided (v4) |
 | updateSpaceList conflict | Adding categories/methods from transaction form overwrites the full LabeledItem[] array. Two offline members adding different items simultaneously → last sync wins. Fix in v2: use arrayUnion for individual item additions. | Open (v2) |
 | arrayUnion in security rules | Resolved: FieldValue transforms (arrayUnion) are NOT reflected in request.resource.data during rule evaluation. Rules must use capability tokens (pendingInviteId + get()) instead of checking mutated array fields. | Decided |
-| Space deletion subcollection cleanup | Client-side batch delete in v1 (getDocs + writeBatch). Cloud Function `onDelete` trigger on `travels/{travelId}` needed for v2: handles crash recovery, >500 transactions, orphan cleanup. | Open (v2) |
+| Space deletion subcollection cleanup | Cloud Function `onTravelDeleted` cascade-deletes server-side; the client deletes only the space document. Pulled forward from v2 as a prerequisite for notifications (avoids one `tx_deleted` event per transaction). Also fixes the >500-transaction cap and crash recovery. | Decided (with notifications) |

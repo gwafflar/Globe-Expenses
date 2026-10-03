@@ -29,6 +29,9 @@ import { getSpaceConfig, enabledCustomFields, resolveOptionLabel } from '@/space
 // against real data (docs/MANUAL_TEST_PLAN.md, T1-T9). Until those pass, the
 // buttons render greyed out and explain themselves instead of shipping a
 // feature that can silently produce a wrong file.
+//
+// Before re-enabling once push notifications exist: an import must send at
+// most one push per recipient, not one per row (Specification §3.11).
 
 const SHEETS_FEATURE_ENABLED = false
 
