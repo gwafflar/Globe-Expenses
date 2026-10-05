@@ -2874,5 +2874,6 @@ Plan: Session 028 table. Design: `docs/NOTIFICATIONS_SPEC.md`. This entry is ext
 - `functions/`: standalone pnpm package (not a workspace), Node 24, `europe-west4`, `maxInstances: 10`. Temporary `smokeTransactionWritten` trigger logs `authType`/`authId`; **remove in step 3**.
 - Rules for the four notification paths + `rules-tests/` (`pnpm test:rules`, 22 tests). Root `pnpm test`/eslint isolated from `functions/`; commands in `CLAUDE.md`.
 - Findings (in spec §3.2/§3.4): the emulator gives no real actor (`authType: 'unknown'`), so event logic takes the actor as input; `pushThrottle` reset must be a merge write.
+- Deploy with pnpm needs `@google-cloud/functions-framework` as an explicit dependency: Cloud Build adds it automatically for npm projects only. Image cleanup policy set to 1 day.
 - Verified: `tsc -b`, `pnpm test` 625/625, `build`, functions typecheck, rules 22/22, emulator trigger fired for create/update/delete.
 - **Open:** deploy was blocked by Claude Code's auto-mode classifier. User deploys functions + rules, then checks the real `authType`/`authId` (incl. delete) in `pnpm --dir functions logs`.
