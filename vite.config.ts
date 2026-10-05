@@ -1,7 +1,7 @@
 import path from 'path'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
-import { defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig } from 'vitest/config'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
@@ -59,6 +59,10 @@ export default defineConfig({
     environment: 'jsdom',   // simulates browser APIs (needed for React component tests)
     globals: true,           // lets you use describe/it/expect without importing them
     setupFiles: ['./src/test/setup.ts'],  // jest-dom matchers (toBeDisabled, toBeInTheDocument, ...)
+    // Vitest's default pattern matches *.test.ts anywhere in the repo. These two
+    // folders have their own runners: functions/ (`pnpm --dir functions test`,
+    // Node env) and rules-tests/ (`pnpm test:rules`, needs the Firestore emulator).
+    exclude: [...configDefaults.exclude, 'functions/**', 'rules-tests/**'],
     // Vitest's 5s default is per-test wall clock, not CPU time. With several
     // component-test files running in parallel workers, the FIRST test in a
     // file pays for that file's whole module graph being transformed and

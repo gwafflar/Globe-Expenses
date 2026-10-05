@@ -350,7 +350,7 @@ Full design: `docs/NOTIFICATIONS_SPEC.md` (authoritative). Summary:
 
 1. A Firestore write (transaction created/edited/deleted, invite, friend request, space deleted, import finished) fires a Cloud Function that resolves the event kind and its recipients (`travelMemberId` → `uid` via the space's `members`; the actor is never notified)
 2. The function writes one activity document per event per recipient to `users/{uid}/activity/{eventId}` (fan-out on write, snapshot of names and amounts, the recipient's own share). This happens from day one, even if push ships before the feed UI
-3. Push-worthy events go through a per-(recipient, space) limiter (`users/{uid}/pushThrottle/{spaceId}`, updated in a Firestore transaction: 2 normal pushes, then one "more changes" push, then silence until 60 s of quiet) and are sent via FCM to the user's device tokens (`users/{uid}/fcmTokens/{token}`), unless the space is in `users/{uid}.mutedSpaceIds`
+3. Push-worthy events go through a per-(recipient, space) limiter (`users/{uid}/pushThrottle/{spaceId}`, updated in a Firestore transaction: 2 normal pushes, then one "more changes" push, then silence until 60 s of quiet) and are sent via FCM to the user's device tokens (`users/{uid}/fcmTokens/{token}`), unless the space is in `mutedSpaceIds` (private doc `users/{uid}/private/notifications`, since `users/{uid}` is readable by all signed-in users)
 4. Feed UI (later): 🔔 header icon with unread badge (`activityLastSeenAt` watermark), entries bold until tapped (`openedAt`) or "Mark all as read" (`activityReadAllAt` watermark)
 5. Tapping an entry or a notification deep-links to the transaction or space
 
@@ -443,6 +443,14 @@ All operations require authentication. Rules are deployed via `firestore.rules` 
 **travels/{travelId}/transactions/{txId}:**
 - Read/write: space member only (membership validated via `get()` on the parent space document — one extra read per rule evaluation)
 
+**Notification paths under users/{userId}/** (owner-only; Cloud Functions write with the Admin SDK and bypass rules — see `NOTIFICATIONS_SPEC.md` §3.4):
+- `activity/{eventId}`: read; update of `openedAt` only (must be a timestamp). No client create/delete.
+- `fcmTokens/{token}`: read, create, update, delete.
+- `pushThrottle/{key}`: create/update with `count == 0` as the only changed key (merge write). No read/delete.
+- `private/notifications`: read, create, update; only `mutedSpaceIds`, `activityLastSeenAt`, `activityReadAllAt`.
+- Rules do not cascade: the `users/{userId}` write rule covers that document only, so each subcollection has its own match.
+- Tested against the emulator: `rules-tests/`, run by `pnpm test:rules`.
+
 # 7. Phased Roadmap
 
 | **Phase** | **Name** | **Scope** |
@@ -465,7 +473,7 @@ All operations require authentication. Rules are deployed via `firestore.rules` 
 | Draft lifecycle: soft delete | Drafts never hard-deleted. Validated: status='validated', linkedTxId set. Dismissed: retained, hidden from inbox. | Decided (v2) |
 | Draft expiry policy | Auto-expire unreviewed drafts after N days? Duration TBD. | Open (v2) |
 | Activity feed storage | `users/{uid}/activity/{eventId}`, written only by Cloud Functions (fan-out on write). See `NOTIFICATIONS_SPEC.md` §3. | Decided |
-| Activity feed seen/unseen state | Two watermarks on the user document: `activityLastSeenAt` (badge) and `activityReadAllAt` ("Mark all as read"), plus per-entry `openedAt`. | Decided |
+| Activity feed seen/unseen state | Two watermarks in the private doc `users/{uid}/private/notifications`: `activityLastSeenAt` (badge) and `activityReadAllAt` ("Mark all as read"), plus per-entry `openedAt`. | Decided |
 | Activity feed retention | Kept forever for now; revisit once real volumes are known. | Open (deferred) |
 | Manual fetch trigger | On-demand webhook fallback deferred to v4. | Decided (v4) |
 | updateSpaceList conflict | Adding categories/methods from transaction form overwrites the full LabeledItem[] array. Two offline members adding different items simultaneously → last sync wins. Fix in v2: use arrayUnion for individual item additions. | Open (v2) |

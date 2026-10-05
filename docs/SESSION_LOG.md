@@ -2835,3 +2835,44 @@ Not committed in-session; the user commits on a new branch created from `fix/spa
 - **Retention** of activity documents: kept forever for now, revisit with real volumes.
 - **To confirm at implementation**: `...WithAuthContext` trigger variants for the actor; reuse of the `watchedTxId` pattern for notification taps; iOS `getNotifications()` + `close()` on a real device; the existing owner-write rule on `users/{uid}`.
 - **Prerequisite**: Firebase Blaze plan for Cloud Functions.
+
+### Implementation kick-off (end of session)
+
+Environment checked: no `functions/` yet, `firebase.json` has Firestore + Hosting only, Firestore database in **`europe-west4`** (functions must use the same region), Firebase CLI 15.12, Node 24, **no Java** (needed for the Firestore emulator), vite-plugin-pwa in `generateSW` mode with no push handling.
+
+**Spec correction (agreed):** `users/{uid}` is readable by every signed-in user, so `mutedSpaceIds`, `activityLastSeenAt` and `activityReadAllAt` move to a private owner-only doc `users/{uid}/private/notifications` (spec §3.5).
+
+**Service worker option 3: confirmed (5 Oct), spec §2.3.** Keep the generated Workbox SW and add a hand-written `push-sw.js` via Workbox `importScripts` (handles `push` + `notificationclick`). FCM `getToken()` gets the existing SW registration. Rejected: a second `firebase-messaging-sw.js` (two SWs, uncertain on iOS), and full `injectManifest` (takes over working caching).
+
+**Implementation plan:**
+
+| # | Step |
+|---|---|
+| 1 | Infrastructure: `functions/` scaffold (TypeScript, `europe-west4`), emulators, rules for new paths |
+| 2 | Device registration + first real push on Android **and** iPhone (de-risks the platform; also test iOS `close()`) |
+| 3 | Activity writer for transactions (pure, unit-tested recipient/material/share logic) |
+| 4 | Push sender: limiter, mute check, invalid-token cleanup |
+| 5 | Space & social events, incl. `onTravelDeleted` + simplified `deleteSpace()` |
+| 6 | Imports (`importBatchId`, `importBatches`) |
+| 7 | UI: space toggle, permission banners, tap deep-link, reset-on-open |
+
+**Decision due at step 3:** functions are a separate package and can't import `mapSpaceDoc()`, which conflicts with the one-mapping-per-collection convention.
+
+### Next steps
+
+- **User actions before step 1:** upgrade to the Blaze plan (and set a budget alert), install Java (`sudo apt install -y openjdk-21-jre-headless`).
+- Then start step 1: explain the `functions/` scaffold before generating it.
+
+---
+
+## 🚧 Working Session 029 — 5 October 2026 — Notifications implementation
+
+Plan: Session 028 table. Design: `docs/NOTIFICATIONS_SPEC.md`. This entry is extended as steps land.
+
+### Step 1 — infrastructure ✅ (deploy pending)
+
+- `functions/`: standalone pnpm package (not a workspace), Node 24, `europe-west4`, `maxInstances: 10`. Temporary `smokeTransactionWritten` trigger logs `authType`/`authId`; **remove in step 3**.
+- Rules for the four notification paths + `rules-tests/` (`pnpm test:rules`, 22 tests). Root `pnpm test`/eslint isolated from `functions/`; commands in `CLAUDE.md`.
+- Findings (in spec §3.2/§3.4): the emulator gives no real actor (`authType: 'unknown'`), so event logic takes the actor as input; `pushThrottle` reset must be a merge write.
+- Verified: `tsc -b`, `pnpm test` 625/625, `build`, functions typecheck, rules 22/22, emulator trigger fired for create/update/delete.
+- **Open:** deploy was blocked by Claude Code's auto-mode classifier. User deploys functions + rules, then checks the real `authType`/`authId` (incl. delete) in `pnpm --dir functions logs`.

@@ -93,6 +93,23 @@ are always read **live**, never cached in app state: the OS or browser can chang
 behind the app's back (e.g. Chrome auto-revokes permission for rarely visited sites).
 Since all three live in the storage context, each context shows its own correct state.
 
+### 2.3 Service worker (decided)
+
+Keep vite-plugin-pwa's generated Workbox service worker (`generateSW`) and add a
+hand-written `public/push-sw.js` through Workbox `importScripts`. It handles only
+`push` (always calls `showNotification()`) and `notificationclick` (opens the
+target page). The client passes the existing registration to FCM:
+`getToken(messaging, { vapidKey, serviceWorkerRegistration: await navigator.serviceWorker.ready })`.
+
+- One service worker; the existing offline caching is untouched.
+- The app controls how every notification is displayed (needed for §6 text, §9.5
+  deep links and the §10 lock-screen cleanup).
+- Rejected: a separate `firebase-messaging-sw.js` (two service workers, uncertain on
+  iOS, Firebase-controlled display) and `injectManifest` (rewriting working caching code).
+- The service worker is inactive under `pnpm dev`, and push needs HTTPS. Device
+  testing uses a Firebase Hosting preview channel.
+- FCM's push payload format is parsed by hand. Confirm it with the first test push.
+
 ---
 
 ## 3. Architecture
@@ -177,6 +194,12 @@ catalogue, the push text and the feed rendering all treat them as distinct event
   `...WithAuthContext` Firestore trigger variants, not from the client-written
   `lastModifiedBy`. It can't be spoofed, and it works for deletes, where the deleted
   document carries no "who deleted me". *To confirm at implementation.*
+  **Emulator finding (step 1):** the Functions emulator fires these triggers for
+  create, update and delete, but does **not** supply a real actor: it reports
+  `authType: 'unknown'` and a placeholder `authId` even for an authenticated write.
+  Real values can only be confirmed on a deployed function. Consequence: the event
+  logic takes the actor as an input (unit-testable), and the trigger wrapper is the
+  only place that reads `event.authId`.
 - **Idempotency.** Firestore triggers are at-least-once. The document ID is the
   trigger's event ID, so a retried trigger overwrites the same document instead of
   duplicating it. A duplicate push on retry is rare and accepted.
@@ -190,8 +213,8 @@ Two separate concepts (decided):
 
 | | Meaning | Stored as | Cleared by |
 |---|---|---|---|
-| **Seen** | Drives the 🔔 badge | `users/{uid}.activityLastSeenAt` (watermark) | Opening the feed |
-| **Read** | Entry shown bold until read | `openedAt` on the entry, **or** `createdAt <= users/{uid}.activityReadAllAt` | Tapping the entry, or **"Mark all as read"** |
+| **Seen** | Drives the 🔔 badge | `activityLastSeenAt` (watermark, in the private doc §3.5) | Opening the feed |
+| **Read** | Entry shown bold until read | `openedAt` on the entry, **or** `createdAt <= activityReadAllAt` (private doc §3.5) | Tapping the entry, or **"Mark all as read"** |
 
 - Badge count = entries with `createdAt > activityLastSeenAt`.
 - An entry is read if `openedAt` is set **or** it is older than `activityReadAllAt`.
@@ -216,9 +239,28 @@ Other client-written notification data, all owner-only:
 
 | Path | Client writes | Why |
 |---|---|---|
-| `users/{uid}/fcmTokens/{token}` | create, delete | register / unregister this device (§2.1) |
-| `users/{uid}/pushThrottle/{key}` | set `count: 0` | reset on open (§6.1) |
-| `users/{uid}` fields `activityLastSeenAt`, `activityReadAllAt`, `mutedSpaceIds` | update | §3.3, §9.1. Existing owner-write rule on the user doc, to verify |
+| `users/{uid}/fcmTokens/{token}` | read, create, **update**, delete | register / unregister this device (§2.1). `update` because the refresh on each app open rewrites an existing document |
+| `users/{uid}/pushThrottle/{key}` | `count: 0` only, via `setDoc(ref, { count: 0 }, { merge: true })`; no read | reset on open (§6.1). A non-merge set is refused: it would erase `lastEventAt` |
+| `users/{uid}/private/notifications` | read, create, update; only the three §3.5 fields | §3.5 |
+
+Implemented in `firestore.rules` and covered by `rules-tests/notifications.rules.test.ts`
+(`pnpm test:rules`, Firestore emulator).
+
+### 3.5 Private notification document
+
+`users/{uid}` is **readable by every signed-in user** (`firestore.rules`: needed for
+nametag search and friends), so notification state must not live on it. It lives in
+`users/{uid}/private/notifications`, readable and writable by the owner only:
+
+```ts
+interface NotificationPrefs {
+  mutedSpaceIds?: string[]       // §9.1
+  activityLastSeenAt?: Timestamp // §3.3, badge watermark
+  activityReadAllAt?: Timestamp  // §3.3, "Mark all as read" watermark
+}
+```
+
+The Cloud Function (Admin SDK) reads it before sending a push.
 
 ---
 
@@ -392,12 +434,12 @@ would only reduce that to a single push, so it moves to §10.
 | Level | Question | Stored in | Shown in |
 |---|---|---|---|
 | **Device** (master switch) | Can *this device* receive pushes? | OS permission + `users/{uid}/fcmTokens/{token}` | Profile → Preferences |
-| **Space** | Do I want pushes from *this space*? | `users/{uid}.mutedSpaceIds: string[]` | Space → Parameters → Manage space |
+| **Space** | Do I want pushes from *this space*? | `mutedSpaceIds: string[]` in `users/{uid}/private/notifications` (§3.5) | Space → Parameters → Manage space |
 | **Field** (v2) | Which edits matter to me? | (§10) | (§10) |
 
 - If the device level is off, the other levels have no effect on that device.
 - All levels filter **push only**. The feed always records every event.
-- Space mute is stored **on the user, not the space**: it's personal, other members
+- Space mute is stored **on the user's private document (§3.5), not the space**: it's personal, other members
   shouldn't see it, and a per-user write avoids rewriting the shared space document
   (and triggering every member's listener) on each toggle. The Cloud Function checks
   `mutedSpaceIds` before sending.

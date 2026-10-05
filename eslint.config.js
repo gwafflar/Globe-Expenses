@@ -6,7 +6,7 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  globalIgnores(['dist', 'functions/lib']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
@@ -18,6 +18,13 @@ export default defineConfig([
     languageOptions: {
       ecmaVersion: 2020,
       globals: globals.browser,
+    },
+  },
+  // Cloud Functions and rules tests run in Node, not the browser.
+  {
+    files: ['functions/**/*.ts', 'rules-tests/**/*.ts'],
+    languageOptions: {
+      globals: globals.node,
     },
   },
 ])

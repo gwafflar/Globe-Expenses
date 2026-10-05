@@ -25,6 +25,7 @@ At the start of every session, before doing anything else, read all files in `do
 
 - Typecheck with **`pnpm tsc -b`**, never `pnpm tsc --noEmit`. The root `tsconfig.json` has `"files": []` and only project references, so `--noEmit` checks nothing and exits 0 — it will pass on code that does not compile. `pnpm build` runs `tsc -b` and is also a valid check.
 - Full verification before a commit: `pnpm tsc -b`, `pnpm test`, `pnpm build`.
+- When `functions/` or `firestore.rules` changed, also: `pnpm --dir functions typecheck`, `pnpm test:functions`, `pnpm test:rules` (starts the Firestore emulator; needs Java). `functions/` is a standalone package (own `package.json`, lockfile, tsconfig) — it is not covered by the root `tsc -b` or `pnpm test`, and it cannot import from `src/`. Inside `functions/`, `tsc --noEmit` *is* valid (no project references there).
 
 ## Development style
 
