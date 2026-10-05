@@ -2876,4 +2876,4 @@ Plan: Session 028 table. Design: `docs/NOTIFICATIONS_SPEC.md`. This entry is ext
 - Findings (in spec §3.2/§3.4): the emulator gives no real actor (`authType: 'unknown'`), so event logic takes the actor as input; `pushThrottle` reset must be a merge write.
 - Deploy with pnpm needs `@google-cloud/functions-framework` as an explicit dependency: Cloud Build adds it automatically for npm projects only. Image cleanup policy set to 1 day.
 - Verified: `tsc -b`, `pnpm test` 625/625, `build`, functions typecheck, rules 22/22, emulator trigger fired for create/update/delete.
-- Deployed by the user (the first attempt left an HTTPS placeholder that had to be deleted). Real actor confirmed: `authType: 'api_key'` + `authId` = Firebase Auth uid on create/update/delete (spec §3.2).
+- Functions + rules deployed by the user (the first functions attempt left an HTTPS placeholder that had to be deleted). Real actor confirmed: `authType: 'api_key'` + `authId` = Firebase Auth uid on create/update/delete (spec §3.2).
