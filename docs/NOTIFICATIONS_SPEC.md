@@ -193,7 +193,12 @@ catalogue, the push text and the feed rendering all treat them as distinct event
 - **Actor identity** comes from the trigger's authenticated writer, using the
   `...WithAuthContext` Firestore trigger variants, not from the client-written
   `lastModifiedBy`. It can't be spoofed, and it works for deletes, where the deleted
-  document carries no "who deleted me". *To confirm at implementation.*
+  document carries no "who deleted me". **Confirmed on a deployed function
+  (6 Oct 2026):** writes from the app arrive with `authType: 'api_key'` (the client
+  SDK uses the web API key) and `authId` = the writer's Firebase Auth uid, for
+  create, update and delete. `api_key` is the expected value for app users; any
+  other `authType` (e.g. `service_account` for Admin SDK writes, `system` for
+  TTL deletes) has no end-user actor.
   **Emulator finding (step 1):** the Functions emulator fires these triggers for
   create, update and delete, but does **not** supply a real actor: it reports
   `authType: 'unknown'` and a placeholder `authId` even for an authenticated write.

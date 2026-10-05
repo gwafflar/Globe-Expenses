@@ -32,7 +32,9 @@ setGlobalOptions({ region: 'europe-west4', maxInstances: 10 })
  * actor's uid reliably, including on deletes (where the deleted document
  * carries no "who deleted me")?
  *
- * Expected for a write from the app: authType 'app_user', authId = writer's uid.
+ * Confirmed on the deployed function: a write from the app gives
+ * authType 'api_key' (the client SDK authenticates with the web API key) and
+ * authId = the writer's Firebase Auth uid, for create, update and delete.
  */
 export const smokeTransactionWritten = onDocumentWrittenWithAuthContext(
   // Path uses the legacy collection name `travels/` (frozen, see CLAUDE.md).
