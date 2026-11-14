@@ -1,7 +1,7 @@
 # Notifications & Activity Feed — Specification
 
-> Status: **implemented, device tests pending** (November 2026). Functions and rules are
-> deployed; the web app is on a preview channel. Progress and decisions taken while
+> Status: **push notifications live in production** (14 November 2026). All device tests
+> passed on Android and iPhone. Progress and decisions taken while
 > building: `docs/notification-implementation-journal.md`. Manual device tests:
 > `docs/NOTIFICATIONS_TEST_PLAN.md`. The Activity Feed UI (§10) is not built.
 > Supersedes the short notes in `GlobeExpenses_Specification.md` §3.7 / §3.11 and

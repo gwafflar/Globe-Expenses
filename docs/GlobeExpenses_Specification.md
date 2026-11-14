@@ -2,7 +2,7 @@
 
 Formal Product Specification
 
-_Version 0.5 - March 2026_
+_Version 0.6 - November 2026_
 
 _Reference document for AI-assisted development sessions. All decisions recorded herein are binding unless explicitly revised._
 
@@ -27,7 +27,7 @@ The product is distributed as a Progressive Web App (PWA), installable directly 
 | Database | Cloud Firestore | Real-time sync, native offline persistence, document model fits data |
 | Authentication | Firebase Auth | Email/password + Google OAuth. Apple login excluded (not targeting App Store) |
 | Server-side logic | Firebase Cloud Functions | Currency computation, bank import agent (v2), notification dispatch (serverless) |
-| Push notifications | Firebase Cloud Messaging | Phase 3 feature |
+| Push notifications | Firebase Cloud Messaging | Live since Nov 2026, see §3.11 |
 | Hosting | Firebase Hosting | CDN delivery, HTTPS by default |
 | Currency rates | Hardcoded table (v1) | Deferred complexity. Rate stored per transaction at creation time regardless of source. |
 | AI coding tools | Cursor (primary) + Claude (architecture/review) | Cursor for daily development, Claude for design decisions and code review |
@@ -54,7 +54,7 @@ The product is distributed as a Progressive Web App (PWA), installable directly 
 - Each space has a **main currency** (`mainCurrency`: ISO 4217) set at creation (defaults to user's `mainCurrency`). All transactions in the space compute `exchangeRate` and `totalAmountMain` relative to this currency. Locked after creation in v1 (editable + batch recompute is v2). Canonical reader: `getSpaceMainCurrency(space)` with fallback chain `mainCurrency → currencies[0] → 'EUR'`.
 - Each space has **default exchange rates** (`defaultRates: Record<string, number>`) seeded from the hardcoded table at creation. User-editable in the Parameters tab (both directions). Per-transaction override is available in the form. `getExchangeRate(from, to, spaceRates?)` checks space rates first.
 - A member can **leave** a multi-user space (removed from `memberUids`, slot unclaimed but preserved for split integrity). If the leaving member was the creator, `createdBy` is reassigned to a random remaining member from `memberUids`.
-- A member can **delete** a solo space (or a space where they are the last user in `memberUids`). This hard-deletes all transactions and the space document.
+- A member can **delete** a solo space (or a space where they are the last user in `memberUids`). The client deletes the space document only; the `onTravelDeleted` Cloud Function then deletes all its transactions server-side.
 - A member can **archive** a space for themselves only (per-user `archivedByUids` array). Archived spaces appear in a separate collapsible section on the spaces list and show an unarchive banner when opened.
 - After creating a new space, the user is navigated directly to the space detail page.
 - [v2] Dynamic member removal and join-date based visibility cutoff for past transactions.
@@ -316,14 +316,16 @@ The Activity Feed is a pull-model notification center surfacing collaborative ev
 - Conflict policy v1: last-write-wins
 - [v2] Conflict detection: if a transaction's lastModifiedAt in Firestore is newer than the version the user loaded, a visual warning is shown
 
-## 3.11 Notifications (Phase 3)
+## 3.11 Notifications (Phase 3) — ✅ live since 14 Nov 2026
 
 > Detailed design: see `docs/NOTIFICATIONS_SPEC.md`, which takes precedence where it differs.
 
-- Push notifications via Firebase Cloud Messaging
-- Trigger: a transaction is created or edited that lists the user as a payer or beneficiary
-- Notification content: transaction name, amount, space name, actor
-- Users can enable/disable notifications per space
+- Push notifications via Firebase Cloud Messaging, on Android (Chrome) and iOS 16.4+ (Home Screen install only)
+- Triggers: a transaction involving the user is created, materially edited or deleted; a space invite, friend request or accepted invite; a space deleted; an import finished. The actor is never notified
+- Notification content: space, actor, transaction name, amount and the recipient's own share
+- Per-device master switch (Profile) and per-space mute (Parameters); the OS prompt only opens from a tap
+- At most 2 pushes per (recipient, space), then one "more changes" push, then silence until 60 s of quiet
+- Every event is also written to the user's activity feed (`users/{uid}/activity`), whose UI is not built yet
 - **An XLSX import must produce at most one push notification per recipient**, never one per imported row. Every imported row still gets its own Activity Feed entry; only the push is collapsed. This must be in place before the import feature (currently gated off by `SHEETS_FEATURE_ENABLED` in `TransactionsTab.tsx`) and push notifications are both live.
 
 # 4. Non-Functional Requirements
@@ -352,7 +354,6 @@ The Activity Feed is a pull-model notification center surfacing collaborative ev
 - Live currency exchange rate API integration
 - Bank rate / cash withdrawal rate input
 - Conflict resolution UI
-- Push notifications (v3)
 - Receipt photo attachment
 - Multi-language / i18n
 - App Store / Play Store distribution
@@ -422,7 +423,7 @@ The Activity Feed is a pull-model notification center surfacing collaborative ev
 | 43 | arrayUnion not reflected in request.resource.data | Firestore FieldValue transforms are evaluated server-side AFTER rules pass. Rules checking request.resource.data.memberUids during an arrayUnion write will see the pre-write value and always fail. | Space join rule uses pendingInviteId + get() capability check instead of checking the mutated array |
 | 44 | pendingInviteId: transient authorization carrier | The accepter writes pendingInviteId to the space document solely for the security rule to read via get(). It has no semantic meaning for the UI and is not displayed or used after the write. | Enables non-member write authorization without a Cloud Function intermediate |
 | 65 | Leave = unclaim slot, not remove | Member slot kept with `userId: null` on leave; `memberUids` updated via `arrayRemove`. | Preserves `travelMemberId` references in transaction splits |
-| 66 | Delete = client-side subcollection cleanup (v1) | `getDocs` + `writeBatch` before `deleteDoc`. Cloud Function cascade deferred to v2. | Acceptable for v1 (low transaction counts); v2 needs `onDelete` trigger for reliability |
+| 66 | ~~Delete = client-side subcollection cleanup (v1)~~ | Superseded by #96 (Nov 2026). | |
 | 67 | Per-user archive via `archivedByUids` | Each member archives independently. No impact on access or membership. Client-side filtering. | Simple, no extra queries; each member manages their own view |
 | 68 | "Only user" check uses `memberUids.length` | Not `members.filter(userId !== null).length`. | A user in `memberUids` who hasn't claimed a slot still has access and counts as a real user |
 | 69 | Creator reassignment on leave | If leaving user is `createdBy`, reassign to random remaining UID from `memberUids`. | Ensures `createdBy` always points to an active member |
@@ -449,3 +450,9 @@ The Activity Feed is a pull-model notification center surfacing collaborative ev
 | 90 | Preset re-application in v1 | Overwrites toggles only, never lists or members | Phase 2+ |
 | 91 | `multiCurrency` is a sticky auto-upgrading flag | Auto-upgrades on first foreign-currency use, never auto-downgrades | Phase 2+ |
 | 92 | Single-currency is a visibility rule, not a data-model change | `exchangeRate = 1` still stored | Phase 2+ |
+| 93 | One event model, two channels | Cloud Functions write an activity entry per event and recipient; only a subset is pushed | The feed UI can follow without rework. `NOTIFICATIONS_SPEC.md` |
+| 94 | Server-side push limiter, no deferral | 2 pushes, one "more changes", then silence until 60 s of quiet, per (recipient, space) | iOS ignores notification `tag` replacement, so bursts can only be capped server-side |
+| 95 | One push per import | `importBatchId` on imported rows, one `importBatches` marker triggers the summary push | An import must never push once per row |
+| 96 | Space delete cascade is server-side | Client deletes the space doc; `onTravelDeleted` recursively deletes subcollections | No `tx_deleted` event per row, no 500-write cap, survives a client crash |
+| 97 | Second Firestore mapping in `functions/` | `functions/src/mapping.ts`, pinned by tests | Functions cannot import from `src/`; a shared package needs a build step for one small function |
+| 98 | Push SW via Workbox `importScripts` | `public/push-sw.js` added to the generated service worker; data-only FCM messages | One service worker on iOS; caching strategy untouched |

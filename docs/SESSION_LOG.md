@@ -2887,3 +2887,13 @@ Details and decisions: `docs/notification-implementation-journal.md`. Manual tes
 - Verified: `tsc -b`, `pnpm test` 644/644, `build`, functions 79/79, rules 28/28, 29-check end-to-end run on the emulators.
 - Deployed: rules + functions to production; web app to preview channel `notifications` only. **Production hosting unchanged.**
 - **Next:** user runs test plan T1–T5 on Android and iPhone. Then production hosting deploy and PR. Open: `mergeMembers()` reads as a burst of material edits.
+
+---
+
+## ✨ Working Session 030 — 14 November 2026 — Notifications released
+
+- **Device tests:** every test in `docs/NOTIFICATIONS_TEST_PLAN.md` passed (Android + iPhone). The first round's missing transaction pushes were the "me only" default split, as inferred.
+- **Docs:** feature marked live in the notifications spec, journal and test plan; Specification §3.11 rewritten, decisions #93–98 added (#66 superseded); Architecture roadmap v3 shipped, stale "production hosting unchanged" notes removed.
+- **Verified:** `tsc -b`, `pnpm test` 644/644, `build`, functions typecheck + 79/79, rules 28/28.
+- **Released:** one ✨ feat commit, PR to `main` (also carries the Space refactor branches, PRs 1–2), production deploy of rules, functions and hosting.
+- **Open:** Activity Feed UI; `mergeMembers()` burst; Windows Firefox delivery unexplained (not a target).

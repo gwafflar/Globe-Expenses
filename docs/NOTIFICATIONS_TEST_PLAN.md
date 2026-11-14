@@ -38,7 +38,13 @@ there, and on iPhone install it to the Home Screen **from the preview URL**.
 
 ---
 
-## Results so far (14 Nov)
+## Results — ✅ all passed (14 Nov 2026)
+
+Every test below passed on the user's devices (Android and iPhone), after the second
+round that redid T1–T5 with B selected in the **Split** row. Production hosting was
+deployed afterwards.
+
+First round, kept for the record:
 
 | Test | Result |
 |---|---|
@@ -47,18 +53,8 @@ there, and on iPhone install it to the Home Screen **from the preview URL**.
 | iPhone: "invite accepted" push | ✅ delivered |
 | Android Firefox: enable, space invite push, tap opens the invite | ✅ OK |
 | Android Firefox: transaction push, tap opens the transaction | ✅ delivered once (a minute late, on unlock) |
-| Transaction pushes otherwise | ❌ none — **to redo, see below** |
+| Transaction pushes otherwise | ❌ none — expenses saved as "me only" (no other recipient); redone, OK |
 | Banner stays after enabling from Profile | 🐛 fixed, redeployed |
-
-**Why the other transactions did not push:** the server ran for each of them (7 runs)
-and decided there was nobody to notify. The logs of that version did not say why. The
-only cause consistent with the code is the default split above: an expense saved as
-"me only" has no other recipient. This is an inference, not an observation.
-
-The redeployed functions now log the reason for every run. **To redo:** T4 step 3
-onwards and T5 on the iPhone, T1–T2 on Android Chrome, each time selecting B in the
-**Split** row. If a push is still missing, give me the time and I will read the
-reason in the logs.
 
 ---
 

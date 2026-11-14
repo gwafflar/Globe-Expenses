@@ -8,15 +8,15 @@ Design lives in the spec; device tests in `docs/NOTIFICATIONS_TEST_PLAN.md`.
 | Step | What | State |
 |---|---|---|
 | 1 | Functions scaffold, emulators, rules | ✅ done 5–6 Oct, deployed |
-| 2 | Device registration, service worker push, Profile toggle | ✅ built, **awaiting device test** |
+| 2 | Device registration, service worker push, Profile toggle | ✅ built, device-tested |
 | 3 | Activity writer for transactions | ✅ built, tested, deployed |
 | 4 | Push sender: limiter, mute, dead-token cleanup | ✅ built, tested, deployed (real FCM delivery unverified) |
 | 5 | Space & social events, `onTravelDeleted`, simplified `deleteSpace()` | ✅ built, tested, deployed |
 | 6 | Imports (`importBatchId`, `importBatches`) | ✅ built, tested, deployed (import UI still flagged off) |
-| 7 | Space toggle, banners, tap deep link, reset-on-open | ✅ built, **awaiting device test** |
+| 7 | Space toggle, banners, tap deep link, reset-on-open | ✅ built, device-tested |
 
-Deployed: Firestore rules and 5 functions (production project), web app on the preview
-channel `notifications` only. **Production hosting is unchanged** (last release 30 Sep).
+Deployed: Firestore rules, 5 functions and the web app, all on production
+(14 Nov, after every test in `NOTIFICATIONS_TEST_PLAN.md` passed).
 
 ## 14 Nov 2026 — steps 2–7 in one session
 
@@ -102,15 +102,22 @@ runs at the end instead, on the complete feature.
 - **Open:** Windows Firefox received nothing — not yet explained; the new logs will
   show whether that account was a recipient and had a device registered.
 
+## 14 Nov 2026 (evening) — release
+
+- The user redid T1–T5 with B in the split and ran the rest of the plan: **all tests
+  passed**. The earlier missing pushes were the "me only" default split, as inferred.
+- Committed as one ✨ feat commit, PR to `main`, production deploy (rules, functions,
+  hosting).
+
 ## Open points
 
-- **Device tests T1–T5** (test plan). In particular: real FCM delivery from the
-  function's service account, the iOS prompt from a tap, tap-to-open on iOS.
+- **Windows Firefox** received nothing in the first round; not re-observed since the
+  reason logging went in. Not a target platform.
 - **`mergeMembers()` is a bulk edit**: merging two member slots rewrites every
   transaction that used them, and each rewrite is a material edit. The limiter caps it
   at 3 pushes, but the feed gets one entry per transaction. Could be stamped like an
   import if it proves noisy.
 - **Notifications show while the app is open** as well (iOS forbids a push without a
   visible notification, so there is no foreground suppression).
-- Production hosting deploy: after the device tests pass.
+- **Activity Feed UI** (spec §10): entries are written from day one, nothing reads them yet.
 - From the spec, unchanged: activity retention, iOS `getNotifications()`/`close()`.

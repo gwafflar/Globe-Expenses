@@ -2,13 +2,13 @@
 
 General Architecture Document
 
-_Version 0.5 - March 2026_
+_Version 0.6 - November 2026_
 
 # 1. System Overview
 
 GlobeExpenses is a collaborative space expense tracking Progressive Web App (PWA). It allows travelers to record, categorize, and analyze spending during trips, with multi-currency support and collaborative expense splitting among space companions.
 
-The application is designed to function fully offline with automatic synchronization when connectivity is restored. Space members can invite friends via shareable links and join shared spaces through invite tokens. In its first phase it targets individual and small-group use. Collaborative real-time features and push notifications are planned for subsequent phases.
+The application is designed to function fully offline with automatic synchronization when connectivity is restored. Space members can invite friends via shareable links and join shared spaces through invite tokens. In its first phase it targets individual and small-group use. Push notifications (FCM) are live since November 2026; the Activity Feed UI is planned.
 
 # 2. High-Level Architecture
 
@@ -353,7 +353,7 @@ Firestore FieldValue transforms (arrayUnion, arrayRemove, serverTimestamp) are N
 
 ## 5.6 Activity Feed & Push Notifications Flow
 
-Full design: `docs/NOTIFICATIONS_SPEC.md` (authoritative). Steps 1–3 and 5 below are implemented (Nov 2026); the feed UI (step 4) is not.
+Full design: `docs/NOTIFICATIONS_SPEC.md` (authoritative). Steps 1–3 and 5 below are implemented and in production (14 Nov 2026); the feed UI (step 4) is not.
 
 Code map: server in `functions/src/` — `index.ts` (five Firestore triggers), `events/` (pure event and recipient rules), `push/` (limiter, message text, FCM send), `activity/publish.ts` (feed writes), `mapping.ts` (raw documents → event inputs). Client in `src/notifications/` — `services/pushService.ts` (device token lifecycle), `services/notificationPrefs.ts` (mute, limiter reset), `store/usePushPromptStore.ts` + `components/PushPromptBanner.tsx` (permission banner), the two toggles, and `public/push-sw.js` (the `push` / `notificationclick` handlers, loaded into the Workbox service worker with `importScripts`).
 
@@ -384,7 +384,7 @@ Summary:
 
 Deleting the space first means each cascaded transaction delete finds no parent space (and no end-user actor) and produces no event (`NOTIFICATIONS_SPEC.md` §5 rule 5). There is no 500-write cap any more, and a crash mid-deletion can no longer strand transactions. For a few seconds the orphaned transactions still exist but are unreadable: the rules check the parent's `memberUids`.
 
-⚠️ Until the notifications build is on production hosting, the live client still runs the old client-side cascade (`getDocs` + `writeBatch`, capped at 500). Both paths end in the same state.
+A client still running a cached older build uses the old client-side cascade (`getDocs` + `writeBatch`, capped at 500) until its service worker updates. Both paths end in the same state.
 
 **Archive / Unarchive (per-user):**
 1. `archivedByUids: string[]` on the space document — each member archives independently
@@ -472,7 +472,7 @@ All operations require authentication. Rules are deployed via `firestore.rules` 
 | --- | --- | --- |
 | v1 | Core (current) | PWA, offline sync, single/multi-member space, transactions with multi-payer splits, transaction editing, space emoji, per-space categories/paymentMethods/countries/cities (LabeledItem[] with smart dropdowns), friends system (nametag search, friend requests, shareable invite links), space member invitations (join via invite link), profile page with nametag claim, four-tab space detail (Transactions / Balance / Dashboard / Parameters), read-only analytics dashboard (period filter, per-member stats, category breakdown, spending-over-time), CSV export/import, hardcoded currency rates |
 | v2 | Collaborative+ | Bank import agent (Revolut webhook, Nordigen aggregator, on-chain via Alchemy/Moralis), draft transaction inbox with soft-delete and raw data audit trail, carousel space selector, AI-assisted categorization, activity feed (pull model), dynamic membership with join-date visibility cutoff, conflict detection UI, live currency rates, settlement suggestions |
-| v3 | Notifications | Push notifications (FCM) for events involving the user. May ship before the v2 feed UI, but writes the feed's activity documents from day one. Requires the `onTravelDeleted` cascade function. See `docs/NOTIFICATIONS_SPEC.md` |
+| v3 | Notifications | ✅ **Shipped 14 Nov 2026** (ahead of the v2 feed UI). Push notifications (FCM) for events involving the user; writes the feed's activity documents from day one; `onTravelDeleted` cascade function. See `docs/NOTIFICATIONS_SPEC.md` |
 | v4 | Advanced | Bank-rate currency input, cash withdrawal tracking, full conflict resolution UI, recurring/template transactions, manual fetch-new-transactions trigger, potential native app wrappers |
 
 # 8. Open Questions & Deferred Decisions
@@ -493,4 +493,4 @@ All operations require authentication. Rules are deployed via `firestore.rules` 
 | Manual fetch trigger | On-demand webhook fallback deferred to v4. | Decided (v4) |
 | updateSpaceList conflict | Adding categories/methods from transaction form overwrites the full LabeledItem[] array. Two offline members adding different items simultaneously → last sync wins. Fix in v2: use arrayUnion for individual item additions. | Open (v2) |
 | arrayUnion in security rules | Resolved: FieldValue transforms (arrayUnion) are NOT reflected in request.resource.data during rule evaluation. Rules must use capability tokens (pendingInviteId + get()) instead of checking mutated array fields. | Decided |
-| Space deletion subcollection cleanup | Cloud Function `onTravelDeleted` cascade-deletes server-side; the client deletes only the space document. Pulled forward from v2 as a prerequisite for notifications (avoids one `tx_deleted` event per transaction). Also fixes the >500-transaction cap and crash recovery. | Implemented (Nov 2026), function deployed; client change ships with the notifications build |
+| Space deletion subcollection cleanup | Cloud Function `onTravelDeleted` cascade-deletes server-side; the client deletes only the space document. Pulled forward from v2 as a prerequisite for notifications (avoids one `tx_deleted` event per transaction). Also fixes the >500-transaction cap and crash recovery. | Implemented and in production (14 Nov 2026) |
