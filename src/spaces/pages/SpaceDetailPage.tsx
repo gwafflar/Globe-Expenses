@@ -5,7 +5,10 @@
 // Transaction list is subscribed via useTransactions (onSnapshot).
 
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { resetPushThrottle } from '@/notifications/services/notificationPrefs'
+import { requestPushPrompt } from '@/notifications/store/usePushPromptStore'
+import { formatAmount } from '@/spaces/components/tabs/TransactionsTab'
 
 import { doc, onSnapshot } from 'firebase/firestore'
 import { db } from '@/services/firebase'
@@ -396,6 +399,84 @@ export function SpaceDetailPage() {
   // Tab navigation request — used by the solo-space CTA to switch to Parameters
   const [requestTab, setRequestTab] = useState<'transactions' | 'balance' | 'dashboard' | 'parameters' | undefined>(undefined)
 
+  // ---------------------------------------------------------------------------
+  // Push notifications (docs/NOTIFICATIONS_SPEC.md)
+  // ---------------------------------------------------------------------------
+
+  // Reset-on-open (§6.1): the user is looking at this space, so the push
+  // limiter's burst counter goes back to 0 and the next change pushes normally.
+  // Runs when the page opens and each time the app returns to the foreground.
+  // The cleanup function removes the listener when leaving the page.
+  useEffect(() => {
+    if (!spaceId || !currentUserUid) return
+    resetPushThrottle(currentUserUid, spaceId)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') resetPushThrottle(currentUserUid, spaceId)
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [spaceId, currentUserUid])
+
+  // Deep link from a tapped notification (§9.5): /spaces/:spaceId?tx=<txId>.
+  // useSearchParams reads (and lets us rewrite) the "?tx=…" part of the URL.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const linkedTxId = searchParams.get('tx')
+  // Derived on every render rather than stored in state: the URL is the single
+  // source of truth for "which transaction was I sent to".
+  const linkedTxFound = linkedTxId !== null && transactions.some((tx) => tx.txId === linkedTxId)
+  // The transaction the list should expand and scroll to (null = none).
+  const focusTxId = linkedTxFound ? linkedTxId : null
+  // True when the linked transaction turned out to be gone (deleted since).
+  const [linkedTxMissing, setLinkedTxMissing] = useState(false)
+
+  useEffect(() => {
+    if (!linkedTxId || loadingTransactions || linkedTxFound) return
+
+    // Not in the list — yet. The first snapshot comes from the local cache and
+    // may predate the transaction the notification is about, so give the
+    // server a few seconds before concluding it no longer exists. If it
+    // arrives meanwhile, this effect re-runs (linkedTxFound flips) and the
+    // cleanup below cancels the timer.
+    const timer = setTimeout(() => {
+      setLinkedTxMissing(true)
+      // Drop ?tx= from the URL so a refresh does not repeat the notice.
+      // `replace` avoids adding a history entry.
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev)
+          next.delete('tx')
+          return next
+        },
+        { replace: true },
+      )
+    }, 4000)
+    return () => clearTimeout(timer)
+  }, [linkedTxId, loadingTransactions, linkedTxFound, setSearchParams])
+
+  // Permission banner, moment (e1) (§9.4): the first time the user sees a
+  // transaction that someone ELSE added and that involves them. A ref (not
+  // state) remembers that we already asked during this visit: changing it must
+  // not re-render. The banner store enforces "once per device".
+  const e1Requested = useRef(false)
+  useEffect(() => {
+    if (e1Requested.current || !space || !currentUserUid) return
+    const myMemberId = space.members.find((m) => m.userId === currentUserUid)?.travelMemberId
+    if (!myMemberId) return
+    const tx = transactions.find(
+      (t) =>
+        t.createdBy?.type === 'user' &&
+        t.createdBy.uid !== currentUserUid &&
+        [...t.paidBy, ...t.beneficiaries].some((s) => s.travelMemberId === myMemberId),
+    )
+    if (!tx || tx.createdBy.type !== 'user') return
+    e1Requested.current = true
+    const authorUid = tx.createdBy.uid
+    const author = space.members.find((m) => m.userId === authorUid)?.displayName || 'Someone'
+    const myShare = tx.beneficiaries.find((s) => s.travelMemberId === myMemberId)?.amount
+    const amount = formatAmount(myShare && myShare > 0 ? myShare : tx.totalAmount, tx.currency)
+    requestPushPrompt('e1', `${author} added ${tx.name} (${amount}) involving you. Get notified next time?`)
+  }, [transactions, space, currentUserUid])
+
   // Dashboard drill-down (Phase 7a §5): the filter selection to hand to the
   // Transactions tab. The nonce is minted here so the same row can be tapped
   // twice in a row and still re-apply. Reusing the existing requestTab
@@ -566,6 +647,25 @@ export function SpaceDetailPage() {
         onSpaceChange={handleSpaceChange}
       />
 
+      {/* A tapped notification pointed at a transaction that has been deleted
+          since: say so instead of silently showing the list (NOTIFICATIONS_SPEC §3.2) */}
+      {linkedTxMissing && (
+        <div
+          role="status"
+          className="mx-4 mt-2 flex items-start justify-between gap-3 rounded-lg border border-border bg-muted px-3 py-2 text-sm"
+        >
+          <span>This transaction no longer exists.</span>
+          <button
+            type="button"
+            onClick={() => setLinkedTxMissing(false)}
+            className="shrink-0 text-muted-foreground hover:text-foreground"
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* One-time notice when stale (pre-fix) default exchange rates were auto-corrected */}
       {repairedRateCodes && (
         <RateRepairBanner codes={repairedRateCodes} onDismiss={() => setRepairedRateCodes(null)} />
@@ -591,10 +691,12 @@ export function SpaceDetailPage() {
           onEditTransaction={handleEditById}
           onDeleteTransaction={handleDeleteTransaction}
           onSpaceChange={handleSpaceChange}
-          requestTab={requestTab}
+          // A notification deep link always lands on the Transactions tab.
+          requestTab={focusTxId ? 'transactions' : requestTab}
           onRequestTabHandled={() => setRequestTab(undefined)}
           filterRequest={filterRequest}
           onDrillDown={handleDrillDown}
+          focusTxId={focusTxId}
         />
       </main>
 

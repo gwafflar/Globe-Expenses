@@ -45,6 +45,7 @@ import { createShareableInvite } from '@/friends/services/friendService'
 import { InstallPromptBanner } from '@/shared/components/InstallPromptBanner'
 import { ALL_CURRENCIES } from '@/shared/data/pickerData'
 import { FeedbackForm } from '@/feedback/components/FeedbackForm'
+import { DeviceNotificationToggle } from '@/notifications/components/DeviceNotificationToggle'
 
 // ---------------------------------------------------------------------------
 // Avatar color
@@ -515,6 +516,10 @@ export function ProfilePage() {
               )}
             </div>
           </div>
+
+          {/* Push notifications — master switch for THIS device. Per-space
+              muting lives in each space's Parameters tab (NOTIFICATIONS_SPEC §9). */}
+          <DeviceNotificationToggle uid={currentUser.uid} />
 
           {/* Theme toggle — v2 */}
           <div className="flex items-center justify-between opacity-50">

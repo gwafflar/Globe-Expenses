@@ -13,6 +13,7 @@ import { Check, Copy, ArrowRight } from 'lucide-react'
 import { useAuthStore } from '@/auth/store/useAuthStore'
 import { createSpace } from '@/spaces/services/spaceService'
 import { createShareableInvite } from '@/friends/services/friendService'
+import { requestPushPrompt } from '@/notifications/store/usePushPromptStore'
 import { PresetPicker } from '@/spaces/components/PresetPicker'
 import { CollapsibleCard } from '@/spaces/components/CollapsibleCard'
 import { FieldsEditor } from '@/spaces/components/FieldsEditor'
@@ -107,6 +108,9 @@ export function SpaceCreatePage() {
     const inviteId = createShareableInvite(userProfile, 'travel_member', createdSpaceId, name.trim())
     const url = `${window.location.origin}/invite/${inviteId}`
     setInviteUrl(url)
+    // Notifications banner, moment (d): shown only because the user chose to
+    // invite people while creating the space (NOTIFICATIONS_SPEC §9.4).
+    requestPushPrompt('d')
     try {
       await navigator.clipboard.writeText(url)
       setCopyFeedback(true)

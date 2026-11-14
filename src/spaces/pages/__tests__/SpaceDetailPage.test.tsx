@@ -74,6 +74,15 @@ vi.mock('@/spaces/components/SpaceTabs', () => ({
   SpaceTabs: ({ space }: { space: { name: string } }) => <div data-testid="space-tabs">{space.name}</div>,
 }))
 
+// Push notifications are out of scope here: the page only calls these two on
+// mount (limiter reset, permission banner), and both would hit Firestore.
+vi.mock('@/notifications/services/notificationPrefs', () => ({
+  resetPushThrottle: vi.fn(),
+}))
+vi.mock('@/notifications/store/usePushPromptStore', () => ({
+  requestPushPrompt: vi.fn(),
+}))
+
 const mockNavigate = vi.fn()
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom')
@@ -81,6 +90,8 @@ vi.mock('react-router-dom', async () => {
     ...actual,
     useParams: () => ({ spaceId: 'space1' }),
     useNavigate: () => mockNavigate,
+    // The page is rendered without a <Router>; no ?tx= deep link in these tests.
+    useSearchParams: () => [new URLSearchParams(), vi.fn()],
   }
 })
 

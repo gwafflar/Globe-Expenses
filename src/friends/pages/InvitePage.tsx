@@ -27,6 +27,7 @@ import {
 import { claimSpaceMember, addUnclaimedMember } from '@/spaces/services/spaceService'
 import { normaliseMember, type SpaceMember } from '@/spaces/types'
 import type { Invite } from '@/friends/types'
+import { requestPushPrompt } from '@/notifications/store/usePushPromptStore'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { ChevronLeft } from 'lucide-react'
@@ -160,6 +161,13 @@ export function InvitePage() {
         )
         // Exclude the slot we just created — candidates are those still unclaimed.
         const unclaimedSlots = members.filter((m) => m.userId === null)
+
+        // Notifications banner, moment (b): the user just joined a space that
+        // has at least one other real person in it, so there will be something
+        // to be notified about. Shown at most once (NOTIFICATIONS_SPEC §9.4).
+        if (members.some((m) => m.userId !== null && m.userId !== userProfile.uid)) {
+          requestPushPrompt('b')
+        }
 
         if (unclaimedSlots.length > 0) {
           setPageState({

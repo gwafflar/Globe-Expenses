@@ -59,4 +59,9 @@ export interface Transaction {
    *  none were filled. For 'select' fields the value is the OPTION ID, never
    *  the label — renaming an option updates every transaction for free. */
   custom?: Record<string, CustomValue>
+  /** Set on transactions written by an XLSX import — one id per import run.
+   *  Read by the Cloud Functions only: imported rows get a feed entry but no
+   *  push, and one summary push is sent per import (docs/NOTIFICATIONS_SPEC.md §7).
+   *  It stays on the document forever; later manual edits notify normally. */
+  importBatchId?: string
 }

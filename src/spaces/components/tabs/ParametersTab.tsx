@@ -49,6 +49,8 @@ import { ALL_CURRENCIES, ALL_COUNTRIES } from '@/shared/data/pickerData'
 import { getExchangeRate } from '@/shared/utils/exchangeRates'
 import { Share2, Check } from 'lucide-react'
 import { FeedbackForm } from '@/feedback/components/FeedbackForm'
+import { SpaceNotificationToggle } from '@/notifications/components/SpaceNotificationToggle'
+import { requestPushPrompt } from '@/notifications/store/usePushPromptStore'
 
 // ---------------------------------------------------------------------------
 // Section wrapper
@@ -1195,13 +1197,19 @@ function MembersSection({
     const newMember = await addUnclaimedMember(space.spaceId, trimmed, space.members)
     onSpaceChange({ members: [...space.members, newMember] })
     setAddMemberOpen(false)
+    requestPushPrompt('a')
   }
+
+  // Notifications banner, moment (a): the first time the user invites someone,
+  // by any method (member slot above, friend, username, link). The banner store
+  // makes sure it appears at most once per device (NOTIFICATIONS_SPEC §9.4).
 
   // Send a space invite to a friend (friend tab)
   async function handleSendSpaceInvite(toUid: string) {
     if (!userProfile) return
     setInvitedUids(prev => new Set(prev).add(toUid))
     await sendSpaceInvite(userProfile, toUid, space.spaceId, space.name)
+    requestPushPrompt('a')
   }
 
   // Send a space invite via username search result (username tab)
@@ -1209,6 +1217,7 @@ function MembersSection({
     if (!userProfile) return
     setInvitedByUsername(prev => new Set(prev).add(toUid))
     await sendSpaceInvite(userProfile, toUid, space.spaceId, space.name)
+    requestPushPrompt('a')
   }
 
   // Generate shareable invite link (link tab) — also auto-copies to clipboard
@@ -1221,6 +1230,7 @@ function MembersSection({
       )
       const url = `${window.location.origin}/invite/${inviteId}`
       setGeneratedInviteUrl(url)
+      requestPushPrompt('a')
       try {
         await navigator.clipboard.writeText(url)
         setCopyFeedback(true)
@@ -1891,8 +1901,9 @@ export function ParametersTab({ space, transactions, onSpaceChange }: Parameters
     setActionInProgress(true)
     try {
       if (isOnlyClaimedUser) {
-        // Solo or last user — hard-delete the entire space + transactions
-        await deleteSpace(space.spaceId)
+        // Solo or last user — delete the space document. Its transactions are
+        // removed server-side by the onTravelDeleted Cloud Function.
+        deleteSpace(space.spaceId)
       } else {
         // Multi-user — leave: remove self from memberUids, unclaim slot
         await leaveSpace(space.spaceId, uid, space.members, space.memberUids, space.createdBy)
@@ -2100,6 +2111,14 @@ export function ParametersTab({ space, transactions, onSpaceChange }: Parameters
       {/* ----------------------------------------------------------------- */}
       <Section title="Manage space">
         <div className="flex flex-col gap-2">
+          {/* Push notifications for this space — a personal setting, stored on
+              my own user document, invisible to other members (NOTIFICATIONS_SPEC §9.3) */}
+          {uid && (
+            <div className="mb-2">
+              <SpaceNotificationToggle uid={uid} spaceId={space.spaceId} />
+            </div>
+          )}
+
           {/* Archive / Unarchive — with loading spinner and "Done!" feedback */}
           <Button
             type="button"

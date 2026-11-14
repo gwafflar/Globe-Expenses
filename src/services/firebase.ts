@@ -16,8 +16,10 @@ const firebaseConfig = {
   appId:             import.meta.env.VITE_FIREBASE_APP_ID,
 }
 
-// Initialize the Firebase app (must happen before any other Firebase call)
-const app = initializeApp(firebaseConfig)
+// Initialize the Firebase app (must happen before any other Firebase call).
+// Exported for Firebase Cloud Messaging, which is created lazily in
+// src/notifications/services/pushService.ts (it does not exist in every browser).
+export const app = initializeApp(firebaseConfig)
 
 // Auth instance — used for login, registration, session management
 export const auth = getAuth(app)
