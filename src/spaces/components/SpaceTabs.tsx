@@ -66,6 +66,9 @@ interface SpaceTabsProps {
   filterRequest?: FilterRequest
   /** Called when a dashboard breakdown row is tapped. */
   onDrillDown?: (request: Omit<FilterRequest, 'nonce'>) => void
+  /** A transaction the Transactions tab should expand and scroll to — set when
+   *  the page was opened from a tapped notification (?tx=…). */
+  focusTxId?: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -94,6 +97,7 @@ export function SpaceTabs({
   onRequestTabHandled,
   filterRequest,
   onDrillDown,
+  focusTxId,
 }: SpaceTabsProps) {
   const [activeTab, setActiveTab] = useState<TabId>('transactions')
 
@@ -192,6 +196,7 @@ export function SpaceTabs({
                   onEditTransaction={onEditTransaction}
                   onDeleteTransaction={onDeleteTransaction}
                   filterRequest={filterRequest}
+                  focusTxId={focusTxId}
                 />
               )}
               {tab.id === 'balance' && (

@@ -536,25 +536,27 @@ export async function leaveSpace(
 }
 
 /**
- * Hard-deletes a space and all its child transactions.
- * Used for solo spaces or when the user is the last real user.
+ * Hard-deletes a space. Used for solo spaces or when the user is the last real user.
+ *
+ * The client deletes ONLY the space document. Firestore does not delete
+ * subcollections with their parent, so the Cloud Function `onTravelDeleted`
+ * (functions/src/index.ts) removes the transactions server-side.
+ *
+ * Why not delete the transactions here, as before (docs/NOTIFICATIONS_SPEC.md §5 rule 5):
+ *  - each deleted transaction would raise its own "transaction deleted"
+ *    notification; deleting the space first makes the server skip them all and
+ *    send a single "space deleted" event;
+ *  - a client batch is capped at 500 writes, so larger spaces could not be deleted;
+ *  - it needed every transaction to be fetched first, which fails offline.
+ *
+ * Fire-and-forget (decision #25): the delete is queued locally and synced when
+ * online, so this works offline too. Until the function has run, the orphaned
+ * transactions are unreadable anyway — the rules check the parent's memberUids.
  */
-export async function deleteSpace(spaceId: string): Promise<void> {
-  // Delete all transactions in the subcollection first
-  // (Firestore does not cascade-delete subcollections)
-  const txRef = collection(db, 'travels', spaceId, 'transactions')
-  const txSnapshot = await getDocs(txRef)
-
-  // Batch delete transactions (max 500 per batch — fine for v1)
-  if (!txSnapshot.empty) {
-    const batch = writeBatch(db)
-    txSnapshot.docs.forEach((txDoc) => batch.delete(txDoc.ref))
-    await batch.commit()
-  }
-
-  // Delete the space document itself
-  const spaceRef = doc(db, 'travels', spaceId)
-  await deleteDoc(spaceRef)
+export function deleteSpace(spaceId: string): void {
+  deleteDoc(doc(db, 'travels', spaceId)).catch((err: unknown) => {
+    console.error('[spaceService] deleteSpace failed:', err)
+  })
 }
 
 // ---------------------------------------------------------------------------

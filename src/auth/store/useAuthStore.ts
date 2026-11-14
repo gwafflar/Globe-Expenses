@@ -20,6 +20,7 @@ import { onAuthStateChanged, signOut as firebaseSignOut } from 'firebase/auth'
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore'
 import { auth, db } from '@/services/firebase'
 import type { UserProfile } from '@/auth/services/userService'
+import { refreshPushToken, removePushTokenOnSignOut } from '@/notifications/services/pushService'
 
 // Shape of the auth store
 interface AuthState {
@@ -40,7 +41,14 @@ export const useAuthStore = create<AuthState>(() => ({
   // Sign-out action exposed to components.
   // We rely on the `onAuthStateChanged` listener below to actually clear state
   // when Firebase confirms the sign-out.
+  //
+  // Push notifications: this device's token is deleted FIRST, while the user is
+  // still authenticated (the delete needs their permissions). Otherwise the
+  // next account signed in on this device would keep receiving this account's
+  // notifications. The cleanup is time-bounded, so signing out offline still works.
   signOut: async () => {
+    const uid = auth.currentUser?.uid
+    if (uid) await removePushTokenOnSignOut(uid)
     await firebaseSignOut(auth)
   },
 
@@ -100,6 +108,12 @@ onAuthStateChanged(auth, async (user) => {
       userProfile: profile,
       isAuthReady: true,
     })
+
+    // Push notifications: runs on every app open and every sign-in. If the
+    // device permission is already granted and the user has not turned
+    // notifications off here, this silently (re)registers the device token —
+    // it never shows a prompt. Not awaited: it must not delay the UI.
+    void refreshPushToken(user.uid)
   } else {
     // No active session — clear everything.
     useAuthStore.setState({

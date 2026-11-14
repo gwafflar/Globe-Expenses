@@ -1,0 +1,28 @@
+{
+  // Standalone TS project — NOT part of the root `tsc -b` build. Deploy uploads
+  // only this folder, so it cannot import from ../src at runtime.
+  "compilerOptions": {
+    // NodeNext + no "type": "module" in package.json => output is CommonJS,
+    // which is what the Firebase Functions runtime loads from "main".
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2024",
+    "lib": ["ES2024"],
+    "types": ["node"],
+    "outDir": "lib",
+    "rootDir": "src",
+    "sourceMap": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["src"],
+  // Tests run through vitest directly from .ts; they must not end up in lib/
+  // (lib/ is what gets deployed). src/testing holds fixtures used only by tests.
+  "exclude": ["src/**/*.test.ts", "src/testing"]
+}

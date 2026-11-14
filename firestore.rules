@@ -31,6 +31,54 @@ service cloud.firestore {
                 && request.resource.data.uid == request.auth.uid)
           );
       }
+
+      // NOTE: the `allow write` on users/{userId} above covers that ONE document
+      // only. Rules do not cascade to subcollections, so each notification path
+      // below needs its own match — without one, every client access is denied.
+      // All of them are owner-only. The Cloud Functions write with the Admin SDK,
+      // which bypasses these rules entirely. See docs/NOTIFICATIONS_SPEC.md §3.4.
+
+      // users/{userId}/activity/{eventId} — the activity feed (§3.1).
+      // Created only by Cloud Functions. The owner may read their feed and mark
+      // an entry as read by setting `openedAt`, nothing else (no create/delete).
+      match /activity/{eventId} {
+        allow read: if request.auth != null && request.auth.uid == userId;
+        allow update: if request.auth != null && request.auth.uid == userId
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['openedAt'])
+          && request.resource.data.openedAt is timestamp;
+      }
+
+      // users/{userId}/fcmTokens/{token} — one document per device (§2.1).
+      // `update` is needed on top of the spec's create/delete: the client
+      // re-registers its token on every app open, and re-writing an existing
+      // document is an update.
+      match /fcmTokens/{token} {
+        allow read, create, update, delete: if request.auth != null
+          && request.auth.uid == userId;
+      }
+
+      // users/{userId}/pushThrottle/{key} — push limiter counter (§6.1).
+      // Counter logic lives in the Cloud Function; the client may only reset
+      // `count` to 0 when the user opens a space. The client must write with
+      // setDoc(ref, { count: 0 }, { merge: true }) so `lastEventAt` is untouched.
+      match /pushThrottle/{key} {
+        allow create: if request.auth != null && request.auth.uid == userId
+          && request.resource.data.keys().hasOnly(['count'])
+          && request.resource.data.count == 0;
+        allow update: if request.auth != null && request.auth.uid == userId
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['count'])
+          && request.resource.data.count == 0;
+      }
+
+      // users/{userId}/private/notifications — owner-only notification state
+      // (§3.5). Lives here rather than on users/{userId}, which every signed-in
+      // user can read. Only the three known fields may be stored.
+      match /private/notifications {
+        allow read: if request.auth != null && request.auth.uid == userId;
+        allow create, update: if request.auth != null && request.auth.uid == userId
+          && request.resource.data.keys().hasOnly(
+               ['mutedSpaceIds', 'activityLastSeenAt', 'activityReadAllAt']);
+      }
     }
 
     // -------------------------------------------------------------------------
@@ -118,6 +166,21 @@ service cloud.firestore {
       match /transactions/{txId} {
         allow read, write: if request.auth != null
           && request.auth.uid in get(/databases/$(database)/documents/travels/$(travelId)).data.memberUids;
+      }
+
+      // travels/{travelId}/importBatches/{importBatchId} — "this import is
+      // finished" marker (docs/NOTIFICATIONS_SPEC.md §7). The importer writes
+      // one after its last batch of rows; a Cloud Function then sends ONE
+      // summary push per involved member instead of one per row.
+      //   - create only, by a member, and only naming THEMSELVES as createdBy:
+      //     the function trusts that field as the actor.
+      //   - no read/update/delete: nothing in the app reads it back, and the
+      //     server-side cascade removes it with the space.
+      match /importBatches/{importBatchId} {
+        allow create: if request.auth != null
+          && request.auth.uid in get(/databases/$(database)/documents/travels/$(travelId)).data.memberUids
+          && request.resource.data.createdBy == request.auth.uid
+          && request.resource.data.keys().hasOnly(['createdBy', 'rowCount', 'createdAt']);
       }
     }
 

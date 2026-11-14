@@ -1,9 +1,11 @@
 // SpacesPage.tsx — lists all spaces for the current user.
 // Active spaces are shown first, followed by a collapsible "Archived" section.
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/auth/store/useAuthStore'
+import { isIos, isStandalone } from '@/notifications/services/pushService'
+import { requestPushPrompt } from '@/notifications/store/usePushPromptStore'
 import { usePendingInvites } from '@/friends/hooks/usePendingInvites'
 
 // Simple hash-based hue — same function as ProfilePage, kept local to avoid
@@ -84,6 +86,16 @@ export function SpacesPage() {
 
   // Subscribe to the current user's spaces via the custom hook.
   const { activeSpaces, archivedSpaces, isLoading, error } = useSpaces(userId)
+
+  // Notifications banner, moment (e2): first launch of the INSTALLED app on
+  // iOS, when the user already shares a space. In a Safari tab they could not
+  // enable push at all, so this is their first real chance (NOTIFICATIONS_SPEC §9.4).
+  // useEffect re-runs when the list loads; the banner store itself guarantees
+  // the banner appears at most once per device.
+  const sharesASpace = activeSpaces.some((s) => s.memberUids.length > 1)
+  useEffect(() => {
+    if (sharesASpace && isIos() && isStandalone()) requestPushPrompt('e2')
+  }, [sharesASpace])
 
   const handleOpenCreateSpace = () => {
     navigate('/spaces/new')

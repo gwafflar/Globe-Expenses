@@ -8,7 +8,7 @@
 // between the two steps.  See ImportXlsxDialog.tsx.
 
 import * as XLSX from 'xlsx'
-import { collection, doc, writeBatch, serverTimestamp } from 'firebase/firestore'
+import { collection, doc, setDoc, writeBatch, serverTimestamp } from 'firebase/firestore'
 import { db } from '@/services/firebase'
 import {
   buildColumnMap,
@@ -427,6 +427,43 @@ export function resolveCustomForSpace(
 }
 
 // ---------------------------------------------------------------------------
+// Import batch marker — one push per import, not one per row
+// (docs/NOTIFICATIONS_SPEC.md §7)
+// ---------------------------------------------------------------------------
+//
+// Every transaction written by one import run carries the same `importBatchId`.
+// The Cloud Function that watches transactions sees that field and writes the
+// activity-feed entry WITHOUT sending a push. Once every row is committed, the
+// importer writes one small "this import is finished" document; a second Cloud
+// Function reacts to it and sends a single summary push per involved member
+// ("Alice imported 120 transactions, 35 involve you").
+
+/** A fresh id for one import run. Generated client-side, no network needed. */
+function newImportBatchId(spaceId: string): string {
+  return doc(collection(db, 'travels', spaceId, 'importBatches')).id
+}
+
+/**
+ * Writes the marker. Must be called AFTER the last batch of rows committed:
+ * the server counts the rows when it sees the marker.
+ *
+ * Fire-and-forget: Firestore sends queued writes in order, so even offline the
+ * marker reaches the server after its rows. A failure here only costs the
+ * summary notification, never the import itself.
+ */
+function writeImportBatchMarker(spaceId: string, importBatchId: string, uid: string, rowCount: number): void {
+  if (rowCount === 0) return
+  setDoc(doc(db, 'travels', spaceId, 'importBatches', importBatchId), {
+    // The security rules require createdBy to be the signed-in user.
+    createdBy: uid,
+    rowCount,
+    createdAt: serverTimestamp(),
+  }).catch((err: unknown) => {
+    console.error('[sheetImport] import batch marker failed:', err)
+  })
+}
+
+// ---------------------------------------------------------------------------
 // Foreign-path writes
 // ---------------------------------------------------------------------------
 
@@ -447,6 +484,8 @@ export async function importForeignRows(
   const BATCH_SIZE = 500
   const txCollection = collection(db, 'travels', spaceId, 'transactions')
   const payloads: Array<{ ref: ReturnType<typeof doc>; data: Record<string, unknown> }> = []
+  // Stamped on every row of this run — see "Import batch marker" above.
+  const importBatchId = newImportBatchId(spaceId)
 
   for (const row of rows) {
     const exchangeRate    = row.exchangeRate ?? getExchangeRate(row.currency, mainCurrency)
@@ -465,6 +504,7 @@ export async function importForeignRows(
       createdAt:      serverTimestamp(),
       lastModifiedBy: currentUserUid,
       lastModifiedAt: serverTimestamp(),
+      importBatchId,
       // ⚠️ `!== undefined`, never truthiness: '' and 0 are valid stored values.
       ...(row.category      !== undefined && { category:      row.category }),
       ...(row.paymentMethod !== undefined && { paymentMethod: row.paymentMethod }),
@@ -484,6 +524,9 @@ export async function importForeignRows(
     await batch.commit()
     onProgress?.(Math.min(i + BATCH_SIZE, payloads.length), payloads.length)
   }
+
+  // After the LAST batch: triggers the single summary notification.
+  writeImportBatchMarker(spaceId, importBatchId, currentUserUid, payloads.length)
 
   return { imported: payloads.length, updated: 0, skipped: 0, errors: [] }
 }
@@ -533,6 +576,9 @@ export async function importParsedRows(
   const BATCH_SIZE = 500
   const payloads: Array<{ ref: ReturnType<typeof doc>; data: Record<string, unknown> }> = []
   const txCollection = collection(db, 'travels', spaceId, 'transactions')
+  // Stamped on every row of this run — created AND updated-in-place rows — so
+  // none of them pushes on its own. See "Import batch marker" above.
+  const importBatchId = newImportBatchId(spaceId)
 
   for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
     const row = rows[rowIndex]
@@ -608,6 +654,7 @@ export async function importParsedRows(
       createdBy:      { type: 'user', uid: currentUserUid },
       lastModifiedBy: currentUserUid,
       lastModifiedAt: serverTimestamp(),
+      importBatchId,
       ...(row.category      !== undefined && { category:      row.category }),
       ...(row.paymentMethod !== undefined && { paymentMethod: row.paymentMethod }),
       ...(row.country       !== undefined && { country:       row.country }),
@@ -643,6 +690,9 @@ export async function importParsedRows(
     await batch.commit()
     onProgress?.(Math.min(i + BATCH_SIZE, payloads.length), payloads.length)
   }
+
+  // After the LAST batch: triggers the single summary notification.
+  writeImportBatchMarker(spaceId, importBatchId, currentUserUid, payloads.length)
 
   return { imported, updated, skipped, errors }
 }

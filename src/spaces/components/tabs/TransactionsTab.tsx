@@ -29,6 +29,9 @@ import { getSpaceConfig, enabledCustomFields, resolveOptionLabel } from '@/space
 // against real data (docs/MANUAL_TEST_PLAN.md, T1-T9). Until those pass, the
 // buttons render greyed out and explain themselves instead of shipping a
 // feature that can silently produce a wrong file.
+//
+// Before re-enabling once push notifications exist: an import must send at
+// most one push per recipient, not one per row (Specification §3.11).
 
 const SHEETS_FEATURE_ENABLED = false
 
@@ -666,7 +669,8 @@ function DayGroupSection({
       />
       <div className="mt-1 space-y-1">
         {group.transactions.map((tx) => (
-          <Card key={tx.txId} className="overflow-hidden p-0">
+          // id: lets a notification deep link scroll to this card (see focusTxId)
+          <Card key={tx.txId} id={`tx-${tx.txId}`} className="overflow-hidden p-0">
             <TransactionRow
               transaction={tx}
               members={members}
@@ -773,6 +777,9 @@ interface TransactionsTabProps {
   /** A filter selection pushed in from outside the tab — the dashboard
    *  drill-down (Phase 7a §5). Applying it replaces any existing filters. */
   filterRequest?: FilterRequest
+  /** A transaction to expand and scroll to — the page was opened from a
+   *  tapped notification (docs/NOTIFICATIONS_SPEC.md §9.5). */
+  focusTxId?: string | null
 }
 
 export function TransactionsTab({
@@ -787,6 +794,7 @@ export function TransactionsTab({
   onEditTransaction,
   onDeleteTransaction,
   filterRequest,
+  focusTxId,
 }: TransactionsTabProps) {
   // Derive the current user's travelMemberId — used for "your share" and "(you)" labels
   const currentUserTravelMemberId = useMemo(
@@ -806,6 +814,19 @@ export function TransactionsTab({
   function handleToggle(txId: string) {
     setExpandedTxId((prev) => (prev === txId ? null : txId))
   }
+
+  // Opened from a tapped notification: expand that transaction and bring it
+  // into view. The effect runs when focusTxId changes. The scroll waits one
+  // animation frame so the expanded card exists in the page before we look
+  // for it; the cleanup cancels a scroll that is no longer wanted.
+  useEffect(() => {
+    if (!focusTxId) return
+    setExpandedTxId(focusTxId)
+    const frame = requestAnimationFrame(() => {
+      document.getElementById(`tx-${focusTxId}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [focusTxId])
 
   // Normalize legacy splits (pre-Session 009 docs stored split.uid instead of split.travelMemberId).
   // Same approach as DashboardTab — returns same reference when nothing needs remapping.

@@ -2787,3 +2787,113 @@ Verified after the change: `tsc -b` clean, 613/613, `build` clean, and `eslint` 
 - **The manual test plan itself** — nothing in it has been run.
 - **Country canonicalisation** (Session 025) — still the highest-value open bug, and now the main unverified thing shipping live.
 - `docs/Devprofile.md` is an untracked stray duplicate of `docs/Developer profile.md` (both 111 lines). Left alone; delete when confirmed redundant.
+
+---
+
+## 📝 Working Session 028 — 3 October 2026
+
+**Type**: Feature design — push notifications & activity feed (no implementation)
+**Tools used**: Claude Code (claude-code CLI)
+
+> The code-review fix commits of 5–26 September (`fcff812` … `9d17798`, branch `fix/space-refactor-code-review`) have no session entry of their own.
+
+### Context
+
+Request: a notifications feature, understood fully before any code. Confirmed it works on both Android and iOS from one PWA codebase via FCM, with iOS restricted to 16.4+ and Home Screen installs. Decided to design push on top of the Activity Feed's event model even if push ships first, so the feed can follow without rework.
+
+### Output: `docs/NOTIFICATIONS_SPEC.md` (new, authoritative)
+
+Key decisions, all agreed during the session:
+
+- **One event model, two channels.** A Cloud Function writes `users/{uid}/activity/{eventId}` for every event and recipient from day one (snapshot names/amounts, the recipient's own share), and pushes only a subset.
+- **Event catalogue** (§4): push only what changes my money or needs my action. Material edits push (amount, currency, `exchangeRate`, payer, split, type); cosmetic edits are feed-only. Member joined/left are feed-only, except "your invite was accepted", which pushes to the inviter.
+- **Push limiter, no deferral** (§6): per (recipient, space) counter, N = 2 normal pushes, then one "more changes" push, then silent until 60 s of quiet. Lazy reset, plus reset when the recipient opens the space. Updated inside a Firestore transaction (lost-update race otherwise). Delayed exact summaries (Cloud Tasks) pushed to v2.
+- **Imports** (§7): one push per recipient via a `travels/{spaceId}/importBatches/{id}` document written after the last batch. New `importBatchId` field on `Transaction`. The no-push rule applies to the create trigger only.
+- **Space deletion** (§5 rule 5): `onTravelDeleted` cascade moves server-side and is pulled forward from v2, because the client-side cascade would emit one `tx_deleted` event per transaction.
+- **Offline bursts**: no special handling in v1, since the limiter caps them at 3 pushes. Detection via a client timestamp is a v2 item (`serverTimestamp()` can't reveal offline queuing).
+- **Preferences & UI** (§9): device toggle in Profile (master switch), per-space toggle in Parameters stored on the user (`mutedSpaceIds`), per-field preferences v2. The OS prompt only opens after a user tap. Six banner moments with a no-nagging rule (each once, stop after two "Not now"), state per device in `localStorage`.
+- **Tokens** (§2.1): deleted on sign-out. OS permission survives sign-out, so re-login re-enables silently. An explicit Profile opt-out is remembered per account in `localStorage`.
+- **Seen/read** (§3.3): badge watermark + per-entry `openedAt` + "Mark all as read" watermark.
+
+### Verified externally
+
+- Web Notification `tag` replacement **does not work on iOS Safari** (WebKit bug 258922, still open July 2026), and `silent` / `renotify` / `vibrate` are unsupported there. Every iOS push alerts, so burst control must be server-side. This killed a device-side coalescing design.
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `docs/NOTIFICATIONS_SPEC.md` | **New**: full design |
+| `docs/GlobeExpenses_Specification.md` | §3.11 points to the new spec; import rule added |
+| `docs/GlobeExpenses_Architecture.md` | §5.6 rewritten, §5.7 planned cascade, roadmap v3 row, open-questions table updated |
+| `src/spaces/components/tabs/TransactionsTab.tsx` | Comment above `SHEETS_FEATURE_ENABLED`: an import must send at most one push per recipient |
+
+Not committed in-session; the user commits on a new branch created from `fix/space-refactor-code-review` (not `main`, which lacks the import flag).
+
+### Not done / still open
+
+- **Retention** of activity documents: kept forever for now, revisit with real volumes.
+- **To confirm at implementation**: `...WithAuthContext` trigger variants for the actor; reuse of the `watchedTxId` pattern for notification taps; iOS `getNotifications()` + `close()` on a real device; the existing owner-write rule on `users/{uid}`.
+- **Prerequisite**: Firebase Blaze plan for Cloud Functions.
+
+### Implementation kick-off (end of session)
+
+Environment checked: no `functions/` yet, `firebase.json` has Firestore + Hosting only, Firestore database in **`europe-west4`** (functions must use the same region), Firebase CLI 15.12, Node 24, **no Java** (needed for the Firestore emulator), vite-plugin-pwa in `generateSW` mode with no push handling.
+
+**Spec correction (agreed):** `users/{uid}` is readable by every signed-in user, so `mutedSpaceIds`, `activityLastSeenAt` and `activityReadAllAt` move to a private owner-only doc `users/{uid}/private/notifications` (spec §3.5).
+
+**Service worker option 3: confirmed (5 Oct), spec §2.3.** Keep the generated Workbox SW and add a hand-written `push-sw.js` via Workbox `importScripts` (handles `push` + `notificationclick`). FCM `getToken()` gets the existing SW registration. Rejected: a second `firebase-messaging-sw.js` (two SWs, uncertain on iOS), and full `injectManifest` (takes over working caching).
+
+**Implementation plan:**
+
+| # | Step |
+|---|---|
+| 1 | Infrastructure: `functions/` scaffold (TypeScript, `europe-west4`), emulators, rules for new paths |
+| 2 | Device registration + first real push on Android **and** iPhone (de-risks the platform; also test iOS `close()`) |
+| 3 | Activity writer for transactions (pure, unit-tested recipient/material/share logic) |
+| 4 | Push sender: limiter, mute check, invalid-token cleanup |
+| 5 | Space & social events, incl. `onTravelDeleted` + simplified `deleteSpace()` |
+| 6 | Imports (`importBatchId`, `importBatches`) |
+| 7 | UI: space toggle, permission banners, tap deep-link, reset-on-open |
+
+**Decision due at step 3:** functions are a separate package and can't import `mapSpaceDoc()`, which conflicts with the one-mapping-per-collection convention.
+
+### Next steps
+
+- **User actions before step 1:** upgrade to the Blaze plan (and set a budget alert), install Java (`sudo apt install -y openjdk-21-jre-headless`).
+- Then start step 1: explain the `functions/` scaffold before generating it.
+
+---
+
+## 🚧 Working Session 029 — 5 October 2026 — Notifications implementation
+
+Plan: Session 028 table. Design: `docs/NOTIFICATIONS_SPEC.md`. This entry is extended as steps land.
+
+### Step 1 — infrastructure ✅ (deploy pending)
+
+- `functions/`: standalone pnpm package (not a workspace), Node 24, `europe-west4`, `maxInstances: 10`. Temporary `smokeTransactionWritten` trigger logs `authType`/`authId`; **remove in step 3**.
+- Rules for the four notification paths + `rules-tests/` (`pnpm test:rules`, 22 tests). Root `pnpm test`/eslint isolated from `functions/`; commands in `CLAUDE.md`.
+- Findings (in spec §3.2/§3.4): the emulator gives no real actor (`authType: 'unknown'`), so event logic takes the actor as input; `pushThrottle` reset must be a merge write.
+- Deploy with pnpm needs `@google-cloud/functions-framework` as an explicit dependency: Cloud Build adds it automatically for npm projects only. Image cleanup policy set to 1 day.
+- Verified: `tsc -b`, `pnpm test` 625/625, `build`, functions typecheck, rules 22/22, emulator trigger fired for create/update/delete.
+- Functions + rules deployed by the user (the first functions attempt left an HTTPS placeholder that had to be deleted). Real actor confirmed: `authType: 'api_key'` + `authId` = Firebase Auth uid on create/update/delete (spec §3.2).
+
+### Steps 2–7 — built 14 November 2026, device tests pending
+
+Details and decisions: `docs/notification-implementation-journal.md`. Manual tests: `docs/NOTIFICATIONS_TEST_PLAN.md`.
+
+- Server: five triggers in `functions/src/index.ts` over pure event logic (`events/`), limiter + text + FCM send (`push/`). Smoke trigger removed. `onTravelDeleted` cascade replaces the client-side one; `deleteSpace()` now deletes only the space document.
+- Client: `src/notifications/` (token lifecycle, live push state, banner store, Profile and space toggles, `?tx=` deep link, reset-on-open) and `public/push-sw.js` via Workbox `importScripts`. Importer stamps `importBatchId` and writes the `importBatches` marker.
+- Verified: `tsc -b`, `pnpm test` 644/644, `build`, functions 79/79, rules 28/28, 29-check end-to-end run on the emulators.
+- Deployed: rules + functions to production; web app to preview channel `notifications` only. **Production hosting unchanged.**
+- **Next:** user runs test plan T1–T5 on Android and iPhone. Then production hosting deploy and PR. Open: `mergeMembers()` reads as a burst of material edits.
+
+---
+
+## ✨ Working Session 030 — 14 November 2026 — Notifications released
+
+- **Device tests:** every test in `docs/NOTIFICATIONS_TEST_PLAN.md` passed (Android + iPhone). The first round's missing transaction pushes were the "me only" default split, as inferred.
+- **Docs:** feature marked live in the notifications spec, journal and test plan; Specification §3.11 rewritten, decisions #93–98 added (#66 superseded); Architecture roadmap v3 shipped, stale "production hosting unchanged" notes removed.
+- **Verified:** `tsc -b`, `pnpm test` 644/644, `build`, functions typecheck + 79/79, rules 28/28.
+- **Released:** one ✨ feat commit, PR to `main` (also carries the Space refactor branches, PRs 1–2), production deploy of rules, functions and hosting.
+- **Open:** Activity Feed UI; `mergeMembers()` burst; Windows Firefox delivery unexplained (not a target).

@@ -20,11 +20,15 @@ At the start of every session, before doing anything else, read all files in `do
 - No behaviour may branch on `presetOrigin`; behaviour reads `config` via `getSpaceConfig()`
 - When stripping fields before a Firestore write, test `v !== undefined` explicitly. Never filter by truthiness — `false`, `0` and `''` are all valid stored values and dropping them produces partial documents that resolvers silently paper over.
 - Firestore documents are mapped to domain objects in exactly one place per collection (`mapSpaceDoc()` for `travels/`). Never hand-roll a second mapping — optional fields make an omission type-check, and the value is silently `undefined` rather than a compile error.
+  - **One deliberate exception:** `functions/src/mapping.ts`. Cloud Functions cannot import from `src/`, so they keep a minimal second mapping of spaces, members, splits and invites (only the fields notifications read). `functions/src/mapping.test.ts` pins the legacy cases; when the stored shape of a member or split changes, update both sides.
+- Notification event logic in `functions/src/events/` is pure (no Firestore, no clock). Triggers in `functions/src/index.ts` only read, call it, and publish. Keep new rules there, with a unit test.
+- Push permission is requested only from a tap handler, and `enablePush()` must be the first call in it (iOS drops the prompt otherwise). Never call it from an effect.
 
 ## Verification
 
 - Typecheck with **`pnpm tsc -b`**, never `pnpm tsc --noEmit`. The root `tsconfig.json` has `"files": []` and only project references, so `--noEmit` checks nothing and exits 0 — it will pass on code that does not compile. `pnpm build` runs `tsc -b` and is also a valid check.
 - Full verification before a commit: `pnpm tsc -b`, `pnpm test`, `pnpm build`.
+- When `functions/` or `firestore.rules` changed, also: `pnpm --dir functions typecheck`, `pnpm test:functions`, `pnpm test:rules` (starts the Firestore emulator; needs Java). `functions/` is a standalone package (own `package.json`, lockfile, tsconfig) — it is not covered by the root `tsc -b` or `pnpm test`, and it cannot import from `src/`. Inside `functions/`, `tsc --noEmit` *is* valid (no project references there).
 
 ## Development style
 

@@ -6,6 +6,8 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { useAuthStore } from '@/auth/store/useAuthStore'
 import { BetaBanner } from '@/feedback/components/BetaBanner'
+import { NotificationClickHandler } from '@/notifications/components/NotificationClickHandler'
+import { PushPromptBanner } from '@/notifications/components/PushPromptBanner'
 
 export function ProtectedRoute() {
   const { currentUser, isAuthReady } = useAuthStore()
@@ -29,7 +31,9 @@ export function ProtectedRoute() {
   // We encode the current path so the login page can navigate back here after sign-in.
   // e.g. /invite/abc123 → /login?redirect=%2Finvite%2Fabc123
   if (!currentUser) {
-    const redirect = encodeURIComponent(location.pathname)
+    // location.search is kept too: a notification can deep-link to
+    // /spaces/abc?tx=123, and the ?tx= part must survive the sign-in detour.
+    const redirect = encodeURIComponent(location.pathname + location.search)
     return <Navigate to={`/welcome?redirect=${redirect}`} replace />
   }
 
@@ -38,9 +42,16 @@ export function ProtectedRoute() {
   // route element nested under this ProtectedRoute in the <Routes> tree.
   // This lets us wrap multiple protected pages with a single guard.
   // BetaBanner sits above all protected page content for maximum visibility.
+  // Push notifications (docs/NOTIFICATIONS_SPEC.md):
+  //  - NotificationClickHandler renders nothing; it navigates when a
+  //    notification is tapped while the app is open.
+  //  - PushPromptBanner is the one "Get notified?" banner, shown above any
+  //    page when some part of the app asks for it.
   return (
     <>
+      <NotificationClickHandler />
       <BetaBanner />
+      <PushPromptBanner />
       <Outlet />
     </>
   )
