@@ -6,7 +6,5 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
-    // No tests until step 3 (activity writer); don't fail the run meanwhile.
-    passWithNoTests: true,
   },
 })

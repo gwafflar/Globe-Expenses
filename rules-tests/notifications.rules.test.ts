@@ -21,6 +21,8 @@ import {
 } from '@firebase/rules-unit-testing'
 import {
   Timestamp,
+  arrayRemove,
+  arrayUnion,
   collection,
   deleteDoc,
   doc,
@@ -225,5 +227,63 @@ describe('private/notifications', () => {
     await assertSucceeds(getDoc(doc(asUser('bob'), 'users/alice')))
     await assertFails(getDoc(doc(asUser('bob'), path)))
     await assertFails(setDoc(doc(asUser('bob'), path), { mutedSpaceIds: [] }))
+  })
+})
+
+describe('private/notifications — space mute toggle', () => {
+  const path = 'users/alice/private/notifications'
+
+  it('muting with a merge + arrayUnion works on a missing AND an existing document', async () => {
+    // This is exactly what setSpaceMuted() does (src/notifications/services/notificationPrefs.ts).
+    const db = asUser('alice')
+    await assertSucceeds(setDoc(doc(db, path), { mutedSpaceIds: arrayUnion('space1') }, { merge: true }))
+    await assertSucceeds(setDoc(doc(db, path), { mutedSpaceIds: arrayUnion('space2') }, { merge: true }))
+    await assertSucceeds(setDoc(doc(db, path), { mutedSpaceIds: arrayRemove('space1') }, { merge: true }))
+  })
+})
+
+// ---------------------------------------------------------------------------
+// travels/{spaceId}/importBatches/{importBatchId}  (spec §7)
+// ---------------------------------------------------------------------------
+describe('importBatches', () => {
+  const path = 'travels/space1/importBatches/batch1'
+
+  beforeEach(async () => {
+    await seed('travels/space1', { name: 'Japan', memberUids: ['alice', 'bob'] })
+  })
+
+  it('a member can create the marker naming themselves', async () => {
+    await assertSucceeds(
+      setDoc(doc(asUser('alice'), path), { createdBy: 'alice', rowCount: 120, createdAt: serverTimestamp() }),
+    )
+  })
+
+  it('a member cannot name someone else as the importer', async () => {
+    // The Cloud Function trusts createdBy as the actor (never notified).
+    await assertFails(
+      setDoc(doc(asUser('alice'), path), { createdBy: 'bob', rowCount: 120, createdAt: serverTimestamp() }),
+    )
+  })
+
+  it('unknown fields are refused', async () => {
+    await assertFails(
+      setDoc(doc(asUser('alice'), path), { createdBy: 'alice', rowCount: 1, createdAt: serverTimestamp(), extra: 1 }),
+    )
+  })
+
+  it('a non-member cannot create one', async () => {
+    await assertFails(
+      setDoc(doc(asUser('mallory'), path), { createdBy: 'mallory', rowCount: 1, createdAt: serverTimestamp() }),
+    )
+    await assertFails(
+      setDoc(doc(asGuest(), path), { createdBy: 'alice', rowCount: 1, createdAt: serverTimestamp() }),
+    )
+  })
+
+  it('nobody can read, update or delete it', async () => {
+    await seed(path, { createdBy: 'alice', rowCount: 1, createdAt: Timestamp.now() })
+    await assertFails(getDoc(doc(asUser('alice'), path)))
+    await assertFails(updateDoc(doc(asUser('alice'), path), { rowCount: 2 }))
+    await assertFails(deleteDoc(doc(asUser('alice'), path)))
   })
 })

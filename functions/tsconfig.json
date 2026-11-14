@@ -23,6 +23,6 @@
   },
   "include": ["src"],
   // Tests run through vitest directly from .ts; they must not end up in lib/
-  // (lib/ is what gets deployed).
-  "exclude": ["src/**/*.test.ts"]
+  // (lib/ is what gets deployed). src/testing holds fixtures used only by tests.
+  "exclude": ["src/**/*.test.ts", "src/testing"]
 }
