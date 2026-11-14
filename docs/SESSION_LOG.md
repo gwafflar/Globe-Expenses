@@ -2221,3 +2221,569 @@ Discussed and deferred to a future session:
 - Tier 1 item 4 (locale-derived default currency for new users) — explicitly declined by user, `UserProfile.mainCurrency` stays hardcoded to `'EUR'` at first sign-in.
 - Tier 2 items not yet implemented (see above) — this session was analysis + critical-fix only.
 - Changes not yet committed as of this log entry.
+
+## ♻️ Working Session 022.1 — 27 July 2026
+
+**Type**: Refactor — Space refactor Phase 1 (Travel → Space rename)
+**Tools used**: Claude Code (claude-code CLI)
+
+### Context
+
+`docs/SPACE_REFACTOR_SPEC.md` was added, generalising the app's container concept from "Travel" (trip-specific: countries, cities, cash wallets, multi-currency always on) to "Space" (also usable for flatshares, couple budgets, personal tracking) via a future config/preset system. This session executed **Phase 1 only**: a pure rename across the codebase, docs, and routes — no behaviour change, no data-model change, no config/preset system yet (that's Phase 2+, see decision log entries #83–92 in `GlobeExpenses_Specification.md`).
+
+### The one rule this session was built around
+
+Firestore collection paths and stored field keys are frozen as legacy even though every TypeScript type, function, folder, and UI string now says "Space". A blind find-and-replace across the repo would have silently corrupted production data (e.g. `doc(db, 'travels', id)` → `doc(db, 'spaces', id)` compiles fine but points at a nonexistent collection). Every file was therefore hand-reviewed (or scripted with protected placeholders around frozen substrings, then diff-reviewed) rather than mechanically substituted in bulk.
+
+**Frozen (unchanged) — confirmed and left exactly as-is:**
+- Firestore collection paths `travels/{travelId}` and `travels/{travelId}/transactions/{txId}`
+- Firestore field keys: `travelMemberId` (on `SpaceMember` and `Split`), `memberUids`, `archivedByUids`
+- Stored string values: the invite `type` discriminator `'travel_member'`, and `Invite.travelId` / `Invite.travelName` (fields on the `invites/{id}` documents)
+- Existing `localStorage` keys (untouched, out of scope)
+
+**Special case resolved**: `Travel.travelId` was checked against `createTravel()`/`useTravels` and confirmed **derived-only** — never written into the document body (always `snapshot.id`). Per the spec's decision rule, this made it safe to rename the TypeScript property freely: `Space.spaceId`.
+
+**Renamed everywhere else**: types (`Travel`→`Space`, `TravelMember`→`SpaceMember`, `TravelSettings`→`SpaceSettings`), functions (`createTravel`→`createSpace`, `updateTravelMeta`→`updateSpaceMeta`, `leaveTravel`→`leaveSpace`, `deleteTravel`→`deleteSpace`, `archiveTravel`/`unarchiveTravel`→`archiveSpace`/`unarchiveSpace`, `claimTravelMember`→`claimSpaceMember`, `renameTravelMember`→`renameSpaceMember`, `unclaimTravelMember`→`unclaimSpaceMember`, `getTravelMainCurrency`→`getSpaceMainCurrency`, `updateTravelList`/`updateTravelCurrencies`/`updateTravelDefaultRate`→`updateSpace*`, `sendTravelInvite`→`sendSpaceInvite`, `acceptTravelInvite`→`acceptSpaceInvite`, `exportTravelToXlsx`→`exportSpaceToXlsx`, `TravelInviteResult`→`SpaceInviteResult` with its `travelId` field renamed to `spaceId` since it's a plain client-side return type, not a stored key), props/variables (`travel`→`space`, `travelId`→`spaceId`, `travelSettings`/`travelCategories`/`travelPaymentMethods`/`travelCurrencies`/`travelCountries`/`travelCities`→`space*`, `onTravelChange`→`onSpaceChange`), routes (`/travels`→`/spaces`, `/travels/:travelId`→`/spaces/:spaceId`), and all user-facing English UI strings.
+
+**Exception preserved per spec §2.4**: identifiers built on the frozen `travelMemberId` key kept their names unchanged — `currentUserTravelMemberId`, `myTravelMemberId`, `selectedTravelMemberId`, `slotToTravelMemberId`, and by the same logic `currentTravelMemberId` / `focusTravelMemberId` (local variables in `DashboardTab.tsx` / `ReconciliationDialog.tsx`).
+
+### Files moved (`git mv`)
+
+`src/travels/` → `src/spaces/`, with `travelService.ts`→`spaceService.ts`, `useTravels.ts`→`useSpaces.ts`, `TravelDetailPage.tsx`→`SpaceDetailPage.tsx`, `TravelsPage.tsx`→`SpacesPage.tsx`, `TravelTabs.tsx`→`SpaceTabs.tsx`, `CreateTravelModal.tsx`→`CreateSpaceModal.tsx`. Tab components, `CollapsibleCard.tsx`, `dashboardHelpers.ts`, and all test files kept their filenames per the prompt's file table.
+
+### Bugs caught during self-review (not shipped)
+
+Working file-by-file with diff review after each script pass caught three real mistakes before they landed:
+1. A scripted word-boundary rename briefly turned `doc(db, 'travels', id)` into `doc(db, 'spaces', id)` in `SpaceDetailPage.tsx` (the bare, unquoted collection literal isn't protected by `\btravels\b` regex boundaries the way `travelMemberId` is) — caught by diffing the file before moving on, fixed immediately.
+2. `space.travelId` (a leftover from before the `Space.spaceId` rename propagated) in two places in `ImportXlsxDialog.tsx` and one in `DashboardTab.tsx`'s `ReconciliationDialog` call — caught by TypeScript-shaped review of each diff, fixed to `space.spaceId`.
+3. An import path collapsed to `@/spaces/services/travelService` (the old filename) in `ParametersTab.tsx` because the generic word regex ran before the explicit full-path string replace — fixed, and the ordering (exact import-path replacements before generic word regex) was corrected for every subsequent file.
+
+### Residual `ravel` grep (post-refactor, expected to remain)
+
+`grep -rn "ravel" src/ --include=*.ts --include=*.tsx` returns ~495 hits, all confirmed legitimate:
+- ~337 — the frozen `travelMemberId` field/property name (types, comments, Split literals, test fixtures)
+- ~84 — the frozen-by-convention compound identifiers (`currentUserTravelMemberId`, `myTravelMemberId`, `selectedTravelMemberId`, `slotToTravelMemberId`, `currentTravelMemberId`, `focusTravelMemberId`)
+- ~29 — the bare Firestore collection literal `'travels'` inside `doc()`/`collection()` calls
+- ~30 — the frozen invite `'travel_member'` discriminator and `Invite.travelId`/`Invite.travelName` fields
+- 1 explanatory comment in `App.tsx`'s legacy-redirect routes (`/travels` — the old path being redirected *from*, correctly still spelled `travels`)
+
+No stray `Travel`/`travel` identifiers, UI strings, or import paths remain outside these categories.
+
+### Docs updated
+
+- `GlobeExpenses_Architecture.md` — §3.1 module list, §4.1 collection table (added an explicit frozen-legacy note), §4.2 data model (`Travel`→`Space`, `TravelMember`→`SpaceMember`), §5.4/5.7 flow names, §6 security rules commentary, §7 roadmap.
+- `GlobeExpenses_Specification.md` — §3.2/§3.4/§3.5.5 section titles, function-name references, decision log entries #79–92 appended (renamed-container decisions + the Phase 2+ config/preset decisions from the spec, marked accordingly).
+- `CLAUDE.md` — "Per-travel lists" → "Per-space lists"; added two new Key Conventions bullets about the frozen Firestore keys and the (future) `getSpaceConfig()` / `presetOrigin` rule.
+
+### Verification
+
+- Full residual grep reviewed line-by-line (see above) — clean.
+- `pnpm tsc --noEmit`, `pnpm test`, `pnpm build`, and the manual smoke-test checklist from the prompt were run after this log entry — see next entry or commit message for results if not captured here.
+
+### Not done / still open
+
+- Phase 2 (config foundation: `SpaceConfig`, `getSpaceConfig()`, presets, per-field tiers) — next phase, not started.
+- Changes not yet committed as of this log entry (pending user review).
+
+## 🐛 Working Session 022.2 — 27 July 2026
+
+**Type**: Bug fix + tests (Space refactor Phase 4.1 and 4.2)
+**Tools used**: Claude Code (claude-code CLI)
+
+### Context
+
+Following the Space refactor's Phase 4 (preset-based creation flow, not logged in this file — see `docs/SPACE_REFACTOR_SPEC.md` for phase status), manual verification surfaced three bugs in quick succession, fixed across two prompts.
+
+### Bug 1 — a space's config did not match the preset chosen at creation (04.1)
+
+Opening Parameters on a freshly created `solo`/`custom` space showed sections the preset should have hidden (Countries, Cities, Exchange rates, Currencies). `travel` looked correct only because its toggles are all `true`, which happens to be `getSpaceConfig()`'s fallback value.
+
+Root cause: `SpaceDetailPage.tsx`'s `fetchSpace()` rebuilt the `Space` object field-by-field from the Firestore doc and never mapped `config`/`presetOrigin`. It type-checked fine since both are optional on `Space`. `space.config` was therefore always `undefined` for every opened space, and the resolver silently fell back to full travel-mode defaults regardless of what preset was actually written. The write path and the `getSpaceConfig()` consumer path were both already correct — only this one reconstruction was missing the fields. Fixed by adding `config`/`presetOrigin`/`startDate`/`endDate` to that mapping (and to `useSpaces.ts`'s snapshot mapping for the two new date fields, for consistency — it already mapped `config` correctly).
+
+### Bug 2 — space creation hung offline (04.1)
+
+`createSpace()` was `async`/awaited since its very first commit (confirmed via `git log -p`) — a long-standing gap, not a Phase 4 regression. Awaiting a Firestore write hangs forever offline because the write promise only resolves on server acknowledgment. Converted `createSpace()` and `createShareableInvite()` to the fire-and-forget pattern (`doc()` generates the id client-side; `setDoc()` is not awaited) — same pattern as `createTransaction()`.
+
+### Bug 3 — permission-denied race on newly created spaces, online (04.2)
+
+Bug 2's fix introduced a new failure mode: navigating to a freshly created space now happens before the parent `travels/{id}` document has synced to the server. The `transactions` subcollection security rule does a `get()` on that parent to check `memberUids`; against a not-yet-existent parent, that `get()` denies the read, and `useTransactions()` surfaced a permission error even though the space and its data were fine (confirmed by reloading). Fixed with a bounded retry in `useTransactions()`: `permission-denied` gets up to 3 retries with ~500ms/1s/2s backoff before surfacing an error; every other error code still surfaces immediately, with no retry. Audited every other `onSnapshot` listener in the app (`useSpaces`, `usePendingInvites`/`subscribeToIncomingRequests`) — neither is exposed to this race, since neither queries a subcollection gated by a `get()` on a possibly-just-created parent document.
+
+### Convention added
+
+`CLAUDE.md`: stripping fields before a Firestore write must test `v !== undefined` explicitly, never filter by truthiness.
+
+### Tests added
+
+- `spaceService.test.ts` — `createSpace` returns a string synchronously (not a `Promise`); solo-preset config toggles are written with explicit `false` (asserted with `toBe(false)`, not truthiness); a custom field with `enabled: false` survives serialization; the write is not awaited.
+- `useSpaces.test.ts` (new) — snapshot mapping produces a `Space.config` deep-equal to the stored document; legacy documents with no `config` map to `undefined`.
+- `useTransactions.test.ts` (new) — permission-denied retries then succeeds with no error surfaced; a different error code surfaces immediately with no retry; permission-denied on every attempt surfaces an error after the 3-attempt budget; unmounting mid-backoff clears the timer, detaches the listener, and updates no state; `spaceId` change resets the attempt counter. Uses fake timers.
+- `SpaceCreatePage.test.tsx` — mocks updated from `mockResolvedValue` to `mockReturnValue` to match the new synchronous contract (the old mock shape would have hidden a Promise-vs-string regression); added a test asserting navigation uses the synchronously-returned id.
+
+Full suite: 230/230 passing. `tsc --noEmit` and `pnpm build` clean.
+
+### Not done / still open
+
+- **Denormalize `memberUids` onto transaction documents** (carry-forward). The real fix for Bug 3 is to stop the `transactions` subcollection rule from doing a per-read `get()` on the parent space document at all — copy `memberUids` onto each transaction at write time and rewrite the rule to check the query constraint directly. This removes the creation race entirely (no parent-existence dependency) and eliminates the per-read `get()` cost already flagged as a scalability concern. It needs a security-rules change plus a backfill of every existing transaction document, so it should be scheduled alongside the `batchUpdateTransactions` work (chunked `writeBatch`, 500 docs/batch) already on the roadmap, rather than done piecemeal. Until then, the bounded retry in `useTransactions()` is the mitigation.
+- Manual browser verification of the online/offline creation flows (§Verification in the 04.2 prompt) was not performed — no Firebase login session available in this environment. Automated coverage (tests above) verifies the logic; a real click-through is still recommended before treating this as fully closed.
+## ♻️ Working Session 023 — 1 August 2026
+
+**Type**: Refactor — Space refactor Phase 6 (config-driven transactions list and filters)
+**Tools used**: Claude Code (claude-code CLI)
+
+### Context
+
+Phase 5 made the transaction *form* config-driven. This session did the same for the *list*: the filter panel, the day headers and the row/detail display stop assuming country/city/category/paymentMethod exist, and enabled custom fields become filterable. See `docs/SPACE_REFACTOR_SPEC.md` §3 (field tiers) and the Phase 6 prompt.
+
+### New pure module — `src/transactions/utils/filterDimensions.ts`
+
+The panel used to hard-code one section per dimension. It now renders generically over a descriptor list:
+
+- `FilterDimension` — `{ key, label, emoji, source, control, options, optionsAreClosed }`. `control` is `'multi'` (core, built-ins, custom select) or `'triState'` (custom boolean: any/yes/no).
+- `filterDimensions(space, config, observed?)` — the **config-gated** dimensions: enabled built-ins (category, country, city, paymentMethod) then enabled custom select/boolean fields in definition order. Custom `text` fields are deliberately absent.
+- `allFilterDimensions(space, config, isSolo, observed?)` — everything the panel renders, i.e. the above plus the **core** dimensions interleaved in the historical display order: `type, category, currency, country, city, paymentMethod, paidBy, beneficiaries, …custom`.
+- `dimensionValues(tx, dim)` / `matchesDimension(tx, dim, selected)` — the single mapping from a transaction onto a dimension. It drives filtering *and* cross-filtered availability, so custom fields get the grey-out behaviour for free.
+- `reconcileFilters(filters, dimensions)` — stale-filter purge (§3). Returns the **same reference** when nothing changed.
+- `searchableCustomFieldIds(config)` — enabled `text` fields, which feed the search box instead of the panel.
+
+### Three descriptor `source` values, not two
+
+The spec's sketch had `source: 'builtIn' | 'custom'`. A third value, `'core'`, was added for `type`, `currency`, `paidBy` and `beneficiaries`. These are not Tier-2 toggleable fields, but they are still *conditional*:
+
+| Dimension | Condition | Rationale |
+|---|---|---|
+| `currency` | `features.multiCurrency` | Same visibility rule as the form's currency pill (SPEC §6.2). This is what removes the currency filter from a solo space. |
+| `paidBy` / `beneficiaries` | `!isSolo` | Pre-existing rule, unchanged. |
+| `type` | always | Deliberately **not** gated on `features.wallets`: existing withdrawals/adjustments stay visible and filterable in a space where wallets were later turned off (SPEC §6.1). |
+
+Without `'core'` these four would have had to be special-cased inside the generic renderer, which is exactly what this phase was meant to eliminate.
+
+### Built-in options stay observation-derived (deliberate divergence from the prompt)
+
+The prompt described built-in `options` as coming from "the space's own list order". That was **not** implemented, because it would have broken legacy parity in two ways: a legacy space with empty per-space lists (which fall back to the user's global profile lists) would offer no filter options at all, and a value stored on transactions but since deleted from the space list would become unfilterable.
+
+Built-in and core options therefore remain derived from the transaction list, exactly as before, with the `UNDEFINED_FILTER` sentinel appended. Custom-field options come from the definition. The difference is made explicit on the descriptor as `optionsAreClosed`, and `reconcileFilters()` only prunes selections on closed dimensions — so a category that momentarily has no transactions never silently clears the user's filter, while a genuinely deleted custom option does.
+
+### Stale filters (§3)
+
+`reconcileFilters()` is applied as a **pure derivation first** (so a filter on a just-disabled field never narrows the current render's results) and the result is then written back to state via the *adjust-state-during-render* pattern rather than a `useEffect`:
+
+```ts
+const effectiveFilters = useMemo(() => reconcileFilters(filters, dimensions), [filters, dimensions])
+if (effectiveFilters !== filters) setFilters(effectiveFilters)
+```
+
+Safe because it is identity-guarded and `reconcileFilters` is idempotent, so it converges after one extra render pass. A `useEffect` here would also have tripped `react-hooks/set-state-in-effect` (the new eslint-plugin-react-hooks v7 rule).
+
+### Display gating (§5)
+
+- `DayGroupHeader` takes `showCountry` / `showCity` (gated **independently**, so a space tracking cities but not countries still gets its city line — the prompt's "date and total only" wording assumes both go together, which the presets do but the toggles don't enforce).
+- `TransactionRow`: the leading emoji is `null` for an expense when `category` is off (the emoji is sourced from a hidden field), and the category pill is gated. Flex `gap` means the row closes up with no leftover space.
+- `TransactionDetail`: each meta-grid cell (Category / Payment / Country / City) and the Notes line are gated on their built-in.
+- Custom field values still do **not** appear in list rows — only in the expanded detail, as built in Phase 5.
+
+### Search (§4)
+
+Enabled custom `text` field values were added to the free-text search. ⚠️ For the record: the search covers **transaction name** + **amount** (exact or prefix, on both `totalAmount` and `totalAmountMain`) + now custom text. It does **not** cover `notes`, and never has — adding it would have been a legacy behaviour change, so it was left alone.
+
+### Tests added
+
+- `src/transactions/utils/__tests__/filterDimensions.test.ts` (34 tests) — legacy space yields today's four built-ins; solo/group presets; custom select + boolean in definition order; text fields absent; disabled fields absent; select options carry **ids not labels**; select matches on option id and *not* on label; boolean *no* matches explicit `false`, an absent key **and** an absent `custom` map; boolean *yes* matches only `true`; reconcile drops a disabled dimension, drops a deleted option while siblings survive, keeps an unobserved built-in selection, survives an option **rename**, and returns the same reference when unchanged.
+- `src/spaces/components/tabs/__tests__/TransactionsTab.test.tsx` (15 tests, new file) — legacy space renders the exact historical chip list and order; solo space offers no country/city/currency and drops the day-header flags; category pill positive control + hidden when disabled; a custom select narrows the list; boolean yes/no incl. pre-field-existence rows; custom text hits the search box but is not a dimension; disabling a field mid-filter clears the chip and widens the results; deleting a filtered option keeps siblings; renaming an option keeps the filter working and shows the new label; empty result shows the no-match state with a working clear action.
+
+Full suite: 308/308 passing (was 259). `tsc --noEmit`, `pnpm build` clean. `pnpm lint` introduces no new problems (the 4 remaining in `TransactionsTab.tsx` are pre-existing: 3 × `react-refresh/only-export-components` on the `currencySymbol`/`formatAmount`/`groupByDay` exports, 1 × `set-state-in-effect` in `PendingBadge`).
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `src/transactions/utils/filterDimensions.ts` | **New** — descriptors, value extraction, reconciliation |
+| `src/transactions/hooks/useTransactionFilters.ts` | Generic over `dimensions`; string-keyed filter state; custom-text search; reconciliation; `availableOptions` now `Record<string, Set<string>>` |
+| `src/transactions/components/FilterPanel.tsx` | Renders generically over descriptors; tri-state control; chips carry `aria-label` |
+| `src/spaces/components/tabs/TransactionsTab.tsx` | `getSpaceConfig()` resolved once; day-header / row / detail gating; new FilterPanel props |
+
+### Not done / still open
+
+- Manual browser verification (prompt §Verification items 2, 9, 10 — legacy click-through, day-header layout with country disabled, 375px with several chips) was **not** performed: no Firebase login session in this environment. Legacy parity is covered by the component tests above, but a real click-through is still recommended before treating Phase 6 as closed.
+- Custom `select` filters offer no "Undefined" option (built-ins do). Not requested; worth deciding before Phase 7 reuses these descriptors for dashboard breakdowns.
+- Out of scope by prompt §7: grouping/sorting by a custom dimension (Phase 7), bulk selection, filter persistence across sessions.
+
+## ✨ Working Session 024 — 6 August 2026
+
+**Type**: Feature — Space refactor Phase 7a (config-driven dashboard) + member scope picker patch
+**Tools used**: Claude Code (claude-code CLI)
+
+### Context
+
+Phase 7a rebuilt the Dashboard tab around a single scoped pipeline, added generic 1D breakdown cards with a card builder, gated every card on `config`, and wired row-tap drill-down into the Transactions tab. A follow-up patch in the same session replaced the binary You/All toggle with a full member picker.
+
+### The one idea the phase is built around
+
+Every card now reads **one** resolution step and nothing else:
+
+```
+transactions → scope (global range; exclude transfers/withdrawals) → attribute → ScopedTransaction[]
+```
+
+`scopeTransactions()` is pure, has no React import, and takes `{ range, mode, mainCurrency }`. Cards never receive raw transactions. Before this, each card did its own filtering, so two cards could quietly show different windows.
+
+The exclusion rule was **not** rewritten — `countsAsSpending()` from `walletHelpers` is reused, so transfers and withdrawals stay out and expense-mode adjustments stay in, exactly as before. **Adjustment treatment, stated explicitly:** `adjustmentMode: 'expense'` counts as spending; `'balance_only'` and a missing mode do not. Unchanged from pre-Phase-7a.
+
+### Member scope picker (the patch)
+
+`mode: 'you' | 'all'` became `mode: typeof ALL_MEMBERS | string`, and `currentMemberId` was **removed from `ScopeOptions` entirely**. The pure function therefore has no parameter that could carry identity: the UI resolves its "You" row to a `travelMemberId` before calling in, so `scopeTransactions()` never sees the string `'you'` and works for any member, not just the logged-in one.
+
+The picker is a bottom sheet (vaul `Drawer`) — a segmented control does not survive 375px past three members. Rows: All · You · then the rest in `space.members` order, unclaimed slots included (they hold splits like anyone else). Hidden entirely in a one-member space. Neither the range nor the member selection is persisted: a stored range goes stale the moment the calendar moves on.
+
+If the selected member disappears (removed by someone else, arriving over `onSnapshot`), the tab falls back to `ALL_MEMBERS` via adjust-state-during-render rather than showing zeroes for someone who is gone.
+
+### Drill-down asymmetry (deliberate)
+
+Tapping a breakdown row opens Transactions with the dimension, the value(s), **and the global date range** — without the range the drilled list would not sum to the number just tapped. It deliberately does **not** carry the member selection: a member's share of a group dinner is not a transaction of its own, so pre-filtering would hide the very rows the number came from. Commented at the call site and pinned by a test asserting the payload keys.
+
+`useTransactionFilters` gained a set-from-outside entry point (`FilterRequest` with a `nonce`, since the same row can legitimately be tapped twice) rather than having its internals reached into. Existing filters are **replaced**, not merged.
+
+### Cards owning their own scoping — migrated
+
+Only one: **"Recent days"** owned a 3/7/15-day look-back pill. §2 required lifting it, so it now reads the global range, was renamed **"Day by day"**, and is capped at 15 rows with a show-all link. **This is the only card whose numbers change on a legacy space.** Every other card reproduces its pre-Phase-7a figures.
+
+### Deviation from the acceptance criterion (accepted)
+
+§6's legacy default card set is category **and** country, but no country card existed before this phase — so a legacy space gains one. Reviewed and kept: it is an addition, no existing card's numbers move, and it is config-gated.
+
+### The "Uncategorized" degradation, fixed
+
+Phase 5 let a space with `builtInFields.category` disabled fall back to a single "Uncategorized" bucket. `categoryKey()` now returns `''` when the field is off, so the bucket never forms.
+
+### Default range without branching on `presetOrigin`
+
+The spec asked for all-time on travel-shaped spaces and this-month elsewhere, but SPEC §8 invariant 4 forbids branching on `presetOrigin`. `defaultRangePreset(config)` reads `builtInFields.country || features.wallets` instead, which reproduces the intended default for a legacy space and for all four presets.
+
+### Tests added (+43 over Phase 6's 344 → 387)
+
+- `dashboardScope.test.ts` (19) — exclusions incl. the three adjustment cases; `ALL_MEMBERS` sums `totalAmountMain`; a member id takes the beneficiary share at the tx rate; unclaimed slots attribute normally; **both** members reconcile against `computeBalances` (`consumed = paid − net`) and their shares partition the group total; DD-MM-YYYY is never compared lexicographically; `defaultRangePreset` per preset.
+- `dashboardCards.test.ts` (17) — sort by amount, Other collapsing, missing row pinned last even after Other, select grouped on option **id** with label resolution and raw-value fallback, boolean absent-key counts as No, disabled dimension hides a card without deleting it.
+- `DashboardTab.test.tsx` (30) — legacy regression; gating; breakdown behaviour; controls; drill-down payload; card builder.
+- `DashboardControls.test.tsx` (7) — pins that "You" calls back with a member id and **never** `'you'`.
+- `TransactionsTab.test.tsx` (+5) — drill-down replaces rather than merges, carries the range, opens the panel.
+
+**Mutation-tested rather than assumed.** Three deliberate mutations confirmed the new assertions bite: `beneficiaries`→`paidBy` (5 failures), range filter disabled (2), All-mode amount doubled (10). All reverted.
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `src/shared/utils/dateRange.ts` | **New** — relative range model; parses via `parseTxDate`, never raw string compare |
+| `src/spaces/utils/dashboardScope.ts` | **New** — `scopeTransactions`, `attributedAmount`, `defaultRangePreset` |
+| `src/spaces/utils/dashboardCards.ts` | **New** — `computeBreakdown`, legacy card set, visibility |
+| `src/spaces/components/dashboard/` | **New** — `DashboardControls`, `BreakdownCard`, `CardBuilder` |
+| `src/spaces/components/tabs/DashboardTab.tsx` | Rewritten around the scoped pipeline |
+| `src/spaces/types.ts` | `DashboardCardDef`; `SpaceConfig.dashboardCards?` |
+| `src/spaces/config.ts` | `dashboardCards` preserved as `undefined` (absent ≠ empty) |
+| `src/spaces/services/spaceService.ts` | `updateSpaceDashboardCards()`, dotted-path atomic write |
+| `src/transactions/utils/filterDimensions.ts` | `FilterRequest` type |
+| `src/transactions/hooks/useTransactionFilters.ts` | Set-from-outside entry point; `dateRange` state |
+| `src/transactions/components/FilterPanel.tsx` | 📅 range badge |
+| `src/spaces/components/CollapsibleCard.tsx` | `actions` slot as a **sibling** of the toggle (a button may not nest a button) |
+| `src/spaces/components/SpaceTabs.tsx`, `SpaceDetailPage.tsx` | Plumb `filterRequest` down, `onDrillDown` up |
+| `vite.config.ts` | `testTimeout: 20000` — cold-start transform under parallel workers was tripping the 5s default |
+
+### Not done / still open
+
+- **`TransactionForm.tsx` has 47 `react-hooks/rules-of-hooks` errors** (conditional hooks). Not touched this session and not introduced by it; the file was heavily rewritten in Phase 5, so that is the likely origin. This is **not** a style complaint — hooks called conditionally corrupt state when the condition flips between renders. Worth a dedicated session; the usual cause is one early return sitting above the hook block.
+- Lint across the whole project: 90 problems (84 errors, 6 warnings). 9 fall in files this session touched, **all pre-existing, 0 new** (4 of them are named verbatim in Session 023's entry, written before Phase 7a existed).
+- Manual browser verification not performed (no Firebase session in this environment): legacy click-through, You-mode agreement with the Balance tab in the real app, 375px layout.
+- Phase 7b (out of scope by §7): 2D pivot cards, a month dimension, per-member dashboards, persisting range/mode. `DashboardCardDef.dimensions` is already an array so 7b widens `[string]` → `[string, string]` without a stored-shape change. Expected friction: `computeBreakdown` returns a flat `BreakdownRow[]`; a separate `computePivot` is probably cleaner than overloading it.
+
+## ✨ Working Session 025 — 6 August 2026
+
+**Type**: Feature — Space refactor Phase 7b (2D pivot breakdown cards)
+**Tools used**: Claude Code (claude-code CLI)
+
+### Context
+
+Phase 7a shipped the scoped pipeline, the generic 1D breakdown card, the card builder and row-tap drill-down. 7b adds a **second grouping dimension**. The aggregation was a small extension; the layout and the duplicate rules were the actual work.
+
+### 1D regression — confirmed
+
+The 387 tests from Phase 7a all pass **unmodified in behaviour**. Nine of them were edited for the `FilterRequest` shape change only (see below) and one for `cardTitle`'s new signature — no assertion about a rendered number, row, or drill-down result changed. `BreakdownCard.tsx` was touched on exactly one line (`cardTitle(card, [dimension])`). A pivot is a new rendering mode, not a rewrite of the card.
+
+There is also a pure-function regression anchor: `computePivot(scoped, country, category)` section totals are asserted equal, key for key, to `computeBreakdown(scoped, country)` rows.
+
+### `computePivot` is a sibling, not a generalisation
+
+Deliberate, per the prompt's carry-in 0.1. The 1D function applies top-N once to a flat row list; a pivot applies it at **two** levels over a cell matrix. The two share only `optionLabel()` and the `OTHER_ROW` / `UNDEFINED_FILTER` sentinels. The mild duplication buys a shipped, tested code path that literally cannot regress.
+
+Rules, applied identically at both levels: only combinations that **exist** produce an entry (no empty cells, which is what keeps a sparse pivot readable); sort by total descending; top-N with an "Other · N values" entry; missing values pinned **last, after Other**.
+
+Two caps: `TOP_N = 5` rows per section (shared with 1D) and a new `SECTION_TOP_N = 8`.
+
+⚠️ **`SECTION_TOP_N = 8` is a known-unvalidated number.** It has never been seen against real data — no Firebase session in this environment. It was deliberately **not** retuned: swapping one guess for another buys nothing, and the builder's live preview exists precisely so real data settles it. Revisit after the first real high-cardinality pivot, not before.
+
+**The "Other" section is the one asymmetry.** It stands for several primary values, so it has no single secondary breakdown: `rows: []`, not expandable, drills straight through. Consequence to know: the "section total = Σ its rows" invariant holds for every *expandable* section, and the test asserts it that way. "Σ section totals = card total" holds unconditionally.
+
+The **missing-primary** section, by contrast, does break down normally — knowing *what* is missing a country is the whole reason to open it.
+
+### `FilterRequest` grew a selections list (carry-in 0.2)
+
+```ts
+selections: { dimensionKey: string; values: string[] }[]
+```
+
+One entry for a 1D row, two for a pivot cell, ANDed by the hook — which is what the filter state already does across dimensions, so this is a shape change and not a behaviour change. The 1D call site was migrated rather than left on the old shape, so there is only one shape in play. Replace-not-merge semantics unchanged.
+
+### Layout: nested list, not a grid
+
+A true matrix loses at 375px — ten countries × twelve categories needs horizontal scrolling inside a vertically-scrolling tab. So primary → collapsible sections, secondary → indented rows. Row chrome (label, amount, %) matches `BreakdownCard` so the two read as one feature. All sections start collapsed **except the first**; the state is component-local and not persisted, and the card is remounted (keyed on the joined dimensions) when the pair changes so it is re-derived rather than carried over.
+
+Row percentages are of the **section**, not the card: inside "Japan", what the user is comparing is Japan's own composition.
+
+### Two tap targets in a section header
+
+The chevron collapses; the **total** drills down to the primary value alone (the same result as the equivalent 1D card row). They are separate `<button>`s with an underline affordance on the total, because the total is the more valuable action and must stay reachable without expanding first — the test asserts it is still there while the section is collapsed.
+
+### Duplicate prevention — order is meaningful
+
+`usedCardKeys(cards, exceptId?)` keys on the **ordered** join, computed from the **full stored array**.
+
+| Case | Rule |
+|---|---|
+| `[country]` vs `[country, category]` | different cards, neither blocks the other |
+| `[country, category]` vs `[category, country]` | different cards, both legitimate |
+| first-dimension picker | disabled only when the exact card being built already exists |
+| second-dimension picker | disabled when it would complete an existing pair, or would pair a dimension with itself |
+| swap control | disabled when the swapped card already exists — the case most easily missed, since it collides without either picker being touched |
+| hidden cards | **counted**, or the user creates a card that silently collides when the field is re-enabled |
+
+Unavailable choices are greyed out with `title="Already on your dashboard"` rather than rejected after the fact. One further UX fix fell out of this: the builder now opens on the first dimension that is *not* already a 1D card, so it never starts on a combination it would refuse to save.
+
+**Post-review fix — the second-dimension row is permanent.** It was first built behind a `+ Add a second dimension` action. That hid the pivot option *and* the greying that depends on it: the first picker re-evaluates against the **pair** once a secondary exists (`[country]` being taken does not make `country × category` a duplicate), but with the row hidden the user never saw that ungreying happen. The row is now always rendered, with a leading **`None`** chip standing for a 1D card — which also replaces the old `Remove` link. `None` is greyed when the `[primary]` 1D card already exists, since dropping back to 1D can itself be the duplicate. Both rows offer identical chip labels, so each is wrapped in a `role="group"` with an `aria-label` — a screen reader has exactly the test's problem of telling two adjacent identically-named button groups apart.
+
+### Disabled dimensions (§6)
+
+A pivot is hidden when **either** dimension is disabled, and never degraded to 1D — that would show a card whose title promises two dimensions and whose numbers are a different aggregation. `visibleDashboardCards()` now returns `dims: FilterDimension[]` and requires every key to resolve. Nothing is written, so re-enabling brings the card back with its title and order intact.
+
+### Tests added (+29 over Phase 7a's 387 → 416)
+
+- `dashboardCards.test.ts` (+13) — no empty cells; both sortings; row-level Other with `collapsedKeys`; section-level cap at 8 with a non-expandable Other; missing pinned last at both levels *after* Other; missing section still breaks down; both eyeball invariants with **both** caps engaged simultaneously; custom select resolved from the option **id** as a secondary; absent boolean key counts as No; 1D regression anchor; `cardTitle` order-sensitivity; `usedCardKeys` ordering/`exceptId`/hidden-card rules; pivot hidden on either dimension and restored intact.
+- `DashboardTab.test.tsx` (+10) — only the first section expanded; row drill-down carries both filters and the range and *not* the member; section-total drill-down carries the primary only; chevron collapses without navigating and leaves the total reachable; Other row drills the collapsed set; a one-disabled-dimension card is hidden and not written away; save preserves picked order; swap updates the title live and saves the swapped order; second picker greys out completing pairs while leaving the reverse available; swap disabled when the swapped card exists; a hidden card's dimension still counts once re-enabled.
+- `TransactionsTab.test.tsx` (+2) — two selections are ANDed; a cell whose values never co-occur yields nothing.
+
+`tsc --noEmit`, `pnpm test` (416/416), `pnpm build` clean. `pnpm lint` still 90 problems, **0 in the files this session touched** — unchanged from Session 024.
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `src/spaces/components/dashboard/PivotCard.tsx` | **New** — nested-list renderer, two-target section header |
+| `src/spaces/utils/dashboardCards.ts` | `computePivot`, `PivotSection`/`PivotRow`, `SECTION_TOP_N`, `drillValues`, `usedCardKeys`; `visibleDashboardCards` → `dims[]`; `cardTitle` takes the dimension list |
+| `src/spaces/components/dashboard/CardBuilder.tsx` | Second dimension, swap, duplicate greying, pivot preview, `DimensionPicker` extracted |
+| `src/spaces/components/dashboard/BreakdownCard.tsx` | One line — `cardTitle(card, [dimension])` |
+| `src/spaces/components/tabs/DashboardTab.tsx` | Renders `PivotCard` for a 2-dimension card; `selections[]` drill-down; passes `usedKeys` |
+| `src/spaces/types.ts` | `dimensions: [string] \| [string, string]` |
+| `src/transactions/utils/filterDimensions.ts` | `FilterSelection`; `FilterRequest.selections` |
+| `src/transactions/hooks/useTransactionFilters.ts` | Applies a list of selections |
+
+### Not done / still open
+
+- **Carry-in 0.3, deferred as instructed**: the "Day by day" card is an undeclared pivot — it groups by day outside the card system and overlaps with "Spending over time". Folding it in as an ordinary card definition needs the month/day **derived dimension** that is still out of scope, so it stays bespoke for now.
+- Manual browser verification not performed (no Firebase session in this environment): the real-space checks in the prompt's Verification §2–§9, including the 375px pass with a long section label. The 5/8 caps are logged above as known-unvalidated and deliberately left alone.
+- Out of scope by §7 and untouched: three or more dimensions, transposing a saved card in place, exporting a pivot.
+
+### 🐛 Open bug — country values have no canonical form (investigated, NOT fixed)
+
+Reported against the dashboard: countries render inconsistently — sometimes the bare name, sometimes only a flag. Diagnosed this session, **deliberately deferred**. Three findings:
+
+**1. `Transaction.country` has no canonical stored form.** The form's country picker writes the **bare name** (`TransactionForm.tsx:186` uses `value={c.label}`); the flag lives separately on `space.countries[].emoji`. Other paths write **flag + name** (`"🇯🇵 Japan"`). That second shape is definitely in real data — `TransactionsTab.tsx:97` carries an `extractCountryEmoji()` helper whose only job is stripping a leading flag back off. XLSX import writes whatever the sheet cell holds, so a bare flag is possible too.
+
+**2. `getFlagForCountry()` is broken** (`pickerData.ts:366`). Entries are `[code, flag, name]`, but it destructures `([, n])` — binding the **flag** — and compares it to a country *name*, so it never matches; and on a match it would return `found[0]`, the ISO code, not the flag. Verified: it returns `'🌍'` for every input. Consequence: every country auto-added by `syncTransactionLocation()` or by XLSX import gets 🌍 instead of its flag. Only the form's picker produces a real flag, because it passes one directly.
+
+**3. The dashboard shows the raw value** because `breakdownDimensions()` calls `filterDimensions(space, config)` with no observed values, so built-in dimensions come back with `options: []` and `optionLabel()` falls through to the stored string.
+
+⚠️ **A display-only fix would make it worse.** The grouping key *is* the raw string, so `"Japan"` and `"🇯🇵 Japan"` are already two rows with split totals; normalising only the label would render two rows reading identically.
+
+**Agreed fix when picked up — canonicalise at the descriptor level, no data migration:**
+
+`dimensionValues()` is a **single funnel** — it drives `matchesDimension()`, the cross-filtered availability list, `computeBreakdown` *and* `computePivot`, all via `STATIC_BY_KEY.get(key).extract(tx)`. Canonicalising inside country's `extract` therefore propagates to all four for free, and drill-down needs no change: the requested value and the matcher canonicalise identically, so they agree by construction.
+
+| File | Change |
+|---|---|
+| `pickerData.ts` | Fix `getFlagForCountry`; add a name→flag index and `canonicalCountry(raw)` (strip flag prefix, resolve to canonical name) |
+| `filterDimensions.ts` | Country `extract` canonicalises; country `labelFor` renders flag + name; expose `labelFor` on `FilterDimension` |
+| `useTransactionFilters.ts` | The observed-values block (~line 185) hand-rolls extraction — the **one** path bypassing `dimensionValues` |
+| `dashboardCards.ts` | `optionLabel()` falls back to `dim.labelFor` when `options` is empty |
+| `TransactionsTab.tsx` | Row / detail / day-header country through the same helper; `extractCountryEmoji` likely deletes |
+
+**Design decision to take first**: the canonical key should be the **bare country name**, with the flag rendered at display time — the form already writes bare names, so most existing data is already canonical and few rows move, and it matches how categories work (label stored, emoji resolved from the list).
+
+Effort: ~60–80 lines of production code, ~10 new tests; only 6 country literals exist across the whole test suite, so fixture churn is trivial. Roughly half a session, low risk because of the single funnel.
+
+**What that fix would still leave**: `space.countries` entries already storing `'🌍'` keep showing 🌍 in the Parameters list editor (it renders the `LabeledItem`'s own emoji rather than looking it up — one extra line to include); the stored data stays mixed, made invisible rather than cleaned; and countries absent from `ALL_COUNTRIES` keep their raw name with no flag, deliberately — better a flagless name than a dropped value. A true data normalisation pass over stored transactions remains a separate, larger option.
+
+### Decided for the NEXT phase — the month dimension resolves to a range
+
+Agreed as the next thing after 7b, and the plumbing question raised during this session has a settled answer. Writing it down now so it is a **constraint in the prompt** rather than something discovered mid-implementation:
+
+> **A month is a display dimension that resolves to a date RANGE on drill-down.** It is not a `filterDimensions()` entry and it introduces no synthetic filter value.
+
+Tapping `March × Food` becomes:
+
+```
+range = [1 Mar, 31 Mar] ∩ globalRange   +   category = Food
+```
+
+Why this is the right shape:
+
+- The Transactions tab **already** filters on ranges, so nothing new has to be learnt by the filter model — no synthetic month value, no new filter concept, no reconciliation rule for a dimension whose options are unbounded and derived.
+- Intersecting with the global range falls out naturally, so the drilled list still sums to the tapped number without a special case.
+- It keeps `Transaction.date` (`"DD-MM-YYYY"`, parsed via `parseTxDate` — never compared lexicographically) as the only source of truth.
+
+⚠️ The consequence to carry into the prompt: month is **genuinely a different shape from every other dimension**. Every other dimension produces `FilterSelection` entries; this one produces a `range` override instead. `FilterRequest` already carries both `selections` and `range`, so the payload needs no change — but `computePivot`'s grouping key and the drill-down translation are no longer the same mechanism, and the design has to say so up front.
+
+Once it exists, the bespoke **"Day by day"** card (carry-in 0.3) and its overlap with "Spending over time" can finally fold into ordinary card definitions.
+
+---
+
+## ✨ Working Session 026 — 9 August 2026
+
+**Type**: Feature — Space refactor Phase 8 (import / export). **Completes the refactor.**
+**Tools used**: Claude Code (claude-code CLI)
+
+### Context
+
+Final phase. Every other surface already reads `getSpaceConfig()`; the spreadsheet did not. Export hard-coded country and category, emitted every built-in column unconditionally, and knew nothing about custom fields. Seven commits (six planned, plus one for the cached-formula-values fix).
+
+### What shipped
+
+| Commit | Scope |
+| --- | --- |
+| 1 | Hidden `_globeexpenses` metadata sheet — format version, space identity, full resolved `SpaceConfig` with field + option ids, member list |
+| 2 | Config-driven export columns; disabled-fields-holding-data warning |
+| 3 | Analysis sheet generated from `config.dashboardCards` |
+| 3b | Real computed values cached in every formula cell; truncation disclosure |
+| 4 | Lossless import path via the metadata sheet |
+| 5 | Foreign-spreadsheet import: column mapping, per-column select decisions |
+| 6 | New custom fields from unmatched columns; completeness sweep; doc corrections |
+
+Tests: **387 → 613**.
+
+### Four pre-existing bugs, all silent
+
+None threw. Each produced a plausible-looking wrong file, which is why they survived this long.
+
+**1. Country totals were always zero.** `buildAnalysisSheet` built its SUMPRODUCT filter as `emoji + ' ' + label` for *both* blocks. `Transaction.category` genuinely is stored emoji-prefixed (`effectiveCategories` maps to the concatenation and the select's value *is* that string), so category worked. `Transaction.country` is stored **bare** — `SmartCountrySelect` calls `onChange(name)` and the flag goes to `Space.countries[].emoji`. So country compared `"🇯🇵 Japan"` against `"Japan"` and matched nothing. Confirms audit finding **F7**; the architecture doc's claim of a flag prefix was wrong and is now corrected.
+
+The fix is structural, not a patched string: `dimensionCellText()` is the single function producing both the exported cell and the formula's filter value, so they cannot drift again.
+
+**2. No exported file contained any formulas.** `fml()` omitted the cached `v`, with a comment explaining it was to avoid caching a stale value. But SheetJS 0.18.5 skips any cell whose `v` is `undefined` — formula included. Isolated:
+
+```
+{ t:'n', f:'SUM(B1:B2)' }        → cell absent from the file
+{ t:'n', v:0, f:'SUM(B1:B2)' }   → written
+```
+
+This affected Balance, Balance Summary, the ✔/✅ check columns and Analysis — everything, not just the sheet being rewritten.
+
+**3. The first fix would have shown a grid of zeros.** A `v: 0` placeholder plus `fullCalcOnLoad` works in Excel and LibreOffice, but Google Sheets is a plausible destination and may render the cached value as-is. Rather than ship on an assumption I could not test from here, every formula now carries its **correct** computed result; `fullCalcOnLoad` became belt, not braces.
+
+**4. Every re-imported file shifted every date back one day.** The Excel epoch (1899-12-30) predates standardised time zones — Europe/Paris was on LMT, `+00:09:21` — so the gap between it and a modern *local* midnight is not a whole number of days. Export survived via `Math.round`; import did not, and SheetJS returned `10-06-2026` as `09-06-2026 23:59:39`.
+
+⚠️ The first fix here was also wrong, and only cross-timezone testing caught it: rounding to the nearest local midnight handles Paris but not `Pacific/Kiritimati`, which was **−10:40** in 1899 and is **+14:00** today — over 24 hours of drift, which no ±12h rounding absorbs. Both directions now convert **entirely in UTC**, and `parseSheetFile` reads raw serials with `cellDates: false` rather than letting SheetJS construct Dates. Verified green under UTC, New_York, Kolkata, Chatham, Kiritimati and Apia.
+
+**Data consequence**: transactions from files imported before this fix have dates one day early in Firestore. The mechanism is fixed; already-imported rows are not.
+
+### `pnpm tsc --noEmit` was a no-op — in every phase
+
+The root `tsconfig.json` has `"files": []` and only project references, so `--noEmit` type-checks **nothing** and exits 0. It was verification step 1 in all eight phase prompts. Coverage was not actually lost — `pnpm build` runs `tsc -b` and was also run each phase — but the cited command was worthless. `CLAUDE.md` now documents `pnpm tsc -b` as the convention.
+
+### Design decisions
+
+**Analysis is generated from dashboard cards, not a second config surface.** The user already declared which breakdowns matter by building cards. A card whose dimension has no exported column is skipped; no card surviving omits the sheet entirely rather than emitting an empty one.
+
+**Blocks are capped, and say so.** 60 rows for 1D, 25×15 for pivots, ranked by spend. Deliberately *not* the dashboard's top-5/top-8 — that is a small-screen readability affordance, this is a file-size and recalculation-cost limit. Different constraint, different numbers. Each capped block carries a note (`Top 60 of 78 by spend — 18 more not shown`): a spreadsheet implies completeness in a way a phone card does not, and someone reconciling a total would otherwise find an unexplainable gap.
+
+**Optional built-in columns are typed `number | undefined`.** Making absence a type-level fact forced every consumer to handle it, which is how the two unguarded reads in `sheetImport.ts` surfaced. Column widths are now assigned *by column number* rather than pushed in order — pushing meant one disabled built-in shifted every later width by one.
+
+**Import has three paths, chosen by the file.** Lossless (our export, same space — ids match, one confirmation, nothing to ask); foreign space (our export elsewhere — config known, ids not); foreign file (no structure — column mapping). A **partial** member-id match is treated as foreign: importing half the splits by id and silently orphaning the rest is worse than asking.
+
+**The GlobeExpenses layout is still tried first.** Routing every metadata-less file through column mapping was tempting, but pre-Phase-8 exports have no metadata sheet *and* the hidden `txId` column has no header text — auto-matching would ignore it, so re-importing an old export would duplicate every transaction instead of updating in place.
+
+**Select decisions are per column, never per value.** Importing into a near-empty space leaves nearly every value unmatched; that is the main case, not an edge case.
+
+**Rows with no per-member columns** attribute the full amount to the signed-in user's slot. Otherwise a bank or personal-budget export imports with empty splits — visible in the list, invisible in every balance.
+
+### Not done / still open
+
+- **No data-preview step on the foreign path.** The two decision screens already show counts and samples; a third read-only screen felt like friction. Reconsider if imports go wrong in practice.
+- **Google Sheets `fullCalcOnLoad` behaviour is still unverified** — worked around rather than confirmed. The cached values make it moot, but the flag's actual support is unknown.
+- **Dates already corrupted by bug 4** are not repaired.
+- **`space.countries` entries storing `'🌍'`** — unchanged, see the open country-canonicalisation bug from Session 025. Phase 8 made the *export* correct without touching stored data.
+
+> ⬇️ **Two items below were recovered from the session transcript in Session 027** — they were
+> reported at the time but never written here, so the entry above read as if the phase had been
+> fully verified.
+
+### ⚠️ Manual verification was NOT performed
+
+Only step 1 of the phase prompt's Verification ran (`pnpm tsc -b`, `pnpm test` 613/613, `pnpm build`). **Steps 2–9 are all manual, all need a browser and a real Firebase session, and none were done**: desktop-spreadsheet open, round-trip into a fresh space, solo export, foreign-sheet mapping, 500+ row batching, offline import, the disabled-field warning, and 375px. Written up as `docs/MANUAL_TEST_PLAN.md` in Session 027.
+
+### Inherited debt in the import path
+
+Named at the time because Phase 8 was the last phase, so unresolved awkwardness becomes permanent:
+
+- **`ParsedSheetRow` carries both `custom` and `customText`.** The lossless path needs resolved values, the foreign path needs raw cells. One row type serving two paths is the seam; two row types from the start would have been cleaner.
+- **Two parallel write functions.** `importParsedRows` (slot→member mapping) and `importForeignRows` (splits pre-resolved) duplicate the batching and payload construction. Made siblings rather than one function with a mode flag — the duplication is real and will drift.
+- **Built-in fields are not uniform and never will be.** `country` stores bare, `category`/`paymentMethod` emoji-prefixed. `dimensionCellText()` funnels it into one place but does not fix the stored inconsistency — the Session 025 country-canonicalisation bug is the proper fix and is still open.
+- **`space.categories` and `config.customFields` are two different option-list mechanisms** — top-level array vs. nested in config, different write paths (`updateSpaceList` vs `updateSpaceConfig`). The importer handles both, which is why `collectPendingOptions` returns a split `{ custom, builtIn }` shape.
+
+---
+
+## 🚧 Working Session 027 — 31 August 2026
+
+**Type**: Release preparation — recover unlogged state, gate the unverified feature
+**Tools used**: Claude Code (claude-code CLI)
+
+### Context
+
+First session after Phase 8 landed. The question was what stands between the branch and a PR. Answer: nothing technical — the gap is that **no part of Phase 7b or 8 has ever run in a browser against real data**.
+
+### Verified green on `Travel-to-Space-maj-upgrade` (31 Aug)
+
+`pnpm tsc -b` clean · `pnpm test` **613/613** · `pnpm build` clean · `pnpm lint` 91 problems (85 errors) — the long-standing pre-existing count, unchanged in refactor-touched files, and not wired into CI.
+
+Branch is pushed, 20 commits ahead of `main`; `main` carries one README commit not yet in the branch.
+
+### Two gaps recovered from the Session 026 transcript
+
+Session 026 ended cleanly — the last commit at 22:35 local, the wrap-up report a minute later, nothing cut off mid-work. But two things reported in that final message never reached this log: the **skipped manual verification** and the **inherited importer debt**. Both are now appended to the Session 026 entry above.
+
+**Process note**: a session log written from inside the session can miss what the final report said, because the log is usually written *before* the report. Worth a glance at the wrap-up before closing out.
+
+### `docs/MANUAL_TEST_PLAN.md` — new
+
+Twelve tests, each with priority, reproduction, expected behaviour and the specific failure to watch for. Four are P1 and gate the PR: legacy export in a desktop spreadsheet, the same file in **Google Sheets** (the one assumption Phase 8 shipped on without being able to test it), a round-trip with dates checked explicitly, and a **501+ row** import at the `writeBatch` boundary.
+
+Two entries are documented as **expected-broken, not bugs to file**: the pivot "Other" section is deliberately non-expandable, and T11's split country rows are the known open canonicalisation bug.
+
+### Import / Export gated behind a flag
+
+`SHEETS_FEATURE_ENABLED = false` in `TransactionsTab.tsx`. One line to flip back once T1–T9 pass.
+
+**`disabled` was deliberately not used.** A disabled button swallows click events, so on mobile — no hover, therefore no `title` tooltip — a tap would do nothing at all with no explanation. The buttons stay clickable and refuse in the handler, showing an inline `role="status"` notice that auto-dismisses after 4s with timer cleanup, so repeated taps restart the countdown rather than stacking timers. Both dialogs are also gated at their `open` prop, so they cannot mount even if the state were set another way.
+
+⚠️ **This gates T1–T9 only.** The Dashboard is untouched, so T10 (pivot cards), T11 (country split rows) and T12 (375px) ship live and unverified. T11 is user-visible today.
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `src/spaces/components/tabs/TransactionsTab.tsx` | Feature gate, greyed buttons, coming-soon notice (+62/−8) |
+| `docs/MANUAL_TEST_PLAN.md` | **New** — 12 manual tests, P1–P3 |
+| `docs/SESSION_LOG.md` | Session 026 gaps recovered; this entry |
+
+Verified after the change: `tsc -b` clean, 613/613, `build` clean, and `eslint` on the touched file reports the **same 4 pre-existing errors** as the committed version — none added.
+
+### Not done / still open
+
+- **The manual test plan itself** — nothing in it has been run.
+- **Country canonicalisation** (Session 025) — still the highest-value open bug, and now the main unverified thing shipping live.
+- `docs/Devprofile.md` is an untracked stray duplicate of `docs/Developer profile.md` (both 111 lines). Left alone; delete when confirmed redundant.

@@ -2,7 +2,7 @@
 //
 // Used in two places:
 //   1. ProfilePage — to display the full invite list (accept / decline)
-//   2. TravelsPage / TravelDetailPage — to drive the badge count on the avatar button
+//   2. SpacesPage / SpaceDetailPage — to drive the badge count on the avatar button
 //
 // Returns { invites, count } derived from a single onSnapshot listener.
 // The listener is cleaned up when the consuming component unmounts.

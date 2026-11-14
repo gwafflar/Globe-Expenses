@@ -12,11 +12,13 @@ import {
   isTransfer,
   countsAsSpending,
   affectsBalance,
+  availableTransactionTypes,
   computeWalletBalances,
   computeReconciliationDiff,
   type WalletBalance,
 } from './walletHelpers'
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
+import type { SpaceConfig } from '@/spaces/types'
 import { Timestamp } from 'firebase/firestore'
 
 // ---------------------------------------------------------------------------
@@ -167,6 +169,49 @@ describe('affectsBalance', () => {
     const tx = { type: 'transfer' as const }
     expect(affectsBalance(tx)).toBe(true)
     expect(countsAsSpending(tx)).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// availableTransactionTypes
+// ---------------------------------------------------------------------------
+
+function makeConfig(overrides: Partial<SpaceConfig['features']> = {}): SpaceConfig {
+  return {
+    builtInFields: { country: true, city: true, category: true, paymentMethod: true, notes: true },
+    features: { wallets: false, multiCurrency: false, ...overrides },
+    customFields: [],
+  }
+}
+
+describe('availableTransactionTypes', () => {
+  it('solo + wallets off → only expense', () => {
+    expect(availableTransactionTypes(makeConfig(), 1)).toEqual(['expense'])
+  })
+
+  it('solo + wallets on → expense/withdrawal/adjustment, no transfer', () => {
+    expect(availableTransactionTypes(makeConfig({ wallets: true }), 1))
+      .toEqual(['expense', 'withdrawal', 'adjustment'])
+  })
+
+  it('3 members + wallets off → expense/transfer', () => {
+    expect(availableTransactionTypes(makeConfig(), 3)).toEqual(['expense', 'transfer'])
+  })
+
+  it('3 members + wallets on → all four, in stable order', () => {
+    expect(availableTransactionTypes(makeConfig({ wallets: true }), 3))
+      .toEqual(['expense', 'transfer', 'withdrawal', 'adjustment'])
+  })
+
+  it('preserves the current type when editing, even if config no longer offers it', () => {
+    // Wallets turned off after a withdrawal was recorded — editing it must not
+    // silently coerce the type, or wallet history would be corrupted.
+    expect(availableTransactionTypes(makeConfig(), 1, 'withdrawal')).toEqual(['expense', 'withdrawal'])
+  })
+
+  it('does not duplicate the current type when it is already available', () => {
+    expect(availableTransactionTypes(makeConfig({ wallets: true }), 1, 'withdrawal'))
+      .toEqual(['expense', 'withdrawal', 'adjustment'])
   })
 })
 

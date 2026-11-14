@@ -51,7 +51,7 @@ export function LoginPage() {
   const location = useLocation()
   // Read the ?redirect= param set by ProtectedRoute when an unauthenticated user
   // opens a protected URL (e.g. /invite/abc123). After sign-in we send them there.
-  const redirectTo = new URLSearchParams(location.search).get('redirect') || '/travels'
+  const redirectTo = new URLSearchParams(location.search).get('redirect') || '/spaces'
 
   // Watch global auth state. When Firebase fires onAuthStateChanged with a user
   // (from redirect, Custom Tab, or any other flow), navigate away from login.
@@ -160,7 +160,7 @@ export function LoginPage() {
         <CardHeader className="space-y-2">
           <CardTitle>Welcome back</CardTitle>
           <CardDescription>
-            Sign in to continue tracking your travel expenses.
+            Sign in to continue tracking your space expenses.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -238,7 +238,7 @@ export function LoginPage() {
             Don&apos;t have an account?{' '}
             {/* Link component changes the URL without triggering a full page reload */}
             <Link
-              to={redirectTo !== '/travels' ? `/register?redirect=${encodeURIComponent(redirectTo)}` : '/register'}
+              to={redirectTo !== '/spaces' ? `/register?redirect=${encodeURIComponent(redirectTo)}` : '/register'}
               className="font-medium text-primary hover:underline"
             >
               Register

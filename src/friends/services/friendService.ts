@@ -15,7 +15,7 @@ import { nanoid } from 'nanoid'
 import { db } from '@/services/firebase'
 import type { UserProfile } from '@/auth/services/userService'
 import type { Invite, Friend, SearchUser } from '@/friends/types'
-import type { TravelMember } from '@/travels/types'
+import type { SpaceMember } from '@/spaces/types'
 
 // How long an invite stays active before it expires.
 const INVITE_EXPIRY_DAYS = 30
@@ -79,16 +79,25 @@ export async function getInvite(inviteId: string): Promise<Invite | null> {
 // ---------------------------------------------------------------------------
 
 /**
- * Creates a multi-use invite link for friend or travel member invites.
+ * Creates a multi-use invite link for friend or space member invites.
  * Unlike sendFriendRequest(), this invite has no toUid — anyone with the
  * link can accept it. Returns the new inviteId to build the share URL.
+ *
+ * Fire-and-forget (decision #25): doc() generates the opaque inviteId
+ * client-side, synchronously, so the caller can build the share URL
+ * immediately — it never needed the await. setDoc() is NOT awaited: the
+ * link is a capability token, valid for building the URL as soon as it's
+ * generated; it simply can't be *redeemed* by anyone else until the write
+ * syncs. Awaiting here would hang forever offline (see createSpace()).
  */
-export async function createShareableInvite(
+export function createShareableInvite(
   fromUser: UserProfile,
+  // ⚠️ 'travel_member' is a frozen stored value — see Invite.type in friends/types.ts
   type: 'friend' | 'travel_member' = 'friend',
+  // Parameter names mirror the frozen Invite.travelId / travelName Firestore keys.
   travelId?: string,
   travelName?: string,
-): Promise<string> {
+): string {
   // doc() on a collection reference auto-generates a random opaque ID
   const inviteRef = doc(collection(db, 'invites'))
 
@@ -96,9 +105,7 @@ export async function createShareableInvite(
     new Date(Date.now() + INVITE_EXPIRY_DAYS * 24 * 60 * 60 * 1000),
   )
 
-  // We await here (unlike sendFriendRequest) because the caller needs the
-  // inviteId to build the URL — it can't proceed until the doc is created.
-  await setDoc(inviteRef, {
+  setDoc(inviteRef, {
     inviteId: inviteRef.id,
     type,
     fromUid: fromUser.uid,
@@ -110,6 +117,8 @@ export async function createShareableInvite(
     usedBy: [],
     createdAt: Timestamp.now(),
     expiresAt,
+  }).catch((err: unknown) => {
+    console.error('[friendService] createShareableInvite failed:', err)
   })
 
   return inviteRef.id
@@ -219,17 +228,18 @@ export async function declineFriendRequest(inviteId: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Travel invite: send a targeted invite to an existing friend
+// Space invite: send a targeted invite to an existing friend
 // ---------------------------------------------------------------------------
 
 /**
- * Sends a targeted travel membership invite to a specific user (must already be a friend).
+ * Sends a targeted space membership invite to a specific user (must already be a friend).
  * Creates an invite of type 'travel_member' with multiUse=false and toUid set.
  * The recipient sees it in their incoming requests badge on the profile button.
  */
-export async function sendTravelInvite(
+export async function sendSpaceInvite(
   fromUser: UserProfile,
   toUid: string,
+  // Parameter names mirror the frozen Invite.travelId / travelName Firestore keys.
   travelId: string,
   travelName: string,
 ): Promise<void> {
@@ -257,19 +267,19 @@ export async function sendTravelInvite(
 }
 
 // ---------------------------------------------------------------------------
-// Travel invite: accept (non-member joins the travel)
+// Space invite: accept (non-member joins the space)
 // ---------------------------------------------------------------------------
 
 /**
- * Result returned by acceptTravelInvite — used by InvitePage to redirect
+ * Result returned by acceptSpaceInvite — used by InvitePage to redirect
  * and, after joining, fetch unclaimed slots for the identity resolution screen.
  */
-export interface TravelInviteResult {
-  /** The travelId so InvitePage can redirect and read the travel after joining. */
-  travelId: string
+export interface SpaceInviteResult {
+  /** The spaceId so InvitePage can redirect and read the space after joining. */
+  spaceId: string
   /**
    * True when the accepter was already in `memberUids` before this call — no new
-   * TravelMember slot was created. InvitePage uses this to skip the identity-pick
+   * SpaceMember slot was created. InvitePage uses this to skip the identity-pick
    * screen (there is nothing new to claim).
    */
   alreadyMember: boolean
@@ -278,43 +288,43 @@ export interface TravelInviteResult {
 /**
  * Accepts a travel_member invite.
  *
- * First attempts a pre-read of the travel document to detect "already a member"
- * (e.g. a targeted invite sent to someone who already joined this travel some
+ * First attempts a pre-read of the space document to detect "already a member"
+ * (e.g. a targeted invite sent to someone who already joined this space some
  * other way, or the link being reused). The Firestore rule only allows this
  * read once auth.uid is already in memberUids, so a genuine new member gets a
  * permission-denied error here — expected, not a bug — and we fall through to
  * the normal join path. arrayUnion on memberUids is also idempotent on its own,
  * so double-accepting the same invite was always safe; this pre-read closes the
- * separate case of ending up with two TravelMember slots for the same person.
+ * separate case of ending up with two SpaceMember slots for the same person.
  *
  * Core batch (atomic — must succeed together):
  *   1. Marks the invite as used (usedBy or status)
- *   2. If not already a member: adds the accepter as a new TravelMember slot and
+ *   2. If not already a member: adds the accepter as a new SpaceMember slot and
  *      appends their UID to memberUids. The Firestore rule verifies the invite
  *      via get() using pendingInviteId. If already a member, this step is skipped
  *      — only the invite is marked used.
  *
- * After the batch, the caller (InvitePage) reads the travel to fetch unclaimed slots —
+ * After the batch, the caller (InvitePage) reads the space to fetch unclaimed slots —
  * that read is now permitted because the user is in memberUids.
  *
  * Friendship writes are intentionally kept outside the batch (fire-and-forget).
  * They are idempotent (set() overwrites safely if already friends) and must not
- * block the travel join — if they fail, the user is still in the travel.
+ * block the space join — if they fail, the user is still in the space.
  *
- * The `pendingInviteId` field written to the travel doc is used solely for
+ * The `pendingInviteId` field written to the space doc is used solely for
  * security rule verification — it has no other semantic meaning and can be
  * ignored by the UI.
  */
-export async function acceptTravelInvite(
+export async function acceptSpaceInvite(
   invite: Invite,
   currentUser: UserProfile,
-): Promise<TravelInviteResult> {
+): Promise<SpaceInviteResult> {
   if (!invite.travelId) throw new Error('Invite missing travelId')
 
-  const travelRef = doc(db, 'travels', invite.travelId)
+  const spaceRef = doc(db, 'travels', invite.travelId)
 
   // Detect "already a member" up front.
-  // The Firestore rule only allows reading a travel doc once auth.uid is in
+  // The Firestore rule only allows reading a space doc once auth.uid is in
   // memberUids, so this read succeeds ONLY if the user already joined before
   // (e.g. re-clicking a link, or a targeted invite sent after they'd already
   // joined some other way). A genuinely new member gets a permission-denied
@@ -322,7 +332,7 @@ export async function acceptTravelInvite(
   // fall through to the normal join batch below.
   let alreadyMember = false
   try {
-    const existingSnap = await getDoc(travelRef)
+    const existingSnap = await getDoc(spaceRef)
     const existingUids: string[] = existingSnap.data()?.memberUids ?? []
     alreadyMember = existingUids.includes(currentUser.uid)
   } catch {
@@ -341,11 +351,11 @@ export async function acceptTravelInvite(
   })
 
   if (!alreadyMember) {
-    // 2. Add the accepter as a new TravelMember slot.
+    // 2. Add the accepter as a new SpaceMember slot.
     //    travelMemberId is a fresh nanoid — stable key for future Split[] references.
     //    arrayUnion on members: Firestore will merge this object into the array.
     //    pendingInviteId: read by the security rule to authorise the non-member write.
-    const newMember: TravelMember = {
+    const newMember: SpaceMember = {
       travelMemberId: nanoid(),
       displayName: currentUser.displayName,
       userId: currentUser.uid,
@@ -353,7 +363,7 @@ export async function acceptTravelInvite(
       joinedAt: now,
     }
 
-    batch.update(travelRef, {
+    batch.update(spaceRef, {
       members: arrayUnion({
         travelMemberId: newMember.travelMemberId,
         displayName: newMember.displayName,
@@ -367,13 +377,13 @@ export async function acceptTravelInvite(
     })
   }
   // else: user is already in memberUids/members — only the invite is marked used,
-  // no duplicate TravelMember slot is created.
+  // no duplicate SpaceMember slot is created.
 
   // Core join must be atomic — await the batch.
   await batch.commit()
 
   // 3. Create friendship outside the batch (fire-and-forget, idempotent).
-  //    Kept separate so an existing-friendship edge case can never block the travel join.
+  //    Kept separate so an existing-friendship edge case can never block the space join.
   const senderFriendRef = doc(db, 'users', invite.fromUid, 'friends', currentUser.uid)
   setDoc(senderFriendRef, {
     uid: currentUser.uid,
@@ -381,7 +391,7 @@ export async function acceptTravelInvite(
     nametag: currentUser.nametag ?? '',
     addedAt: now,
   } satisfies Friend).catch((err) =>
-    console.warn('[friendService] acceptTravelInvite: senderFriend write failed', err),
+    console.warn('[friendService] acceptSpaceInvite: senderFriend write failed', err),
   )
 
   const myFriendRef = doc(db, 'users', currentUser.uid, 'friends', invite.fromUid)
@@ -391,10 +401,10 @@ export async function acceptTravelInvite(
     nametag: invite.fromNametag ?? '',
     addedAt: now,
   } satisfies Friend).catch((err) =>
-    console.warn('[friendService] acceptTravelInvite: myFriend write failed', err),
+    console.warn('[friendService] acceptSpaceInvite: myFriend write failed', err),
   )
 
-  return { travelId: invite.travelId, alreadyMember }
+  return { spaceId: invite.travelId, alreadyMember }
 }
 
 // ---------------------------------------------------------------------------

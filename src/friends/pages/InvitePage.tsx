@@ -9,8 +9,8 @@
 //   2. Validate it (exists, not revoked, not expired, not already used by this user).
 //   3. Show invite info + Accept button.
 //   4. On accept:
-//      - friend invite → batch write (friendship + invite update) → navigate to /travels
-//      - travel_member invite → acceptTravelInvite() which returns TravelInviteResult
+//      - friend invite → batch write (friendship + invite update) → navigate to /spaces
+//      - travel_member invite → acceptSpaceInvite() which returns SpaceInviteResult
 //        • if unclaimedSlots.length > 0 → show identity pick screen
 //        • else → show accepted screen
 
@@ -22,10 +22,10 @@ import { useAuthStore } from '@/auth/store/useAuthStore'
 import {
   getInvite,
   acceptFriendRequest,
-  acceptTravelInvite,
+  acceptSpaceInvite,
 } from '@/friends/services/friendService'
-import { claimTravelMember, addUnclaimedMember } from '@/travels/services/travelService'
-import { normaliseMember, type TravelMember } from '@/travels/types'
+import { claimSpaceMember, addUnclaimedMember } from '@/spaces/services/spaceService'
+import { normaliseMember, type SpaceMember } from '@/spaces/types'
 import type { Invite } from '@/friends/types'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -67,10 +67,10 @@ type PageState =
   | { status: 'ready'; invite: Invite }
   | { status: 'accepting'; invite: Invite }
   // After joining: show identity pick when there are unclaimed slots
-  | { status: 'identityPick'; invite: Invite; travelId: string; unclaimedSlots: TravelMember[]; allMembers: TravelMember[] }
+  | { status: 'identityPick'; invite: Invite; spaceId: string; unclaimedSlots: SpaceMember[]; allMembers: SpaceMember[] }
   // While claiming a slot (brief loading state before redirect)
-  | { status: 'claiming'; invite: Invite; travelId: string }
-  | { status: 'accepted'; invite: Invite; travelId?: string }
+  | { status: 'claiming'; invite: Invite; spaceId: string }
+  | { status: 'accepted'; invite: Invite; spaceId?: string }
 
 export function InvitePage() {
   // React Router gives us the :inviteId segment from the URL
@@ -141,21 +141,21 @@ export function InvitePage() {
     try {
       const { invite } = pageState
       if (invite.type === 'travel_member') {
-        // Batch write: user joins travel, invite is marked used.
-        // The pre-read of the travel is intentionally deferred to AFTER the batch
+        // Batch write: user joins space, invite is marked used.
+        // The pre-read of the space is intentionally deferred to AFTER the batch
         // because the user is not in memberUids until the batch commits.
-        const result = await acceptTravelInvite(invite, userProfile)
+        const result = await acceptSpaceInvite(invite, userProfile)
 
         // Already a member — no new slot was created, so there's nothing to
         // claim. Skip straight to the accepted screen.
         if (result.alreadyMember) {
-          setPageState({ status: 'accepted', invite, travelId: result.travelId })
+          setPageState({ status: 'accepted', invite, spaceId: result.spaceId })
           return
         }
 
-        // User is now in memberUids — safe to read the travel document.
-        const travelSnap = await getDoc(doc(db, 'travels', result.travelId))
-        const members: TravelMember[] = (travelSnap.data()?.members ?? []).map(
+        // User is now in memberUids — safe to read the space document.
+        const spaceSnap = await getDoc(doc(db, 'travels', result.spaceId))
+        const members: SpaceMember[] = (spaceSnap.data()?.members ?? []).map(
           (raw: Record<string, unknown>) => normaliseMember(raw),
         )
         // Exclude the slot we just created — candidates are those still unclaimed.
@@ -165,12 +165,12 @@ export function InvitePage() {
           setPageState({
             status: 'identityPick',
             invite,
-            travelId: result.travelId,
+            spaceId: result.spaceId,
             unclaimedSlots,
             allMembers: members,
           })
         } else {
-          setPageState({ status: 'accepted', invite, travelId: result.travelId })
+          setPageState({ status: 'accepted', invite, spaceId: result.spaceId })
         }
       } else {
         await acceptFriendRequest(invite, userProfile)
@@ -187,38 +187,38 @@ export function InvitePage() {
   // Identity pick: claim an existing unclaimed slot
   // ---------------------------------------------------------------------------
 
-  async function handleClaimSlot(travelId: string, travelMemberId: string, invite: Invite, allMembers: TravelMember[]) {
+  async function handleClaimSlot(spaceId: string, travelMemberId: string, invite: Invite, allMembers: SpaceMember[]) {
     if (!currentUser) return
-    setPageState({ status: 'claiming', invite, travelId })
+    setPageState({ status: 'claiming', invite, spaceId })
     try {
-      // claimTravelMember handles transfer semantics (nulls any previously claimed slot)
-      await claimTravelMember(travelId, travelMemberId, currentUser.uid, allMembers)
+      // claimSpaceMember handles transfer semantics (nulls any previously claimed slot)
+      await claimSpaceMember(spaceId, travelMemberId, currentUser.uid, allMembers)
     } catch (err) {
-      console.error('[InvitePage] claimTravelMember failed:', err)
-      // Non-fatal: user still joined the travel, just proceed
+      console.error('[InvitePage] claimSpaceMember failed:', err)
+      // Non-fatal: user still joined the space, just proceed
     }
-    setPageState({ status: 'accepted', invite, travelId })
+    setPageState({ status: 'accepted', invite, spaceId })
   }
 
-  function handleSkipClaim(travelId: string, invite: Invite) {
-    setPageState({ status: 'accepted', invite, travelId })
+  function handleSkipClaim(spaceId: string, invite: Invite) {
+    setPageState({ status: 'accepted', invite, spaceId })
   }
 
   // Creates a new unclaimed member slot with the given name, then immediately claims it.
   // Used when the user says "I'm someone new" on the identity pick screen.
-  async function handleCreateAndClaim(travelId: string, invite: Invite, allMembers: TravelMember[]) {
+  async function handleCreateAndClaim(spaceId: string, invite: Invite, allMembers: SpaceMember[]) {
     const trimmed = newSlotName.trim()
     if (!trimmed || !currentUser) return
     setCreatingSlot(true)
     try {
-      const newMember = await addUnclaimedMember(travelId, trimmed, allMembers)
-      await claimTravelMember(travelId, newMember.travelMemberId, currentUser.uid, [...allMembers, newMember])
+      const newMember = await addUnclaimedMember(spaceId, trimmed, allMembers)
+      await claimSpaceMember(spaceId, newMember.travelMemberId, currentUser.uid, [...allMembers, newMember])
     } catch (err) {
       console.error('[InvitePage] handleCreateAndClaim failed:', err)
-      // Non-fatal: user is still in the travel, just proceed without a slot
+      // Non-fatal: user is still in the space, just proceed without a slot
     }
     setCreatingSlot(false)
-    setPageState({ status: 'accepted', invite, travelId })
+    setPageState({ status: 'accepted', invite, spaceId })
   }
 
   // ---------------------------------------------------------------------------
@@ -251,20 +251,20 @@ export function InvitePage() {
               <CardDescription>You're already friends with this person.</CardDescription>
             </CardHeader>
             <CardContent>
-              <Button onClick={() => navigate('/travels')}>Go to my travels</Button>
+              <Button onClick={() => navigate('/spaces')}>Go to my spaces</Button>
             </CardContent>
           </Card>
         )
 
       case 'error': {
-        const isTravelInvite = pageState.invite.type === 'travel_member'
+        const isSpaceInvite = pageState.invite.type === 'travel_member'
         return (
           <Card className="text-center">
             <CardHeader>
               <CardTitle>Something went wrong</CardTitle>
               <CardDescription>
-                {isTravelInvite
-                  ? 'Unable to join this travel. Please try again or ask the sender to share a new link.'
+                {isSpaceInvite
+                  ? 'Unable to join this space. Please try again or ask the sender to share a new link.'
                   : 'Unable to accept this invitation. Please try again.'}
               </CardDescription>
             </CardHeader>
@@ -273,8 +273,8 @@ export function InvitePage() {
               <Button className="w-full" onClick={() => setPageState({ status: 'ready', invite: pageState.invite })}>
                 Try again
               </Button>
-              <Button variant="outline" className="w-full" onClick={() => navigate('/travels')}>
-                Go to my travels
+              <Button variant="outline" className="w-full" onClick={() => navigate('/spaces')}>
+                Go to my spaces
               </Button>
             </CardContent>
           </Card>
@@ -309,7 +309,7 @@ export function InvitePage() {
               >
                 {isAccepting ? 'Accepting…' : 'Accept invitation'}
               </Button>
-              <Button variant="outline" className="w-full" onClick={() => navigate('/travels')}>
+              <Button variant="outline" className="w-full" onClick={() => navigate('/spaces')}>
                 Decline
               </Button>
             </CardContent>
@@ -318,8 +318,8 @@ export function InvitePage() {
       }
 
       case 'identityPick': {
-        // Show after joining the travel: allow the user to claim an existing unclaimed slot
-        const { invite, travelId, unclaimedSlots, allMembers } = pageState
+        // Show after joining the space: allow the user to claim an existing unclaimed slot
+        const { invite, spaceId, unclaimedSlots, allMembers } = pageState
         return (
           <div className="flex flex-col gap-4">
             <div className="text-center">
@@ -336,7 +336,7 @@ export function InvitePage() {
                   key={member.travelMemberId}
                   type="button"
                   className="flex w-full items-center justify-between rounded-lg border border-input bg-background px-4 py-3 text-left transition-colors hover:bg-accent active:bg-accent/70"
-                  onClick={() => handleClaimSlot(travelId, member.travelMemberId, invite, allMembers)}
+                  onClick={() => handleClaimSlot(spaceId, member.travelMemberId, invite, allMembers)}
                 >
                   <div className="flex items-center gap-3">
                     {/* Grey avatar for unclaimed member */}
@@ -358,7 +358,7 @@ export function InvitePage() {
                     value={newSlotName}
                     onChange={(e) => setNewSlotName(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !creatingSlot) handleCreateAndClaim(travelId, invite, allMembers)
+                      if (e.key === 'Enter' && !creatingSlot) handleCreateAndClaim(spaceId, invite, allMembers)
                     }}
                     placeholder="Your name…"
                     disabled={creatingSlot}
@@ -366,7 +366,7 @@ export function InvitePage() {
                   />
                   <Button
                     size="sm"
-                    onClick={() => handleCreateAndClaim(travelId, invite, allMembers)}
+                    onClick={() => handleCreateAndClaim(spaceId, invite, allMembers)}
                     disabled={!newSlotName.trim() || creatingSlot}
                   >
                     {creatingSlot ? '…' : 'Join'}
@@ -378,7 +378,7 @@ export function InvitePage() {
               <button
                 type="button"
                 className="text-center w-full py-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                onClick={() => handleSkipClaim(travelId, invite)}
+                onClick={() => handleSkipClaim(spaceId, invite)}
               >
                 Skip for now
               </button>
@@ -397,31 +397,31 @@ export function InvitePage() {
       }
 
       case 'accepted': {
-        const { invite, travelId } = pageState
-        const isTravelInvite = invite.type === 'travel_member'
+        const { invite, spaceId } = pageState
+        const isSpaceInvite = invite.type === 'travel_member'
         return (
           <Card className="text-center">
             <CardHeader className="gap-4">
               <InviteAvatar uid={invite.fromUid} name={invite.fromDisplayName} />
               <CardTitle>
-                {isTravelInvite ? `You've joined ${invite.travelName}!` : "You're now friends!"}
+                {isSpaceInvite ? `You've joined ${invite.travelName}!` : "You're now friends!"}
               </CardTitle>
               <CardDescription>
-                {isTravelInvite
+                {isSpaceInvite
                   ? `You are now a member of "${invite.travelName}" and connected with ${invite.fromDisplayName}.`
-                  : `You and ${invite.fromDisplayName} are now connected. You can invite each other to shared travels.`}
+                  : `You and ${invite.fromDisplayName} are now connected. You can invite each other to shared spaces.`}
               </CardDescription>
             </CardHeader>
             <CardContent>
               <Button
                 className="w-full"
                 onClick={() =>
-                  navigate(isTravelInvite && travelId
-                    ? `/travels/${travelId}`
-                    : '/travels')
+                  navigate(isSpaceInvite && spaceId
+                    ? `/spaces/${spaceId}`
+                    : '/spaces')
                 }
               >
-                {isTravelInvite ? `Open ${invite.travelName}` : 'Go to my travels'}
+                {isSpaceInvite ? `Open ${invite.travelName}` : 'Go to my spaces'}
               </Button>
             </CardContent>
           </Card>
@@ -435,11 +435,11 @@ export function InvitePage() {
       <header className="flex items-center border-b px-4 py-3">
         <button
           type="button"
-          onClick={() => navigate('/travels')}
+          onClick={() => navigate('/spaces')}
           className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
           <ChevronLeft className="h-4 w-4" />
-          All travels
+          All spaces
         </button>
       </header>
       <main className="mx-auto w-full max-w-md flex-1 px-4 py-8">
@@ -462,7 +462,7 @@ function ErrorCard({ title, description }: { title: string; description: string 
         <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent>
-        <Button variant="outline" onClick={() => navigate('/travels')}>Go to my travels</Button>
+        <Button variant="outline" onClick={() => navigate('/spaces')}>Go to my spaces</Button>
       </CardContent>
     </Card>
   )

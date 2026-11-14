@@ -4,7 +4,7 @@
 //   - Avatar (initials-based, color derived from UID) + name + nametag
 //   - Identity: edit display name and @nametag
 //   - Security: email (read-only), send password reset email
-//   - Preferences: favorite main travel currency (editable), theme (v2 placeholder)
+//   - Preferences: favorite main space currency (editable), theme (v2 placeholder)
 //   - Friends: placeholder (v2)
 //   - Feedback: embedded FeedbackForm (includes collapsible contact developer card)
 //   - Sign out (red, with confirmation dialog)
@@ -20,7 +20,7 @@ import {
   searchByNametag,
   sendFriendRequest,
   acceptFriendRequest,
-  acceptTravelInvite,
+  acceptSpaceInvite,
   declineFriendRequest,
   fetchFriends,
 } from '@/friends/services/friendService'
@@ -220,7 +220,7 @@ export function ProfilePage() {
   }
 
   // -------------------------------------------------------------------------
-  // Save main currency (favorite default for new travels)
+  // Save main currency (favorite default for new spaces)
   // -------------------------------------------------------------------------
 
   async function handleSaveMainCurrency() {
@@ -229,7 +229,7 @@ export function ProfilePage() {
     setMainCurrencyMsg(null)
     try {
       await updateUserProfile(currentUser.uid, { mainCurrency })
-      // Update Zustand cache so new travels created with this user default to the new currency
+      // Update Zustand cache so new spaces created with this user default to the new currency
       setUserProfile({ ...userProfile!, mainCurrency })
       setMainCurrencyMsg({ ok: true, text: 'Saved.' })
     } catch {
@@ -321,14 +321,14 @@ export function ProfilePage() {
     const invite = pendingInvites.find(i => i.inviteId === inviteId)
     if (!invite) return
     // Dispatch to the correct acceptance function based on invite type.
-    // travel_member invites must call acceptTravelInvite() to write the travel membership —
-    // acceptFriendRequest() would only create friendship entries and never add the user to the travel.
+    // travel_member invites must call acceptSpaceInvite() to write the space membership —
+    // acceptFriendRequest() would only create friendship entries and never add the user to the space.
     if (invite.type === 'travel_member') {
-      await acceptTravelInvite(invite, userProfile)
+      await acceptSpaceInvite(invite, userProfile)
     } else {
       await acceptFriendRequest(invite, userProfile)
     }
-    // Trigger friends list reload (relevant for both types — travel join also creates friendship)
+    // Trigger friends list reload (relevant for both types — space join also creates friendship)
     setFriendsKey(k => k + 1)
   }
 
@@ -383,11 +383,11 @@ export function ProfilePage() {
       <header className="flex items-center border-b px-4 py-3">
         <button
           type="button"
-          onClick={() => navigate('/travels')}
+          onClick={() => navigate('/spaces')}
           className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
           <ChevronLeft className="h-4 w-4" />
-          All travels
+          All spaces
         </button>
         {/* Centered title */}
         <h1 className="absolute left-1/2 -translate-x-1/2 text-base font-semibold">Profile</h1>
@@ -484,11 +484,11 @@ export function ProfilePage() {
 
         {/* Preferences */}
         <Section title="Preferences">
-          {/* Favorite main travel currency — used as default when creating new travels */}
+          {/* Favorite main space currency — used as default when creating new spaces */}
           <div className="flex flex-col gap-2">
-            <Label htmlFor="mainCurrency">Favorite main travel currency</Label>
+            <Label htmlFor="mainCurrency">Favorite main space currency</Label>
             <p className="text-xs text-muted-foreground">
-              Used as the default when you create a new travel. Can be overridden per travel.
+              Used as the default when you create a new space. Can be overridden per space.
             </p>
             <select
               id="mainCurrency"
@@ -622,19 +622,19 @@ export function ProfilePage() {
             )}
           </div>
 
-          {/* Incoming travel invitations — type='travel_member' */}
+          {/* Incoming space invitations — type='travel_member' */}
           {pendingInvites.filter(i => i.type === 'travel_member').length > 0 && (
             <div className="flex flex-col gap-2">
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Travel invitations ({pendingInvites.filter(i => i.type === 'travel_member').length})
+                Space invitations ({pendingInvites.filter(i => i.type === 'travel_member').length})
               </p>
               <ul className="flex flex-col gap-2">
                 {pendingInvites.filter(i => i.type === 'travel_member').map(invite => (
                   <li key={invite.inviteId} className="flex items-center gap-2 rounded-md border px-3 py-2">
                     <MiniAvatar uid={invite.fromUid} name={invite.fromDisplayName} />
                     <div className="flex-1 min-w-0">
-                      {/* Show the travel name prominently, sender as secondary info */}
-                      <p className="text-sm font-medium truncate">{invite.travelName ?? 'Unknown travel'}</p>
+                      {/* Show the space name prominently, sender as secondary info */}
+                      <p className="text-sm font-medium truncate">{invite.travelName ?? 'Unknown space'}</p>
                       <p className="text-xs text-muted-foreground truncate">
                         from {invite.fromDisplayName}{invite.fromNametag ? ` (@${invite.fromNametag})` : ''}
                       </p>

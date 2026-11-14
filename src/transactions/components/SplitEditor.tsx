@@ -2,7 +2,7 @@
  * SplitEditor.tsx
  *
  * Controlled component for editing how a transaction amount is split among
- * travel members. Used for both "Paid by" and "Split between" fields inside
+ * space members. Used for both "Paid by" and "Split between" fields inside
  * a shadcn Drawer (bottom sheet).
  *
  * --- Equal / Custom mode state machine ---
@@ -41,7 +41,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import type { TravelMember } from '@/travels/types'
+import type { SpaceMember } from '@/spaces/types'
 import type { Split } from '@/transactions/types'
 
 // ---------------------------------------------------------------------------
@@ -69,7 +69,7 @@ function splitEqually(total: number, ids: string[]): Split[] {
 // ---------------------------------------------------------------------------
 
 interface SplitEditorProps {
-  members: TravelMember[]
+  members: SpaceMember[]
   totalAmount: number
   value: Split[]
   onChange: (splits: Split[]) => void

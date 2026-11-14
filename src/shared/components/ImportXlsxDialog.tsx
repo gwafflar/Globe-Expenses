@@ -1,18 +1,39 @@
 // ImportXlsxDialog.tsx — 3-step wizard for importing a GlobeExpenses xlsx file.
 //
 // Step 1 — Upload:  drag-and-drop or file picker, calls parseSheetFile()
-// Step 2 — Mapping: table matching sheet member slots to travel member UIDs
+// Step 2 — Mapping: table matching sheet member slots to space member UIDs
 // Step 3 — Result:  shows imported/skipped counts and any errors
 //
 // The dialog is controlled (open prop) so the parent can close it cleanly.
 
 import { useCallback, useMemo, useRef, useState } from 'react'
+import * as XLSX from 'xlsx'
 import { arrayUnion, doc, updateDoc } from 'firebase/firestore'
 import { db } from '@/services/firebase'
-import type { Travel, LabeledItem } from '@/travels/types'
-import { getTravelMainCurrency } from '@/travels/types'
+import type { Space, LabeledItem } from '@/spaces/types'
+import { getSpaceMainCurrency } from '@/spaces/types'
+import { updateSpaceConfig } from '@/spaces/services/spaceService'
+import {
+  autoMatchColumns,
+  buildForeignRows,
+  collectPendingOptions,
+  readForeignSheet,
+  resolveNewFields,
+  summariseSelectColumn,
+  validateMapping,
+  withCreatedListItems,
+  withCreatedOptions,
+  MAX_NEW_FIELDS,
+  type ColumnMapping,
+  type ForeignSheet,
+  type SelectDecisions,
+} from '@/shared/utils/foreignSheet'
+import { ColumnMappingStep } from '@/shared/components/import/ColumnMappingStep'
+import { NewFieldsStep, newFieldDrafts } from '@/shared/components/import/NewFieldsStep'
+import { ValueDecisionStep, type SelectColumnInfo } from '@/shared/components/import/ValueDecisionStep'
+import type { CustomFieldType } from '@/spaces/types'
 import type { ParsedSheetRow } from '@/shared/utils/sheetImport'
-import { CollapsibleCard } from '@/travels/components/CollapsibleCard'
+import { CollapsibleCard } from '@/spaces/components/CollapsibleCard'
 import { getFlagForCountry } from '@/shared/data/pickerData'
 import {
   Dialog,
@@ -25,9 +46,13 @@ import { Button } from '@/components/ui/button'
 import {
   parseSheetFile,
   importParsedRows,
+  importForeignRows,
+  selectImportPath,
+  type ImportPath,
   type ParseResult,
   type ImportResult,
 } from '@/shared/utils/sheetImport'
+import { getSpaceConfig } from '@/spaces/config'
 
 // ---------------------------------------------------------------------------
 // Props
@@ -36,7 +61,7 @@ import {
 interface ImportXlsxDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  travel: Travel
+  space: Space
   currentUserUid: string
 }
 
@@ -46,8 +71,11 @@ interface ImportXlsxDialogProps {
 
 function UploadStep({
   onParsed,
+  onForeign,
 }: {
   onParsed: (result: ParseResult) => void
+  /** The file has no GlobeExpenses structure at all — column mapping instead. */
+  onForeign: (sheet: ForeignSheet) => void
 }) {
   const [isDragging, setIsDragging] = useState(false)
   const [isParsing, setIsParsing]   = useState(false)
@@ -62,10 +90,21 @@ function UploadStep({
     setError(null)
     setIsParsing(true)
     try {
+      // Try the GlobeExpenses layout first. It is the only path that can read
+      // the hidden txId column, which is what makes a re-import update rows
+      // in place rather than duplicating them — worth preferring even for a
+      // pre-Phase-8 file that has no metadata sheet.
       const result = await parseSheetFile(file)
       onParsed(result)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to parse the file.')
+    } catch {
+      // No Parameters/Expenses sheet: a spreadsheet from somewhere else.
+      // Fall back to reading it as an arbitrary grid and mapping the columns.
+      try {
+        const wb = XLSX.read(await file.arrayBuffer(), { cellDates: false })
+        onForeign(readForeignSheet(wb))
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to read the file.')
+      }
     } finally {
       setIsParsing(false)
     }
@@ -89,8 +128,8 @@ function UploadStep({
     <div className="flex flex-col gap-4">
       {/* Format notice */}
       <div className="rounded-md bg-blue-50 px-3 py-2 text-xs text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
-        Only files exported from GlobeExpenses are supported. Files in any other format
-        (manual spreadsheets, bank exports, etc.) will not parse correctly.
+        A GlobeExpenses export imports in one tap. Any other spreadsheet works too — you'll
+        be asked to match its columns to fields.
       </div>
 
       {/* Drop zone */}
@@ -139,17 +178,17 @@ function UploadStep({
 
 function MappingStep({
   parseResult,
-  travel,
+  space,
   slotToTravelMemberId,
   onChange,
 }: {
   parseResult: ParseResult
-  travel: Travel
+  space: Space
   slotToTravelMemberId: Record<number, string | undefined>
   onChange: (updated: Record<number, string | undefined>) => void
 }) {
   const { slots, nMembersInSheet } = parseResult
-  const members = travel.members
+  const members = space.members
 
   // Check for duplicate mappings (two slots → same non-undefined travelMemberId)
   const assignedIds = Object.values(slotToTravelMemberId).filter((id): id is string => id !== undefined)
@@ -167,14 +206,14 @@ function MappingStep({
       <p className="text-sm text-muted-foreground">
         Found <strong>{parseResult.rows.length}</strong> transactions across{' '}
         <strong>{slots.length}</strong> active member slot{slots.length !== 1 ? 's' : ''}.
-        Match each sheet member to a travel member below.
+        Match each sheet member to a space member below.
       </p>
 
       {/* Member count mismatch warning */}
       {nMembersInSheet !== members.length && (
         <div className="rounded-md bg-yellow-50 px-3 py-2 text-sm text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300">
           The sheet has {nMembersInSheet} member slot{nMembersInSheet !== 1 ? 's' : ''} but this
-          travel has {members.length} member{members.length !== 1 ? 's' : ''}. Check your mapping
+          space has {members.length} member{members.length !== 1 ? 's' : ''}. Check your mapping
           carefully.
         </div>
       )}
@@ -321,6 +360,88 @@ function ResultStep({
 }
 
 // ---------------------------------------------------------------------------
+// Lossless path — confirmation instead of a wizard
+// ---------------------------------------------------------------------------
+
+/** What the file turned out to be, shown before a one-tap import.
+ *  Deliberately short: on this path there is nothing to decide, so the screen
+ *  exists to confirm the file is the one the user meant, not to gather input. */
+function LosslessConfirmStep({
+  parseResult,
+  space,
+}: {
+  parseResult: ParseResult
+  space: Space
+}) {
+  const meta = parseResult.meta!
+  const fieldCount = meta.config.customFields.filter((f) => f.enabled).length
+  const sameName = meta.space.name === space.name
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="rounded-md bg-green-50 px-3 py-2 text-sm text-green-800 dark:bg-green-900/30 dark:text-green-300">
+        This is a GlobeExpenses export of this space. Everything maps
+        automatically — no matching needed.
+      </div>
+
+      <dl className="flex flex-col divide-y rounded-lg border text-sm">
+        <div className="flex items-center justify-between gap-3 px-3 py-2">
+          <dt className="text-muted-foreground">Space</dt>
+          <dd className="min-w-0 truncate font-medium">
+            {meta.space.emoji ? `${meta.space.emoji} ` : ''}{meta.space.name}
+          </dd>
+        </div>
+        <div className="flex items-center justify-between gap-3 px-3 py-2">
+          <dt className="text-muted-foreground">Transactions</dt>
+          <dd className="font-medium">{parseResult.rows.length}</dd>
+        </div>
+        <div className="flex items-center justify-between gap-3 px-3 py-2">
+          <dt className="text-muted-foreground">Members</dt>
+          <dd className="font-medium">{parseResult.slots.length}</dd>
+        </div>
+        {fieldCount > 0 && (
+          <div className="flex items-center justify-between gap-3 px-3 py-2">
+            <dt className="text-muted-foreground">Custom fields</dt>
+            <dd className="font-medium">{fieldCount}</dd>
+          </div>
+        )}
+        <div className="flex items-center justify-between gap-3 px-3 py-2">
+          <dt className="text-muted-foreground">Exported</dt>
+          <dd className="font-medium">
+            {new Date(meta.exportedAt).toLocaleDateString()}
+          </dd>
+        </div>
+      </dl>
+
+      {/* The space was renamed since the export. Ids still match, so the import
+          is still lossless — but say so rather than letting it look wrong. */}
+      {!sameName && (
+        <p className="rounded-md bg-blue-50 px-3 py-2 text-xs text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+          The space was called “{meta.space.name}” when this file was exported.
+          It is the same space, so the import is unaffected.
+        </p>
+      )}
+
+      <p className="text-xs text-muted-foreground">
+        Rows that came from this space are updated in place rather than
+        duplicated.
+      </p>
+    </div>
+  )
+}
+
+/** Shown when the file is one of ours but belongs to a different space. */
+function ForeignSpaceNotice({ parseResult }: { parseResult: ParseResult }) {
+  return (
+    <div className="rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
+      This file was exported from <strong>{parseResult.meta?.space.name}</strong>, a
+      different space. Its members and field values don’t have matching ids here,
+      so you’ll be asked to match them below.
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Step 2.5 — Data preview (read-only)
 // ---------------------------------------------------------------------------
 
@@ -348,20 +469,20 @@ function uniqueValues(rows: ParsedSheetRow[], key: 'country' | 'city' | 'categor
 interface PreviewSection {
   label: string
   values: string[]
-  travelList: LabeledItem[]
+  spaceList: LabeledItem[]
 }
 
-function PreviewStep({ rows, travel }: { rows: ParsedSheetRow[]; travel: Travel }) {
-  // Build the four sections with their corresponding travel lists
+function PreviewStep({ rows, space }: { rows: ParsedSheetRow[]; space: Space }) {
+  // Build the four sections with their corresponding space lists
   const sections: PreviewSection[] = useMemo(() => [
-    { label: 'Countries',       values: uniqueValues(rows, 'country'),       travelList: travel.countries      ?? [] },
-    { label: 'Cities',          values: uniqueValues(rows, 'city'),          travelList: travel.cities         ?? [] },
-    { label: 'Categories',      values: uniqueValues(rows, 'category'),      travelList: travel.categories     ?? [] },
-    { label: 'Payment methods', values: uniqueValues(rows, 'paymentMethod'), travelList: travel.paymentMethods ?? [] },
-  ], [rows, travel])
+    { label: 'Countries',       values: uniqueValues(rows, 'country'),       spaceList: space.countries      ?? [] },
+    { label: 'Cities',          values: uniqueValues(rows, 'city'),          spaceList: space.cities         ?? [] },
+    { label: 'Categories',      values: uniqueValues(rows, 'category'),      spaceList: space.categories     ?? [] },
+    { label: 'Payment methods', values: uniqueValues(rows, 'paymentMethod'), spaceList: space.paymentMethods ?? [] },
+  ], [rows, space])
 
   const totalUnmatched = sections.reduce(
-    (sum, s) => sum + s.values.filter((v) => !matchesLabeledList(v, s.travelList)).length,
+    (sum, s) => sum + s.values.filter((v) => !matchesLabeledList(v, s.spaceList)).length,
     0,
   )
 
@@ -375,11 +496,11 @@ function PreviewStep({ rows, travel }: { rows: ParsedSheetRow[]; travel: Travel 
       {/* Match status banner */}
       {totalUnmatched === 0 ? (
         <div className="rounded-md bg-green-50 px-3 py-2 text-sm text-green-800 dark:bg-green-900/30 dark:text-green-300">
-          All values match the travel configuration.
+          All values match the space configuration.
         </div>
       ) : (
         <div className="rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
-          Some values don't match the travel configuration. They will be imported as-is.
+          Some values don't match the space configuration. They will be imported as-is.
         </div>
       )}
 
@@ -396,7 +517,7 @@ function PreviewStep({ rows, travel }: { rows: ParsedSheetRow[]; travel: Travel 
           ) : (
             <div className="flex flex-wrap gap-1.5">
               {section.values.map((value) => {
-                const matched = matchesLabeledList(value, section.travelList)
+                const matched = matchesLabeledList(value, section.spaceList)
                 return (
                   <span
                     key={value}
@@ -424,7 +545,7 @@ function PreviewStep({ rows, travel }: { rows: ParsedSheetRow[]; travel: Travel 
 
 function buildInitialMapping(
   slots: ParseResult['slots'],
-  members: Travel['members'],
+  members: Space['members'],
 ): Record<number, string | undefined> {
   const mapping: Record<number, string | undefined> = {}
   // Track which travelMemberIds have already been auto-matched
@@ -447,6 +568,15 @@ function buildInitialMapping(
   return mapping
 }
 
+/** The member slot belonging to the signed-in user, used as the default owner
+ *  of every row when the sheet carries no per-member split columns. Falls back
+ *  to the first slot so a personal import into an unclaimed space still lands
+ *  somewhere rather than silently producing split-less transactions. */
+function currentUserMemberId(space: Space, uid: string): string | undefined {
+  return space.members.find((m) => m.userId === uid)?.travelMemberId
+    ?? space.members[0]?.travelMemberId
+}
+
 // ---------------------------------------------------------------------------
 // Main dialog component
 // ---------------------------------------------------------------------------
@@ -454,12 +584,24 @@ function buildInitialMapping(
 export function ImportXlsxDialog({
   open,
   onOpenChange,
-  travel,
+  space,
   currentUserUid,
 }: ImportXlsxDialogProps) {
-  type Step = 'upload' | 'mapping' | 'preview' | 'result'
+  // Three routes through this dialog:
+  //   lossless      upload → confirm → result
+  //   foreignSpace  upload → mapping → preview → result   (member slots)
+  //   foreignFile   upload → columns → values  → result   (arbitrary grid)
+  type Step = 'upload' | 'confirm' | 'mapping' | 'preview' | 'columns' | 'fields' | 'values' | 'result'
   const [step, setStep]                 = useState<Step>('upload')
   const [parseResult, setParseResult]   = useState<ParseResult | null>(null)
+  const [importPath, setImportPath]     = useState<ImportPath | null>(null)
+
+  // Foreign-file state
+  const [foreignSheet, setForeignSheet] = useState<ForeignSheet | null>(null)
+  const [columnMapping, setColumnMapping] = useState<ColumnMapping>({})
+  const [selectDecisions, setSelectDecisions] = useState<SelectDecisions>({})
+
+  const config = useMemo(() => getSpaceConfig(space), [space])
   // Maps sheet slot index → travelMemberId (the stable ID used in Split[])
   const [slotToTravelMemberId, setSlotToTravelMemberId] = useState<Record<number, string | undefined>>({})
   const [importResult, setImportResult] = useState<ImportResult | null>(null)
@@ -472,7 +614,11 @@ export function ImportXlsxDialog({
     if (!nextOpen) {
       setStep('upload')
       setParseResult(null)
+      setImportPath(null)
       setSlotToTravelMemberId({})
+      setForeignSheet(null)
+      setColumnMapping({})
+      setSelectDecisions({})
       setImportResult(null)
       setIsImporting(false)
       setImportProgress({ committed: 0, total: 0 })
@@ -480,16 +626,35 @@ export function ImportXlsxDialog({
     onOpenChange(nextOpen)
   }
 
-  // Step 1 → 2
+  // Step 1 → columns, for a file with no GlobeExpenses structure.
+  const handleForeign = useCallback(
+    (sheet: ForeignSheet) => {
+      setForeignSheet(sheet)
+      setColumnMapping(autoMatchColumns(sheet.columns, space, config))
+      setStep('columns')
+    },
+    [space, config],
+  )
+
+  // Step 1 → 2. The file itself decides which path we take.
   const handleParsed = useCallback(
     (result: ParseResult) => {
       setParseResult(result)
-      // Auto-match slot names to travel member display names
-      const autoMapping = buildInitialMapping(result.slots, travel.members)
-      setSlotToTravelMemberId(autoMapping)
+      const path = selectImportPath(result, space)
+      setImportPath(path)
+
+      if (path.kind === 'lossless') {
+        // Ids match: slots are already resolved, so there is nothing to ask.
+        setSlotToTravelMemberId(path.slotToTravelMemberId)
+        setStep('confirm')
+        return
+      }
+
+      // Auto-match slot names to space member display names; the user corrects.
+      setSlotToTravelMemberId(buildInitialMapping(result.slots, space.members))
       setStep('mapping')
     },
-    [travel.members],
+    [space],
   )
 
   // Step 2 (mapping) → preview
@@ -497,34 +662,35 @@ export function ImportXlsxDialog({
     setStep('preview')
   }
 
-  // Step preview → result (runs the actual import + syncs travel lists)
+  // Step preview → result (runs the actual import + syncs space lists)
   async function handleImport() {
     if (!parseResult) return
 
     setIsImporting(true)
     setStep('result')
 
-    const mainCurrency = getTravelMainCurrency(travel)
+    const mainCurrency = getSpaceMainCurrency(space)
     const result = await importParsedRows(
-      travel.travelId,
+      space.spaceId,
       parseResult.rows,
       slotToTravelMemberId,
       currentUserUid,
       mainCurrency,
       (committed, total) => setImportProgress({ committed, total }),
+      getSpaceConfig(space).customFields,
     )
 
-    // ── Sync travel lists ───────────────────────────────────────────────────
+    // ── Sync space lists ───────────────────────────────────────────────────
     // Reuse the same uniqueValues / matchesLabeledList helpers from PreviewStep
-    // to find values not already in the travel and write them via arrayUnion.
-    const travelRef = doc(db, 'travels', travel.travelId)
+    // to find values not already in the space and write them via arrayUnion.
+    const spaceRef = doc(db, 'travels', space.spaceId)
     const listUpdates: Record<string, unknown> = {}
 
     const listFields = [
-      { key: 'country'       as const, field: 'countries',      existing: travel.countries      ?? [], prefix: 'country' },
-      { key: 'city'          as const, field: 'cities',         existing: travel.cities         ?? [], prefix: 'city' },
-      { key: 'category'      as const, field: 'categories',     existing: travel.categories     ?? [], prefix: 'cat' },
-      { key: 'paymentMethod' as const, field: 'paymentMethods', existing: travel.paymentMethods ?? [], prefix: 'pm' },
+      { key: 'country'       as const, field: 'countries',      existing: space.countries      ?? [], prefix: 'country' },
+      { key: 'city'          as const, field: 'cities',         existing: space.cities         ?? [], prefix: 'city' },
+      { key: 'category'      as const, field: 'categories',     existing: space.categories     ?? [], prefix: 'cat' },
+      { key: 'paymentMethod' as const, field: 'paymentMethods', existing: space.paymentMethods ?? [], prefix: 'pm' },
     ] as const
 
     for (const { key, field, existing, prefix } of listFields) {
@@ -543,7 +709,7 @@ export function ImportXlsxDialog({
     }
 
     // Currencies are plain string[], not LabeledItem[]
-    const existingCurrencySet = new Set((travel.currencies ?? []).map((c) => c.toUpperCase()))
+    const existingCurrencySet = new Set((space.currencies ?? []).map((c) => c.toUpperCase()))
     const sheetCurrencies = new Set<string>()
     for (const row of parseResult.rows) {
       if (row.currency) sheetCurrencies.add(row.currency)
@@ -553,9 +719,9 @@ export function ImportXlsxDialog({
 
     if (Object.keys(listUpdates).length > 0) {
       try {
-        await updateDoc(travelRef, listUpdates)
+        await updateDoc(spaceRef, listUpdates)
       } catch (err) {
-        console.error('[ImportXlsxDialog] travel list sync failed:', err)
+        console.error('[ImportXlsxDialog] space list sync failed:', err)
       }
     }
 
@@ -563,15 +729,156 @@ export function ImportXlsxDialog({
     setIsImporting(false)
   }
 
+  // ── Foreign-file derived state ───────────────────────────────────────────
+
+  const mappingErrors = useMemo(
+    () => (foreignSheet ? validateMapping(columnMapping) : []),
+    [foreignSheet, columnMapping],
+  )
+
+  /** Columns the user chose to turn into new fields. */
+  const fieldDrafts = useMemo(
+    () => (foreignSheet ? newFieldDrafts(foreignSheet.columns, columnMapping) : []),
+    [foreignSheet, columnMapping],
+  )
+
+  function updateFieldDraft(columnIndex: number, patch: { label?: string; type?: CustomFieldType }) {
+    const target = columnMapping[columnIndex]
+    if (target?.kind !== 'newField') return
+    setColumnMapping({ ...columnMapping, [columnIndex]: { ...target, ...patch } })
+  }
+
+  /** Built-in list options, for value matching and creation. */
+  const builtInOptions = useMemo(() => ({
+    country:       space.countries      ?? [],
+    city:          space.cities         ?? [],
+    category:      space.categories     ?? [],
+    paymentMethod: space.paymentMethods ?? [],
+  }), [space])
+
+  /** The columns that need a per-column decision: those mapped to something
+   *  with a closed option list where at least one value is unmatched. */
+  const selectColumns = useMemo<SelectColumnInfo[]>(() => {
+    if (!foreignSheet) return []
+    const out: SelectColumnInfo[] = []
+
+    for (const col of foreignSheet.columns) {
+      const target = columnMapping[col.index]
+      if (!target) continue
+
+      let options: LabeledItem[] | null = null
+      let fieldLabel = ''
+
+      if (target.kind === 'custom') {
+        const def = config.customFields.find((f) => f.id === target.fieldId)
+        // text fields have no option list, booleans have a fixed one.
+        if (!def || def.type !== 'select') continue
+        options = def.options ?? []
+        fieldLabel = def.label
+      } else if (target.kind === 'builtIn' && target.field !== 'notes') {
+        options = builtInOptions[target.field as keyof typeof builtInOptions] ?? []
+        fieldLabel = target.field
+      }
+
+      if (options === null) continue
+      const summary = summariseSelectColumn(col, options)
+      if (summary.unmatched.length === 0) continue
+      out.push({ ...summary, fieldLabel, existingOptions: options })
+    }
+    return out
+  }, [foreignSheet, columnMapping, config, builtInOptions])
+
+  /** Foreign import: create any opted-in options, then write the rows. */
+  async function handleForeignImport() {
+    if (!foreignSheet) return
+    setIsImporting(true)
+    setStep('result')
+
+    try {
+      // 1. Materialise any columns the user turned into new fields. This
+      //    rewrites their mapping entries to real field ids, so everything
+      //    downstream sees ordinary custom columns.
+      const created = resolveNewFields(foreignSheet, columnMapping, config.customFields)
+      const effectiveMapping = created.mapping
+      const fieldsAfterCreation = [...config.customFields, ...created.definitions]
+
+      // 2. Options to add to fields that already existed.
+      const pending = collectPendingOptions(
+        foreignSheet, effectiveMapping, selectDecisions, fieldsAfterCreation, builtInOptions,
+      )
+
+      // Both go through updateSpaceConfig — the importer must never write
+      // config itself, so field definitions keep one owner.
+      const updatedFields = withCreatedOptions(fieldsAfterCreation, pending)
+      if (created.definitions.length > 0 || Object.keys(pending.custom).length > 0) {
+        await updateSpaceConfig(space.spaceId, { ...config, customFields: updatedFields })
+      }
+
+      // Built-in lists are plain space arrays.
+      const listUpdates: Record<string, unknown> = {}
+      const listFields = [
+        ['country', 'countries', space.countries, 'country'],
+        ['city', 'cities', space.cities, 'city'],
+        ['category', 'categories', space.categories, 'cat'],
+        ['paymentMethod', 'paymentMethods', space.paymentMethods, 'pm'],
+      ] as const
+      for (const [key, field, existing, prefix] of listFields) {
+        const labels = pending.builtIn[key]
+        if (!labels?.length) continue
+        listUpdates[field] = withCreatedListItems(existing ?? [], labels, prefix)
+      }
+      if (Object.keys(listUpdates).length > 0) {
+        await updateDoc(doc(db, 'travels', space.spaceId), listUpdates)
+      }
+
+      const mergedBuiltIns = {
+        country:       (listUpdates.countries      as LabeledItem[]) ?? space.countries      ?? [],
+        city:          (listUpdates.cities         as LabeledItem[]) ?? space.cities         ?? [],
+        category:      (listUpdates.categories     as LabeledItem[]) ?? space.categories     ?? [],
+        paymentMethod: (listUpdates.paymentMethods as LabeledItem[]) ?? space.paymentMethods ?? [],
+      }
+
+      const { rows } = buildForeignRows({
+        sheet: foreignSheet,
+        mapping: effectiveMapping,
+        decisions: selectDecisions,
+        customFields: updatedFields,
+        builtInOptions: mergedBuiltIns,
+        defaultMemberId: currentUserMemberId(space, currentUserUid),
+        mainCurrency: getSpaceMainCurrency(space),
+      })
+
+      const result = await importForeignRows(
+        space.spaceId, rows, currentUserUid, getSpaceMainCurrency(space),
+        (committed, total) => setImportProgress({ committed, total }),
+      )
+      setImportResult(result)
+    } catch (err) {
+      console.error('[ImportXlsxDialog] foreign import failed:', err)
+      setImportResult({
+        imported: 0, updated: 0, skipped: 0,
+        errors: [err instanceof Error ? err.message : 'The import failed.'],
+      })
+    } finally {
+      setIsImporting(false)
+    }
+  }
+
   // Derive duplicate-mapping status for the import button
   const assignedIds = Object.values(slotToTravelMemberId).filter((id): id is string => id !== undefined)
   const hasDuplicates = assignedIds.length !== new Set(assignedIds).size
 
+  // The lossless path is two steps, not four — labelling it "Step 2 of 4" would
+  // promise work that never comes.
   const stepLabel: Record<Step, string> = {
-    upload:  'Step 1 of 4 — Upload',
+    upload:  'Step 1 — Upload',
+    confirm: 'Step 2 of 2 — Confirm',
     mapping: 'Step 2 of 4 — Member mapping',
     preview: 'Step 3 of 4 — Data preview',
-    result:  'Step 4 of 4 — Done',
+    columns: 'Step 2 — Match columns',
+    fields:  'Step 3 — New fields',
+    values:  'Last step — New values',
+    result:  'Done',
   }
 
   return (
@@ -583,19 +890,66 @@ export function ImportXlsxDialog({
         </DialogHeader>
 
         {/* Step content */}
-        {step === 'upload' && <UploadStep onParsed={handleParsed} />}
+        {step === 'upload' && <UploadStep onParsed={handleParsed} onForeign={handleForeign} />}
 
-        {step === 'mapping' && parseResult && (
-          <MappingStep
-            parseResult={parseResult}
-            travel={travel}
-            slotToTravelMemberId={slotToTravelMemberId}
-            onChange={setSlotToTravelMemberId}
+        {step === 'columns' && foreignSheet && (
+          <ColumnMappingStep
+            columns={foreignSheet.columns}
+            mapping={columnMapping}
+            onChange={setColumnMapping}
+            space={space}
+            config={config}
+            rowCount={foreignSheet.rows.length}
+            errors={mappingErrors}
+            canCreateFields={fieldDrafts.length < MAX_NEW_FIELDS}
           />
         )}
 
+        {step === 'fields' && (
+          <NewFieldsStep
+            drafts={fieldDrafts}
+            onChange={updateFieldDraft}
+            onRemove={(columnIndex) =>
+              setColumnMapping({ ...columnMapping, [columnIndex]: { kind: 'ignore' } })
+            }
+          />
+        )}
+
+        {step === 'values' && (
+          <ValueDecisionStep
+            columns={selectColumns}
+            decisions={selectDecisions}
+            onChange={setSelectDecisions}
+          />
+        )}
+
+        {step === 'confirm' && parseResult && (
+          <LosslessConfirmStep parseResult={parseResult} space={space} />
+        )}
+
+        {step === 'mapping' && parseResult && (
+          <div className="flex flex-col gap-4">
+            {/* Say plainly why matching is being asked for, rather than
+                dropping the user into a table with no explanation. */}
+            {importPath?.kind === 'foreignSpace' && (
+              <ForeignSpaceNotice parseResult={parseResult} />
+            )}
+            {importPath?.kind === 'foreignFile' && importPath.reason && (
+              <div className="rounded-md bg-yellow-50 px-3 py-2 text-sm text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300">
+                {importPath.reason} Values will be matched by name instead.
+              </div>
+            )}
+            <MappingStep
+              parseResult={parseResult}
+              space={space}
+              slotToTravelMemberId={slotToTravelMemberId}
+              onChange={setSlotToTravelMemberId}
+            />
+          </div>
+        )}
+
         {step === 'preview' && parseResult && (
-          <PreviewStep rows={parseResult.rows} travel={travel} />
+          <PreviewStep rows={parseResult.rows} space={space} />
         )}
 
         {step === 'result' && (
@@ -608,6 +962,46 @@ export function ImportXlsxDialog({
             <Button variant="outline" onClick={() => handleOpenChange(false)}>
               Cancel
             </Button>
+          )}
+          {step === 'confirm' && (
+            <>
+              <Button variant="outline" onClick={() => setStep('upload')}>
+                Back
+              </Button>
+              <Button onClick={handleImport}>Import</Button>
+            </>
+          )}
+          {step === 'columns' && (
+            <>
+              <Button variant="outline" onClick={() => setStep('upload')}>
+                Back
+              </Button>
+              <Button
+                onClick={() => setStep(fieldDrafts.length > 0 ? 'fields' : 'values')}
+                disabled={mappingErrors.length > 0}
+              >
+                Next
+              </Button>
+            </>
+          )}
+          {step === 'fields' && (
+            <>
+              <Button variant="outline" onClick={() => setStep('columns')}>
+                Back
+              </Button>
+              <Button onClick={() => setStep('values')}>Next</Button>
+            </>
+          )}
+          {step === 'values' && (
+            <>
+              <Button
+                variant="outline"
+                onClick={() => setStep(fieldDrafts.length > 0 ? 'fields' : 'columns')}
+              >
+                Back
+              </Button>
+              <Button onClick={handleForeignImport}>Import</Button>
+            </>
           )}
           {step === 'mapping' && (
             <>

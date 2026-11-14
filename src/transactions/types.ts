@@ -1,8 +1,11 @@
 import type { Timestamp } from 'firebase/firestore'
+import type { CustomValue } from '@/spaces/types'
 
 export interface Split {
-  // Stable travelMemberId (nanoid) — never a Firebase Auth UID.
-  // Use travel.members.find(m => m.travelMemberId === s.travelMemberId) to resolve display info.
+  /** Stable nanoid identifying a SpaceMember.
+   *  ⚠️ Name kept as `travelMemberId`: it is a Firestore field key, frozen as legacy.
+   *  See docs/SPACE_REFACTOR_SPEC.md §2.1. Never a Firebase Auth UID.
+   *  Use space.members.find(m => m.travelMemberId === s.travelMemberId) to resolve display info. */
   travelMemberId: string
   amount: number // in transaction currency
 }
@@ -26,7 +29,11 @@ export type AdjustmentMode = 'expense' | 'balance_only'
 
 export interface Transaction {
   txId: string
-  date: string // date string "DD-MM-YYYY"
+  /** Date string "DD-MM-YYYY". ⚠️ This format DIFFERS from Space.startDate/endDate
+   *  (ISO "YYYY-MM-DD") — it does not sort lexicographically by chronology, unlike
+   *  ISO. Never compare against a Space date string directly; parse both explicitly
+   *  first (e.g. via parseTxDate() in dashboardHelpers.ts). */
+  date: string
   country?: string   // Stored as plain strings. Country includes the flag emoji prefix (e.g. "🇯🇵 Japan").
   city?: string   // City flag emoji deferred to v2 (requires country→city mapping).
   name: string
@@ -48,4 +55,8 @@ export interface Transaction {
   type?: TransactionType  // Optional for backward compat — undefined treated as 'expense'
   fees?: number           // Withdrawal fees (same currency). Deducted from wallet balance (user received totalAmount - fees).
   adjustmentMode?: AdjustmentMode  // Only meaningful when type === 'adjustment'
+  /** Keyed by CustomFieldDef.id. Absent when the space has no custom fields or
+   *  none were filled. For 'select' fields the value is the OPTION ID, never
+   *  the label — renaming an option updates every transaction for free. */
+  custom?: Record<string, CustomValue>
 }

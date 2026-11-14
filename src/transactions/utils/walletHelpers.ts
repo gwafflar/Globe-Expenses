@@ -3,12 +3,13 @@
 // No React imports — keeping this file pure makes it easy to unit-test with
 // Vitest without needing a browser/DOM environment.
 //
-// A "wallet" is a (paymentMethod, currency) pair for a specific travel member.
+// A "wallet" is a (paymentMethod, currency) pair for a specific space member.
 // The balance is: deposits (withdrawals) minus expenses, plus/minus adjustments.
 // Only payment methods with at least one withdrawal are tracked.
 
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
 import type { TransactionType, AdjustmentMode } from '@/transactions/types'
+import type { SpaceConfig } from '@/spaces/types'
 
 // ---------------------------------------------------------------------------
 // Transaction type helpers
@@ -68,13 +69,51 @@ export function affectsBalance(tx: { type?: TransactionType; adjustmentMode?: Ad
 }
 
 // ---------------------------------------------------------------------------
+// Transaction type availability (Space refactor Phase 5, §2)
+// ---------------------------------------------------------------------------
+
+/** Order the type selector renders in — stable regardless of config. */
+const TYPE_ORDER: TransactionType[] = ['expense', 'transfer', 'withdrawal', 'adjustment']
+
+/**
+ * Which transaction types can be CREATED in this space right now.
+ * - 'expense'    always
+ * - 'transfer'   requires >= 2 members (a transfer needs someone to transfer to)
+ * - 'withdrawal' and 'adjustment' require features.wallets
+ * Order is stable and matches the type selector's pill order.
+ *
+ * @param currentType When editing an existing transaction, pass its type so it
+ *   stays available even if the config no longer offers it for creation (e.g.
+ *   wallets turned off after a withdrawal was recorded). The transaction must
+ *   remain editable without silently coercing its type — that would corrupt
+ *   wallet history. Omit when creating a new transaction.
+ */
+export function availableTransactionTypes(
+  config: SpaceConfig,
+  memberCount: number,
+  currentType?: TransactionType,
+): TransactionType[] {
+  const types = TYPE_ORDER.filter((t) => {
+    if (t === 'transfer') return memberCount >= 2
+    if (t === 'withdrawal' || t === 'adjustment') return config.features.wallets
+    return true
+  })
+  if (currentType && !types.includes(currentType)) {
+    // Insert at its stable position rather than appending, so the pill order
+    // never depends on whether this is an edit.
+    return TYPE_ORDER.filter((t) => types.includes(t) || t === currentType)
+  }
+  return types
+}
+
+// ---------------------------------------------------------------------------
 // Wallet balance computation
 // ---------------------------------------------------------------------------
 
 /** Computed wallet balance for a (paymentMethod, currency) pair. */
 export interface WalletBalance {
   paymentMethod: string      // LabeledItem.id (or raw string for legacy)
-  paymentMethodLabel: string // Display label (resolved from travel's LabeledItem[] by the caller)
+  paymentMethodLabel: string // Display label (resolved from space's LabeledItem[] by the caller)
   currency: string           // ISO 4217 code
   deposited: number          // Sum of withdrawals (totalAmount - fees)
   spent: number              // Sum of expenses paid by this member with this PM + currency
@@ -95,14 +134,14 @@ function memberPaidAmount(
 }
 
 /**
- * Compute wallet balances for a specific travel member across all transactions.
+ * Compute wallet balances for a specific space member across all transactions.
  *
  * Only returns entries for (paymentMethod, currency) pairs that have at least
  * one withdrawal — a payment method with no deposits has no "wallet" to track.
  *
- * @param transactions   All transactions in the travel (from useTransactions)
- * @param travelMemberId The member's stable nanoid (from TravelMember)
- * @param pmLabelMap     Map from paymentMethod id → display label (built by caller from travel.paymentMethods)
+ * @param transactions   All transactions in the space (from useTransactions)
+ * @param travelMemberId The member's stable nanoid (from SpaceMember)
+ * @param pmLabelMap     Map from paymentMethod id → display label (built by caller from space.paymentMethods)
  */
 export function computeWalletBalances(
   transactions: TransactionWithStatus[],

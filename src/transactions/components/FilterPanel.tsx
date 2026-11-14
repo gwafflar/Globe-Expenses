@@ -3,44 +3,23 @@
 // Structure:
 //   1. Search bar (always visible when panel is open)
 //   2. Filter dimension chips — tap to expand that dimension's options
-//   3. Multi-select checkboxes for the expanded dimension
+//   3. Option buttons for the expanded dimension (multi-select, or tri-state
+//      Any/Yes/No for boolean custom fields)
 //   4. Active filter badges showing what's selected
 //   5. "Clear all" button when any filter is active
 //
-// Everything is client-side. No Firestore reads.
+// The panel is generic over the descriptor list produced by filterDimensions.ts:
+// it never branches on a dimension key, so an enabled custom field becomes
+// filterable with no change here. Everything is client-side; no Firestore reads.
 
 import { useState } from 'react'
 import { Input } from '@/components/ui/input'
-import type { Travel } from '@/travels/types'
 import {
   UNDEFINED_FILTER,
-  type FilterDimension,
-  type FilterState,
-  type FilterOptions,
+  type AvailableOptions,
 } from '@/transactions/hooks/useTransactionFilters'
-
-// ---------------------------------------------------------------------------
-// Dimension metadata — label, emoji, display order
-// ---------------------------------------------------------------------------
-
-interface DimensionMeta {
-  key: FilterDimension
-  label: string
-  emoji: string
-  /** Only show this dimension in multi-user travels */
-  multiUserOnly?: boolean
-}
-
-const DIMENSIONS: DimensionMeta[] = [
-  { key: 'type', label: 'Type', emoji: '📋' },
-  { key: 'category', label: 'Category', emoji: '🏷️' },
-  { key: 'currency', label: 'Currency', emoji: '💱' },
-  { key: 'country', label: 'Country', emoji: '🌍' },
-  { key: 'city', label: 'City', emoji: '🏙️' },
-  { key: 'paymentMethod', label: 'Payment', emoji: '💳' },
-  { key: 'paidBy', label: 'Paid by', emoji: '🧑', multiUserOnly: true },
-  { key: 'beneficiaries', label: 'For', emoji: '👥', multiUserOnly: true },
-]
+import type { FilterDimension, FilterState } from '@/transactions/utils/filterDimensions'
+import { rangeLabel, type DateRange } from '@/shared/utils/dateRange'
 
 // ---------------------------------------------------------------------------
 // Props
@@ -49,18 +28,28 @@ const DIMENSIONS: DimensionMeta[] = [
 interface FilterPanelProps {
   searchQuery: string
   onSearchChange: (q: string) => void
+  /** Dimensions to render, in display order (config-derived). */
+  dimensions: FilterDimension[]
   filters: FilterState
-  options: FilterOptions
   /** Cross-filtered: which values still produce results given other active filters. */
-  availableOptions: FilterOptions
-  onToggleFilter: (dimension: FilterDimension, value: string) => void
-  onClearDimension: (dimension: FilterDimension) => void
+  availableOptions: AvailableOptions
+  onToggleFilter: (key: string, value: string) => void
+  /** Exclusive selection, used by tri-state controls. null clears the dimension. */
+  onSetExclusiveFilter: (key: string, value: string | null) => void
+  onClearDimension: (key: string) => void
+  /** Active date-range restriction (set by the dashboard drill-down, §5).
+   *  ALL_TIME means "no restriction" and renders nothing. */
+  dateRange: DateRange
+  onClearDateRange: () => void
+  /** Spending-only restriction (also set by the drill-down, §5). Like the date
+   *  range it has no chip of its own — it arrives from outside and can only be
+   *  cleared here. */
+  spendingOnly: boolean
+  onClearSpendingOnly: () => void
   onClearAll: () => void
   hasActiveFilters: boolean
   resultCount: number
   totalCount: number
-  travel: Travel
-  isSolo: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -70,51 +59,45 @@ interface FilterPanelProps {
 export function FilterPanel({
   searchQuery,
   onSearchChange,
+  dimensions,
   filters,
-  options,
   availableOptions,
   onToggleFilter,
+  onSetExclusiveFilter,
   onClearDimension,
+  dateRange,
+  onClearDateRange,
+  spendingOnly,
+  onClearSpendingOnly,
   onClearAll,
   hasActiveFilters,
   resultCount,
   totalCount,
-  travel,
-  isSolo,
 }: FilterPanelProps) {
-  // Which dimension is currently expanded (showing its checkboxes). null = none.
-  const [expandedDim, setExpandedDim] = useState<FilterDimension | null>(null)
+  // Which dimension is currently expanded (showing its options). null = none.
+  const [expandedKey, setExpandedKey] = useState<string | null>(null)
 
-  // Filter out dimensions that don't apply (solo travel → hide paidBy/beneficiaries)
-  // and dimensions that have no options (e.g. no countries recorded)
-  const visibleDimensions = DIMENSIONS.filter((d) => {
-    if (d.multiUserOnly && isSolo) return false
-    if (options[d.key].length === 0) return false
-    return true
-  })
+  // Hide dimensions with nothing to pick from (e.g. no country recorded yet,
+  // or a select field whose option list is still empty) — same rule as before.
+  const visibleDimensions = dimensions.filter((d) => d.options.length > 0)
 
-  /** Resolve a value to a display label. For member dimensions, resolve travelMemberId → displayName.
-   *  For the UNDEFINED_FILTER sentinel, returns "Undefined". */
-  /** Map for human-readable transaction type labels. */
-  const TYPE_LABELS: Record<string, string> = {
-    expense: 'Expense',
-    transfer: 'Transfer',
-    withdrawal: 'Withdrawal',
-    adjustment: 'Adjustment',
-  }
-
-  function displayLabel(dimension: FilterDimension, value: string): string {
-    if (value === UNDEFINED_FILTER) return 'Undefined'
-    if (dimension === 'type') return TYPE_LABELS[value] ?? value
-    if (dimension === 'paidBy' || dimension === 'beneficiaries') {
-      return travel.members.find((m) => m.travelMemberId === value)?.displayName ?? value
-    }
-    return value
-  }
+  const expanded = visibleDimensions.find((d) => d.key === expandedKey) ?? null
 
   /** Count how many values are selected for a given dimension. */
-  function selectedCount(dimension: FilterDimension): number {
-    return filters[dimension]?.size ?? 0
+  function selectedCount(key: string): number {
+    return filters[key]?.size ?? 0
+  }
+
+  /** Display label for one option id within a dimension. */
+  function optionLabel(dim: FilterDimension, value: string): string {
+    return dim.options.find((o) => o.id === value)?.label ?? value
+  }
+
+  /** "Undefined" and tri-state Yes/No are meaningless on their own, so their
+   *  badges are qualified with the dimension name. A value-level rule — the
+   *  panel still never branches on which dimension it is looking at. */
+  function needsQualifier(dim: FilterDimension, value: string): boolean {
+    return value === UNDEFINED_FILTER || dim.control === 'triState'
   }
 
   return (
@@ -123,7 +106,7 @@ export function FilterPanel({
       <div className="relative">
         <Input
           type="text"
-          placeholder="Search name or amount…"
+          placeholder="Search name, notes or amount…"
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
           className="h-8 pl-8 text-sm"
@@ -138,12 +121,15 @@ export function FilterPanel({
       <div className="flex gap-1.5 overflow-x-auto pb-1">
         {visibleDimensions.map((dim) => {
           const count = selectedCount(dim.key)
-          const isExpanded = expandedDim === dim.key
+          const isExpanded = expandedKey === dim.key
           return (
             <button
               key={dim.key}
               type="button"
-              onClick={() => setExpandedDim(isExpanded ? null : dim.key)}
+              // Accessible name is the plain label — the emoji is decoration.
+              aria-label={dim.label}
+              aria-expanded={isExpanded}
+              onClick={() => setExpandedKey(isExpanded ? null : dim.key)}
               className={`
                 flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium
                 transition-colors
@@ -155,7 +141,7 @@ export function FilterPanel({
                 }
               `}
             >
-              <span>{dim.emoji}</span>
+              {dim.emoji && <span>{dim.emoji}</span>}
               <span>{dim.label}</span>
               {/* Badge showing how many values are selected */}
               {count > 0 && (
@@ -168,18 +154,16 @@ export function FilterPanel({
         })}
       </div>
 
-      {/* Expanded dimension — multi-select checkboxes */}
-      {expandedDim && (
+      {/* Expanded dimension — option buttons */}
+      {expanded && (
         <div className="space-y-1">
           {/* Dimension header with clear button */}
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-muted-foreground">
-              {DIMENSIONS.find((d) => d.key === expandedDim)?.label}
-            </span>
-            {selectedCount(expandedDim) > 0 && (
+            <span className="text-xs font-medium text-muted-foreground">{expanded.label}</span>
+            {selectedCount(expanded.key) > 0 && (
               <button
                 type="button"
-                onClick={() => onClearDimension(expandedDim)}
+                onClick={() => onClearDimension(expanded.key)}
                 className="text-[11px] text-muted-foreground underline hover:text-foreground"
               >
                 Clear
@@ -187,59 +171,118 @@ export function FilterPanel({
             )}
           </div>
 
-          {/* Checkbox list — wraps into multiple rows.
-              Values not in availableOptions are greyed out (no matching transactions
-              given the other active filters), but remain clickable. */}
-          <div className="flex flex-wrap gap-1.5">
-            {options[expandedDim].map((value) => {
-              const isSelected = filters[expandedDim]?.has(value) ?? false
-              // A value is "available" if it appears in the cross-filtered set
-              const isAvailable = availableOptions[expandedDim].includes(value)
-              const label = displayLabel(expandedDim, value)
-              return (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => onToggleFilter(expandedDim, value)}
-                  className={`
-                    rounded-md border px-2 py-1 text-xs transition-colors
-                    ${value === UNDEFINED_FILTER ? 'italic' : ''}
-                    ${isSelected
-                      ? 'border-primary bg-primary text-primary-foreground'
-                      : !isAvailable
-                        ? 'border-input bg-muted text-muted-foreground/40 line-through'
-                        : value === UNDEFINED_FILTER
-                          ? 'border-dashed border-input bg-background text-muted-foreground hover:bg-accent'
-                          : 'border-input bg-background text-foreground hover:bg-accent'
-                    }
-                  `}
-                >
-                  {label}
-                </button>
-              )
-            })}
-          </div>
+          {expanded.control === 'triState' ? (
+            /* Tri-state: Any / Yes / No, mutually exclusive. "Any" is the
+               absence of a filter, so it is simply an empty selection. */
+            <div className="flex flex-wrap gap-1.5">
+              {[{ id: null, label: 'Any' }, ...expanded.options].map((opt) => {
+                const isSelected = opt.id === null
+                  ? selectedCount(expanded.key) === 0
+                  : (filters[expanded.key]?.has(opt.id) ?? false)
+                return (
+                  <button
+                    key={opt.id ?? '__any__'}
+                    type="button"
+                    onClick={() => onSetExclusiveFilter(expanded.key, opt.id)}
+                    className={`
+                      rounded-md border px-2 py-1 text-xs transition-colors
+                      ${isSelected
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : 'border-input bg-background text-foreground hover:bg-accent'
+                      }
+                    `}
+                  >
+                    {opt.label}
+                  </button>
+                )
+              })}
+            </div>
+          ) : (
+            /* Multi-select. Values with no matching transactions given the
+               other active filters are greyed out but remain clickable. */
+            <div className="flex flex-wrap gap-1.5">
+              {expanded.options.map((opt) => {
+                const isSelected = filters[expanded.key]?.has(opt.id) ?? false
+                const isAvailable = availableOptions[expanded.key]?.has(opt.id) ?? false
+                const isSentinel = opt.id === UNDEFINED_FILTER
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => onToggleFilter(expanded.key, opt.id)}
+                    className={`
+                      rounded-md border px-2 py-1 text-xs transition-colors
+                      ${isSentinel ? 'italic' : ''}
+                      ${isSelected
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : !isAvailable
+                          ? 'border-input bg-muted text-muted-foreground/40 line-through'
+                          : isSentinel
+                            ? 'border-dashed border-input bg-background text-muted-foreground hover:bg-accent'
+                            : 'border-input bg-background text-foreground hover:bg-accent'
+                      }
+                    `}
+                  >
+                    {opt.label}
+                  </button>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
 
-      {/* Active filter summary badges */}
+      {/* Active filter summary badges — iterated in dimension display order */}
       {hasActiveFilters && (
         <div className="flex flex-wrap items-center gap-1.5">
-          {/* Show each active filter as a removable badge */}
-          {(Object.entries(filters) as [FilterDimension, Set<string>][]).map(([dim, selected]) =>
-            Array.from(selected).map((value) => (
+          {/* Date-range badge — first, because it constrains every other filter.
+              It has no chip of its own above (there is no in-panel date picker
+              yet); it arrives from the dashboard drill-down and can be cleared. */}
+          {dateRange.preset !== 'all' && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
+              📅 {rangeLabel(dateRange)}
+              <button
+                type="button"
+                aria-label="Remove date range filter"
+                onClick={onClearDateRange}
+                className="ml-0.5 text-primary/60 hover:text-primary"
+              >
+                ×
+              </button>
+            </span>
+          )}
+
+          {/* Spending-only badge — same class of restriction as the date range:
+              pushed in by the drill-down so the list matches the card that was
+              tapped, and clearable here to reveal the movements it excluded. */}
+          {spendingOnly && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
+              💸 Spending only
+              <button
+                type="button"
+                aria-label="Remove spending-only filter"
+                onClick={onClearSpendingOnly}
+                className="ml-0.5 text-primary/60 hover:text-primary"
+              >
+                ×
+              </button>
+            </span>
+          )}
+
+          {dimensions.map((dim) =>
+            Array.from(filters[dim.key] ?? []).map((value) => (
               <span
-                key={`${dim}-${value}`}
+                key={`${dim.key}-${value}`}
                 className={`inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary ${value === UNDEFINED_FILTER ? 'italic' : ''}`}
               >
-                {/* Prefix with dimension label for "Undefined" badges to disambiguate */}
-                {value === UNDEFINED_FILTER
-                  ? `${DIMENSIONS.find((d) => d.key === dim)?.label ?? dim}: Undefined`
-                  : displayLabel(dim, value)}
+                {needsQualifier(dim, value)
+                  ? `${dim.label}: ${optionLabel(dim, value)}`
+                  : optionLabel(dim, value)}
                 {/* × button to remove this single filter value */}
                 <button
                   type="button"
-                  onClick={() => onToggleFilter(dim, value)}
+                  aria-label={`Remove filter ${optionLabel(dim, value)}`}
+                  onClick={() => onToggleFilter(dim.key, value)}
                   className="ml-0.5 text-primary/60 hover:text-primary"
                 >
                   ×

@@ -31,12 +31,12 @@ import type { AdjustmentMode } from '@/transactions/types'
 interface ReconciliationDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  travelId: string
+  spaceId: string
   balance: WalletBalance
   currentTravelMemberId: string
-  // The travel's reference currency for exchange rate computation.
+  // The space's reference currency for exchange rate computation.
   mainCurrency: string
-  /** Per-travel default exchange rates (relative to mainCurrency). */
+  /** Per-space default exchange rates (relative to mainCurrency). */
   defaultRates?: Record<string, number>
   onSuccess: (txId: string) => void
 }
@@ -64,7 +64,7 @@ function formatAmount(n: number): string {
 export function ReconciliationDialog({
   open,
   onOpenChange,
-  travelId,
+  spaceId,
   balance,
   currentTravelMemberId,
   mainCurrency,
@@ -117,7 +117,7 @@ export function ReconciliationDialog({
     const directionLabel = diff > 0 ? 'surplus' : 'shortfall'
     const txName = `Reconciliation ${directionLabel} — ${balance.paymentMethodLabel}`
 
-    const txId = createTransaction(travelId, {
+    const txId = createTransaction(spaceId, {
       date: getTodayDDMMYYYY(),
       name: txName,
       totalAmount: absDiff,

@@ -19,8 +19,8 @@ export interface UserProfile {
   email: string
   nametag?: string         // optional @handle for friend management (v2)
   mainCurrency: string     // ISO 4217 code, e.g. 'EUR'
-  categories: string[]     // user-defined expense categories, global across all travels
-  paymentMethods: string[] // user-defined payment methods, global across all travels
+  categories: string[]     // user-defined expense categories, global across all spaces
+  paymentMethods: string[] // user-defined payment methods, global across all spaces
   createdAt: Timestamp     // Firestore server timestamp set at account creation
 }
 

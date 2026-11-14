@@ -33,3 +33,7 @@ scripts/serviceAccountKey.json
 
 # directory used to share screenshots with Claude Code
 screenshots/*
+
+# Local-only working docs — not meant for the repo
+docs/Audit report.md
+docs/scale-up cost analysis.md

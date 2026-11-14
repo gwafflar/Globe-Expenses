@@ -1,0 +1,663 @@
+// src/spaces/services/spaceService.ts
+// Firestore operations for spaces.
+// ⚠️ Collection path stays `travels/` — frozen as legacy. See docs/SPACE_REFACTOR_SPEC.md §2.1.
+
+import {
+  Timestamp,
+  arrayRemove,
+  arrayUnion,
+  collection,
+  deleteDoc,
+  doc,
+  getDocs,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  writeBatch,
+} from 'firebase/firestore'
+import { nanoid } from 'nanoid'
+import { db } from '@/services/firebase'
+import type { CustomFieldDef, DashboardCardDef, LabeledItem, PresetId, Space, SpaceConfig, SpaceMember, SpaceSettings } from '@/spaces/types'
+import { normaliseMember } from '@/spaces/types'
+import { getFlagForCountry } from '@/shared/data/pickerData'
+import { buildDefaultRates } from '@/shared/utils/exchangeRates'
+import { configFromPreset } from '@/spaces/presets'
+import { normaliseSpaceConfig } from '@/spaces/config'
+
+// ---------------------------------------------------------------------------
+// mapSpaceDoc — the single source of truth for turning a Firestore `travels/`
+// document into a Space. Used by every listener/read that reconstructs a
+// Space (useSpaces.ts, SpaceDetailPage.tsx) so a field added to one path can
+// never silently go missing from another (see docs/SESSION_LOG.md Session 022
+// Bug 1 — `config`/`presetOrigin` were dropped from one hand-rolled mapping
+// and it still type-checked, since both are optional on Space).
+// ---------------------------------------------------------------------------
+
+export function mapSpaceDoc(id: string, data: Record<string, unknown>): Space {
+  return {
+    // Derived from the doc id — spaceId is never written into the document body.
+    spaceId: id,
+    name: data.name as string,
+    emoji: data.emoji as string | undefined,
+    description: data.description as string | undefined,
+    // Apply normaliseMember to handle legacy MemberRef documents transparently
+    members: ((data.members as Record<string, unknown>[]) ?? []).map((m) => normaliseMember(m)),
+    memberUids: (data.memberUids as string[]) ?? [],
+    createdBy: data.createdBy as string,
+    createdAt: data.createdAt as Space['createdAt'],
+    currencies: (data.currencies as string[]) ?? [],
+    mainCurrency: data.mainCurrency as string | undefined,
+    defaultRates: data.defaultRates as Record<string, number> | undefined,
+    settings: data.settings as SpaceSettings | undefined,
+    // Absent on legacy docs — getSpaceConfig() resolves the fallback.
+    config: data.config as SpaceConfig | undefined,
+    presetOrigin: data.presetOrigin as PresetId | undefined,
+    startDate: data.startDate as string | undefined,
+    endDate: data.endDate as string | undefined,
+    // Per-space lists — default to [] for older documents that pre-date this field
+    categories: (data.categories as LabeledItem[]) ?? [],
+    paymentMethods: (data.paymentMethods as LabeledItem[]) ?? [],
+    countries: (data.countries as LabeledItem[]) ?? [],
+    cities: (data.cities as LabeledItem[]) ?? [],
+    archivedByUids: (data.archivedByUids as string[]) ?? [],
+  }
+}
+
+// ---------------------------------------------------------------------------
+// serialiseMember — strips undefined field values before writing to Firestore.
+//
+// Firestore rejects `undefined` values. They can appear when spreading a
+// normalised legacy document that didn't have all SpaceMember fields.
+// Use this in every updateDoc() call that writes the members array.
+// ---------------------------------------------------------------------------
+
+function serialiseMember(m: SpaceMember): Record<string, unknown> {
+  const obj: Record<string, unknown> = {
+    travelMemberId: m.travelMemberId,
+    displayName: m.displayName,
+    userId: m.userId,       // null is valid in Firestore — do not strip
+    allowRename: m.allowRename,
+  }
+  // Only include joinedAt if it's defined (new docs always have it, some legacy may not)
+  if (m.joinedAt !== undefined) obj.joinedAt = m.joinedAt
+  return obj
+}
+
+// ---------------------------------------------------------------------------
+// serialiseCustomFieldDef — strips undefined field values before writing.
+//
+// Firestore rejects `undefined` values. emoji and options are optional and
+// commonly absent, so every config write path must go through this first.
+// ---------------------------------------------------------------------------
+
+function serialiseCustomFieldDef(f: CustomFieldDef): Record<string, unknown> {
+  const obj: Record<string, unknown> = {
+    id: f.id,
+    label: f.label,
+    type: f.type,
+    enabled: f.enabled,
+  }
+  if (f.emoji !== undefined) obj.emoji = f.emoji
+  if (f.options !== undefined) obj.options = f.options
+  return obj
+}
+
+function serialiseDashboardCard(c: DashboardCardDef): Record<string, unknown> {
+  const obj: Record<string, unknown> = { id: c.id, dimensions: [...c.dimensions] }
+  // `title` is an optional override; Firestore rejects undefined values.
+  if (c.title !== undefined) obj.title = c.title
+  return obj
+}
+
+function serialiseSpaceConfig(config: SpaceConfig): Record<string, unknown> {
+  const obj: Record<string, unknown> = {
+    builtInFields: { ...config.builtInFields },
+    features: { ...config.features },
+    customFields: config.customFields.map(serialiseCustomFieldDef),
+  }
+  // Absent means "never edited" and must STAY absent, so the space keeps
+  // resolving to the legacy default card set (Phase 7a §6). An empty array is
+  // a real value — the user deleted every card — and is written as such.
+  if (config.dashboardCards !== undefined) {
+    obj.dashboardCards = config.dashboardCards.map(serialiseDashboardCard)
+  }
+  return obj
+}
+
+// ---------------------------------------------------------------------------
+// Create
+// ---------------------------------------------------------------------------
+
+interface CreateSpaceInput {
+  uid: string
+  displayName: string
+  name: string
+  emoji?: string
+  description?: string
+  mainCurrency: string  // ISO 4217 — the reference currency for all exchange rate conversions
+  // Extra currencies selected in the "Other currencies" control (travel preset only).
+  // Defaults to [mainCurrency] when absent so it still appears in dropdowns.
+  currencies?: string[]
+  // Optional trip dates (travel preset only) — ISO "YYYY-MM-DD", see Space.startDate/endDate.
+  startDate?: string
+  endDate?: string
+  // Defaults to 'travel' so callers not yet updated to the Phase 4 creation
+  // flow keep creating spaces with the pre-refactor behaviour.
+  presetId?: PresetId
+  // Explicit config from the "Customize fields" accordion (Phase 4). When absent,
+  // falls back to configFromPreset(presetId) — the pre-Phase-4 behaviour.
+  config?: SpaceConfig
+}
+
+// Fire-and-forget (decision #25): doc() generates the ID client-side,
+// synchronously — no network round-trip needed. setDoc() is NOT awaited.
+// Firestore writes to the local cache immediately and replays the write when
+// connectivity returns; awaiting it would hang forever offline, because the
+// write promise only settles on server acknowledgment. Same pattern as
+// createTransaction() in transactionService.ts.
+export function createSpace(input: CreateSpaceInput): string {
+  const {
+    uid, displayName, name, emoji, description, mainCurrency,
+    currencies, startDate, endDate, presetId = 'travel', config,
+  } = input
+
+  // Collection name stays `travels` — Firestore path frozen as legacy.
+  // doc() with no ID argument generates a unique random ID client-side.
+  const spaceRef = doc(collection(db, 'travels'))
+
+  // Creator gets a stable travelMemberId (nanoid). Their Firebase Auth UID is stored in
+  // both userId (slot link) and memberUids (access control flat array).
+  const creatorMember: SpaceMember = {
+    travelMemberId: nanoid(),
+    displayName,
+    userId: uid,
+    allowRename: true,
+    joinedAt: Timestamp.now(),
+  }
+
+  const resolvedConfig = normaliseSpaceConfig(config ?? configFromPreset(presetId))
+
+  const docData: Record<string, unknown> = {
+    name,
+    members: [serialiseMember(creatorMember)],
+    memberUids: [uid],
+    createdBy: uid,
+    createdAt: serverTimestamp(),
+    // Seed with main currency (+ any extras picked in the accordion) so they appear in dropdowns.
+    currencies: currencies && currencies.length > 0 ? currencies : [mainCurrency],
+    mainCurrency,
+    // Seed exchange rates from hardcoded defaults, relative to mainCurrency.
+    defaultRates: buildDefaultRates(mainCurrency),
+    // Per-space lists initialised empty
+    categories: [],
+    paymentMethods: [],
+    countries: [],
+    cities: [],
+    config: serialiseSpaceConfig(resolvedConfig),
+    presetOrigin: presetId,
+  }
+
+  if (emoji?.trim()) docData.emoji = emoji.trim()
+  if (description?.trim()) docData.description = description.trim()
+  if (startDate) docData.startDate = startDate
+  if (endDate) docData.endDate = endDate
+
+  setDoc(spaceRef, docData).catch((err: unknown) => {
+    console.error('[spaceService] createSpace failed:', err)
+  })
+
+  return spaceRef.id
+}
+
+// ---------------------------------------------------------------------------
+// Update name / emoji (auto-save, called on blur)
+// ---------------------------------------------------------------------------
+
+export async function updateSpaceMeta(
+  spaceId: string,
+  fields: { name?: string; emoji?: string },
+): Promise<void> {
+  const ref = doc(db, 'travels', spaceId)
+  const update: Record<string, unknown> = {}
+  if (fields.name !== undefined) update.name = fields.name
+  if (fields.emoji !== undefined) update.emoji = fields.emoji
+  if (Object.keys(update).length > 0) await updateDoc(ref, update)
+}
+
+// ---------------------------------------------------------------------------
+// Update settings (trackLocation toggle)
+// ---------------------------------------------------------------------------
+
+export async function updateSpaceSettings(
+  spaceId: string,
+  settings: SpaceSettings,
+): Promise<void> {
+  const ref = doc(db, 'travels', spaceId)
+  await updateDoc(ref, { settings })
+}
+
+// ---------------------------------------------------------------------------
+// Update the space's SpaceConfig (Fields editor — Phase 3).
+// Whole-object write: the Fields editor always submits the complete config.
+// ---------------------------------------------------------------------------
+
+export async function updateSpaceConfig(spaceId: string, config: SpaceConfig): Promise<void> {
+  const ref = doc(db, 'travels', spaceId)
+  await updateDoc(ref, { config: serialiseSpaceConfig(normaliseSpaceConfig(config)) })
+}
+
+/**
+ * Persist the dashboard breakdown cards (Phase 7a §6).
+ *
+ * Dot-notation so the rest of `config` is never rewritten — two members editing
+ * different sections of the config concurrently can't clobber each other. On a
+ * legacy space with no `config` map at all this creates one holding only
+ * `dashboardCards`; getSpaceConfig() resolves every other key to its legacy
+ * default, so a partial config is a supported state.
+ *
+ * Fire-and-forget: safe offline, replayed on reconnect, same pattern as
+ * ensureMultiCurrency().
+ */
+export function updateSpaceDashboardCards(spaceId: string, cards: DashboardCardDef[]): void {
+  const ref = doc(db, 'travels', spaceId)
+  updateDoc(ref, { 'config.dashboardCards': cards.map(serialiseDashboardCard) })
+    .catch((err: unknown) => {
+      console.error('[spaceService] updateSpaceDashboardCards failed:', err)
+    })
+}
+
+/** Updates the display-only preset badge. Never drives behaviour. */
+export async function updateSpacePresetOrigin(spaceId: string, presetId: PresetId): Promise<void> {
+  const ref = doc(db, 'travels', spaceId)
+  await updateDoc(ref, { presetOrigin: presetId })
+}
+
+/**
+ * Sticky multi-currency upgrade (SPEC §6.2). Fire-and-forget, same pattern as
+ * syncTransactionLocation(): safe offline, replayed on reconnect.
+ * No-op when already true. Wired into the transaction form in Phase 5.
+ */
+export function ensureMultiCurrency(spaceId: string, config: SpaceConfig): void {
+  if (config.features.multiCurrency) return
+  const ref = doc(db, 'travels', spaceId)
+  updateDoc(ref, { 'config.features.multiCurrency': true }).catch((err: unknown) => {
+    console.error('[spaceService] ensureMultiCurrency failed:', err)
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Generic list update helper
+// Used by all four per-space lists: categories, paymentMethods, countries, cities
+// ---------------------------------------------------------------------------
+
+type SpaceListField = 'categories' | 'paymentMethods' | 'countries' | 'cities'
+
+export async function updateSpaceCurrencies(
+  spaceId: string,
+  currencies: string[],
+): Promise<void> {
+  const ref = doc(db, 'travels', spaceId)
+  await updateDoc(ref, { currencies })
+}
+
+// ---------------------------------------------------------------------------
+// Update a single default exchange rate for a currency.
+// Uses dot-notation to update a single key without overwriting the whole map.
+// ---------------------------------------------------------------------------
+
+export async function updateSpaceDefaultRate(
+  spaceId: string,
+  currencyCode: string,
+  rate: number,
+): Promise<void> {
+  const ref = doc(db, 'travels', spaceId)
+  await updateDoc(ref, { [`defaultRates.${currencyCode}`]: rate })
+}
+
+export async function updateSpaceList(
+  spaceId: string,
+  field: SpaceListField,
+  items: LabeledItem[],
+): Promise<void> {
+  const ref = doc(db, 'travels', spaceId)
+  await updateDoc(ref, { [field]: items })
+}
+
+// ---------------------------------------------------------------------------
+// Sync country/city from a new transaction into the space's lists.
+// Called after createTransaction() — ensures Parameters tab and future
+// TransactionForm dropdowns reflect newly used locations immediately.
+//
+// Returns { newCountry, newCity } — the LabeledItems that were added
+// (null if already present). SpaceDetailPage uses this to update local state.
+// ---------------------------------------------------------------------------
+
+export async function syncTransactionLocation(
+  spaceId: string,
+  country: string | undefined,
+  city: string | undefined,
+  existingCountries: LabeledItem[],
+  existingCities: LabeledItem[],
+): Promise<{ newCountry: LabeledItem | null; newCity: LabeledItem | null }> {
+  const ref = doc(db, 'travels', spaceId)
+  const updates: Record<string, unknown> = {}
+
+  let newCountry: LabeledItem | null = null
+  let newCity: LabeledItem | null = null
+
+  if (country) {
+    const alreadyHas = existingCountries.some(
+      (c) => c.label.toLowerCase() === country.toLowerCase(),
+    )
+    if (!alreadyHas) {
+      const flag = getFlagForCountry(country)
+      newCountry = { id: `country-${Date.now()}`, label: country, emoji: flag }
+      // arrayUnion safely handles concurrent writes from multiple members
+      updates.countries = arrayUnion(newCountry)
+    }
+  }
+
+  if (city) {
+    const alreadyHas = existingCities.some(
+      (c) => c.label.toLowerCase() === city.toLowerCase(),
+    )
+    if (!alreadyHas) {
+      newCity = { id: `city-${Date.now()}`, label: city }
+      updates.cities = arrayUnion(newCity)
+    }
+  }
+
+  if (Object.keys(updates).length > 0) {
+    // Fire-and-forget — same pattern as createTransaction.
+    // If offline, Firestore queues it and syncs on reconnect.
+    updateDoc(ref, updates).catch((err) => {
+      console.error('[syncTransactionLocation] updateDoc failed:', err)
+    })
+  }
+
+  return { newCountry, newCity }
+}
+
+// ---------------------------------------------------------------------------
+// SpaceMember operations
+//
+// These functions write the full members array (via serialiseMember) so that
+// Firestore never receives undefined field values from normalised legacy docs.
+//
+// IMPORTANT invariants:
+//  - memberUids is NEVER modified by claim/unclaim — it is access control only.
+//  - claimSpaceMember implements transfer semantics: if the userId already owns
+//    another slot, that slot is silently set to userId: null first.
+// ---------------------------------------------------------------------------
+
+/** Adds a name-only unclaimed member slot. memberUids unchanged. */
+export async function addUnclaimedMember(
+  spaceId: string,
+  displayName: string,
+  currentMembers: SpaceMember[],
+): Promise<SpaceMember> {
+  const ref = doc(db, 'travels', spaceId)
+  const newMember: SpaceMember = {
+    travelMemberId: nanoid(),
+    displayName,
+    userId: null,           // unclaimed — no Auth account linked yet
+    allowRename: true,
+    joinedAt: Timestamp.now(),
+  }
+  const updated = [...currentMembers, newMember]
+  await updateDoc(ref, { members: updated.map(serialiseMember) })
+  return newMember
+}
+
+/** Renames a slot. Caller must verify permission before calling. */
+export async function renameSpaceMember(
+  spaceId: string,
+  travelMemberId: string,
+  newName: string,
+  currentMembers: SpaceMember[],
+): Promise<void> {
+  const ref = doc(db, 'travels', spaceId)
+  const updated = currentMembers.map((m) =>
+    m.travelMemberId === travelMemberId ? { ...m, displayName: newName } : m,
+  )
+  await updateDoc(ref, { members: updated.map(serialiseMember) })
+}
+
+/**
+ * Claims a slot for a Firebase Auth user.
+ * Transfer semantics: if the userId already owns another slot, that slot is
+ * silently set to userId: null before the target slot is claimed.
+ * memberUids is NOT modified — access was already granted on join.
+ */
+export async function claimSpaceMember(
+  spaceId: string,
+  travelMemberId: string,
+  userId: string,
+  currentMembers: SpaceMember[],
+): Promise<void> {
+  const ref = doc(db, 'travels', spaceId)
+  const updated = currentMembers.map((m) => {
+    if (m.travelMemberId === travelMemberId) {
+      // Claim this slot for the user
+      return { ...m, userId }
+    }
+    if (m.userId === userId) {
+      // The user previously owned this other slot — release it (transfer semantics)
+      return { ...m, userId: null }
+    }
+    return m
+  })
+  await updateDoc(ref, { members: updated.map(serialiseMember) })
+}
+
+/**
+ * Unclaims a slot — sets userId to null.
+ * memberUids is NOT modified. The person whose account was unlinked retains access.
+ */
+export async function unclaimSpaceMember(
+  spaceId: string,
+  travelMemberId: string,
+  currentMembers: SpaceMember[],
+): Promise<void> {
+  const ref = doc(db, 'travels', spaceId)
+  const updated = currentMembers.map((m) =>
+    m.travelMemberId === travelMemberId ? { ...m, userId: null } : m,
+  )
+  // memberUids intentionally NOT touched — access control is unchanged
+  await updateDoc(ref, { members: updated.map(serialiseMember) })
+}
+
+/** Toggles the allowRename flag on a slot. */
+export async function setMemberAllowRename(
+  spaceId: string,
+  travelMemberId: string,
+  allowRename: boolean,
+  currentMembers: SpaceMember[],
+): Promise<void> {
+  const ref = doc(db, 'travels', spaceId)
+  const updated = currentMembers.map((m) =>
+    m.travelMemberId === travelMemberId ? { ...m, allowRename } : m,
+  )
+  await updateDoc(ref, { members: updated.map(serialiseMember) })
+}
+
+// ---------------------------------------------------------------------------
+// Leave / Delete space
+//
+// "Leave" removes the current user from memberUids (revokes access) and
+// unclaims their member slot (sets userId to null). The slot itself is kept
+// so that existing transaction splits referencing the travelMemberId stay valid.
+//
+// If the leaving user is the creator and other real users remain, createdBy
+// is reassigned to a random remaining real user.
+//
+// "Delete" hard-deletes the space doc AND all child transactions. Used when
+// the user is the only real user left (solo space or last person standing).
+//
+// Impact on memberUids: YES — arrayRemove(uid) revokes Firestore access.
+// Impact on members:    slot is unclaimed (userId → null), NOT removed.
+// ---------------------------------------------------------------------------
+
+/**
+ * Leaves a multi-user space. The user's UID is removed from memberUids
+ * (revoking access) and their member slot is unclaimed (userId → null).
+ * If the user is the creator, createdBy is reassigned to another real user.
+ */
+export async function leaveSpace(
+  spaceId: string,
+  uid: string,
+  currentMembers: SpaceMember[],
+  currentMemberUids: string[],
+  currentCreatedBy: string,
+): Promise<void> {
+  const ref = doc(db, 'travels', spaceId)
+
+  // Unclaim the leaving user's slot but keep the slot for split integrity
+  const updatedMembers = currentMembers.map((m) =>
+    m.userId === uid ? { ...m, userId: null } : m,
+  )
+
+  const update: Record<string, unknown> = {
+    memberUids: arrayRemove(uid),
+    members: updatedMembers.map(serialiseMember),
+  }
+
+  // Reassign creator if needed — pick a random remaining user from memberUids.
+  // Uses memberUids (not members with non-null userId) because a user in
+  // memberUids who hasn't claimed a slot is still a real user with access.
+  if (currentCreatedBy === uid) {
+    const remaining = currentMemberUids.filter((u) => u !== uid)
+    if (remaining.length > 0) {
+      update.createdBy = remaining[Math.floor(Math.random() * remaining.length)]
+    }
+  }
+
+  await updateDoc(ref, update)
+}
+
+/**
+ * Hard-deletes a space and all its child transactions.
+ * Used for solo spaces or when the user is the last real user.
+ */
+export async function deleteSpace(spaceId: string): Promise<void> {
+  // Delete all transactions in the subcollection first
+  // (Firestore does not cascade-delete subcollections)
+  const txRef = collection(db, 'travels', spaceId, 'transactions')
+  const txSnapshot = await getDocs(txRef)
+
+  // Batch delete transactions (max 500 per batch — fine for v1)
+  if (!txSnapshot.empty) {
+    const batch = writeBatch(db)
+    txSnapshot.docs.forEach((txDoc) => batch.delete(txDoc.ref))
+    await batch.commit()
+  }
+
+  // Delete the space document itself
+  const spaceRef = doc(db, 'travels', spaceId)
+  await deleteDoc(spaceRef)
+}
+
+// ---------------------------------------------------------------------------
+// Archive / Unarchive
+//
+// Per-user archive: each user can independently archive/unarchive a space.
+// The user's UID is added to / removed from archivedByUids[].
+//
+// No impact on memberUids or members — purely additive.
+// ---------------------------------------------------------------------------
+
+/** Archives a space for the current user. */
+export async function archiveSpace(spaceId: string, uid: string): Promise<void> {
+  const ref = doc(db, 'travels', spaceId)
+  await updateDoc(ref, { archivedByUids: arrayUnion(uid) })
+}
+
+/** Unarchives a space for the current user. */
+export async function unarchiveSpace(spaceId: string, uid: string): Promise<void> {
+  const ref = doc(db, 'travels', spaceId)
+  await updateDoc(ref, { archivedByUids: arrayRemove(uid) })
+}
+
+// ---------------------------------------------------------------------------
+// mergeMembers
+//
+// Merges two member slots (keepId + deleteId) into one.
+// All references to `deleteId` in every transaction's paidBy / beneficiaries
+// are rewritten to `keepId`. If both members appear in the same Split array,
+// their amounts are summed (no duplicate travelMemberIds after merge).
+// The `deleteId` slot is then removed from space.members.
+//
+// Everything runs in a single Firestore batch.
+// Firestore batch limit: 500 writes. Fine for v1 (spaces rarely have 490+ transactions).
+// ---------------------------------------------------------------------------
+
+export async function mergeMembers(
+  spaceId: string,
+  keepId: string,
+  deleteId: string,
+  currentMembers: SpaceMember[],
+  currentCreatedBy: string,
+): Promise<void> {
+  const batch = writeBatch(db)
+
+  // --- 1. Read all transactions -----------------------------------------
+  const txCol = collection(db, 'travels', spaceId, 'transactions')
+  const txSnapshot = await getDocs(txCol)
+
+  // Helper: rewrite a Split[] replacing deleteId → keepId, merging amounts if both present
+  function rewriteSplits(splits: { travelMemberId: string; amount: number }[]) {
+    const hasKeep = splits.some((s) => s.travelMemberId === keepId)
+    const hasDelete = splits.some((s) => s.travelMemberId === deleteId)
+    if (!hasDelete) return null  // no change needed
+
+    if (hasKeep) {
+      // Both exist — sum amounts onto keepId, remove deleteId
+      const result: { travelMemberId: string; amount: number }[] = []
+      let keepAmount = 0
+      for (const s of splits) {
+        if (s.travelMemberId === keepId || s.travelMemberId === deleteId) {
+          keepAmount += s.amount
+        } else {
+          result.push(s)
+        }
+      }
+      result.push({ travelMemberId: keepId, amount: keepAmount })
+      return result
+    } else {
+      // Only deleteId exists — rename to keepId
+      return splits.map((s) =>
+        s.travelMemberId === deleteId ? { ...s, travelMemberId: keepId } : s,
+      )
+    }
+  }
+
+  // --- 2. Batch-update each affected transaction ------------------------
+  txSnapshot.docs.forEach((txDoc) => {
+    const data = txDoc.data()
+    const paidBy: { travelMemberId: string; amount: number }[] = data.paidBy ?? []
+    const beneficiaries: { travelMemberId: string; amount: number }[] = data.beneficiaries ?? []
+
+    const newPaidBy = rewriteSplits(paidBy)
+    const newBeneficiaries = rewriteSplits(beneficiaries)
+
+    if (newPaidBy || newBeneficiaries) {
+      batch.update(txDoc.ref, {
+        ...(newPaidBy ? { paidBy: newPaidBy } : {}),
+        ...(newBeneficiaries ? { beneficiaries: newBeneficiaries } : {}),
+      })
+    }
+  })
+
+  // --- 3. Update space: remove deleteId slot, reassign createdBy if needed
+  const spaceRef = doc(db, 'travels', spaceId)
+  const updatedMembers = currentMembers.filter((m) => m.travelMemberId !== deleteId)
+  const spaceUpdate: Record<string, unknown> = {
+    members: updatedMembers.map(serialiseMember),
+  }
+  if (currentCreatedBy === deleteId) {
+    spaceUpdate.createdBy = keepId
+  }
+  batch.update(spaceRef, spaceUpdate)
+
+  await batch.commit()
+}
