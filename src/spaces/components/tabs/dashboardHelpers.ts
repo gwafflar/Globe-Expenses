@@ -9,6 +9,7 @@
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
 import type { Split } from '@/transactions/types'
 import type { Space, SpaceMember } from '@/spaces/types'
+import { getLocale, getT } from '@/i18n'
 
 // ---------------------------------------------------------------------------
 // PeriodFilter — discriminated union describing which time window is active
@@ -311,11 +312,14 @@ export function formatDayLabel(dateStr: string): string {
   const dMidnight = new Date(d)
   dMidnight.setHours(0, 0, 0, 0)
 
-  if (dMidnight.getTime() === today.getTime())     return 'Today'
-  if (dMidnight.getTime() === yesterday.getTime()) return 'Yest.'
+  // Language and locale read at call time (not at module level), so a
+  // language change takes effect on the caller's next render.
+  const t = getT().dashboard
+  if (dMidnight.getTime() === today.getTime())     return t.day.today
+  if (dMidnight.getTime() === yesterday.getTime()) return t.day.yesterday
 
-  // e.g. "Mar 12"
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+  // e.g. "Mar 12" / "12 mars"
+  return d.toLocaleDateString(getLocale(), { month: 'short', day: 'numeric' })
 }
 
 // ---------------------------------------------------------------------------
@@ -331,11 +335,13 @@ export function dateRangeLabel(
   transactions: TransactionWithStatus[],
   tripDurationDays: number,
 ): string {
+  const t = getT().dashboard
+  const locale = getLocale()
   const shortDate = (d: Date) =>
-    d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    d.toLocaleDateString(locale, { month: 'short', day: 'numeric' })
 
   if (period.type === 'all') {
-    if (transactions.length === 0) return `${tripDurationDays} days`
+    if (transactions.length === 0) return t.day.days(tripDurationDays)
     const dates = transactions.map((tx) => parseTxDate(tx.date).getTime())
     const min = new Date(Math.min(...dates))
     const max = new Date(Math.max(...dates))
@@ -343,7 +349,7 @@ export function dateRangeLabel(
     return `${shortDate(min)}–${shortDate(max)}`
   }
 
-  if (period.type === 'today') return 'Today'
+  if (period.type === 'today') return t.day.today
 
   if (period.type === 'days') {
     const to   = todayMidnight()

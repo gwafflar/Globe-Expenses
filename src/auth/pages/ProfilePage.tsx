@@ -43,9 +43,11 @@ import {
 import { ChevronLeft, LogOut, UserPlus, Check, X, Search, Share2 } from 'lucide-react'
 import { createShareableInvite } from '@/friends/services/friendService'
 import { InstallPromptBanner } from '@/shared/components/InstallPromptBanner'
-import { ALL_CURRENCIES } from '@/shared/data/pickerData'
+import { ALL_CURRENCIES, localizedCurrencyName } from '@/shared/data/pickerData'
+import { useLocale, useT } from '@/i18n'
 import { FeedbackForm } from '@/feedback/components/FeedbackForm'
 import { DeviceNotificationToggle } from '@/notifications/components/DeviceNotificationToggle'
+import { LanguageSelect } from '@/auth/components/LanguageSelect'
 
 // ---------------------------------------------------------------------------
 // Avatar color
@@ -149,6 +151,13 @@ export function ProfilePage() {
   const [generatedInviteUrl, setGeneratedInviteUrl] = useState<string | null>(null)
   const [copyFeedback, setCopyFeedback] = useState(false)
 
+  // translation hook — re-renders when the language changes.
+  // Must stay above the early `return null` below (hooks run on every render).
+  const t = useT()
+  const p = t.profile // shorthand for this page's namespace
+  // Intl locale tag (e.g. 'fr-BE'), used for the localized currency names
+  const locale = useLocale()
+
   // Guard: should not reach this page without being authenticated
   if (!currentUser || !userProfile) return null
 
@@ -178,7 +187,7 @@ export function ProfilePage() {
       if (nametagChanged && trimmedTag !== '') {
         const available = await isNametagAvailable(trimmedTag)
         if (!available) {
-          setIdentityMsg({ ok: false, text: '@' + trimmedTag + ' is already taken.' })
+          setIdentityMsg({ ok: false, text: p.identity.tagTaken({ tag: trimmedTag }) })
           return
         }
       }
@@ -205,15 +214,15 @@ export function ProfilePage() {
       // Keeps TransactionForm and other consumers in sync without re-fetch.
       setUserProfile({ ...userProfile, displayName: trimmedName, nametag: trimmedTag || userProfile.nametag || '' })
 
-      setIdentityMsg({ ok: true, text: 'Saved.' })
+      setIdentityMsg({ ok: true, text: p.saved })
     } catch (err: unknown) {
       // FirestoreError with code 'permission-denied' means the nametag was
       // claimed between our availability check and the batch write (race condition).
       const code = (err as { code?: string })?.code
       if (code === 'permission-denied') {
-        setIdentityMsg({ ok: false, text: '@' + nametag + ' was just taken. Try another handle.' })
+        setIdentityMsg({ ok: false, text: p.identity.tagJustTaken({ tag: nametag }) })
       } else {
-        setIdentityMsg({ ok: false, text: 'Failed to save. Please try again.' })
+        setIdentityMsg({ ok: false, text: p.saveFailed })
       }
     } finally {
       setIdentitySaving(false)
@@ -232,9 +241,9 @@ export function ProfilePage() {
       await updateUserProfile(currentUser.uid, { mainCurrency })
       // Update Zustand cache so new spaces created with this user default to the new currency
       setUserProfile({ ...userProfile!, mainCurrency })
-      setMainCurrencyMsg({ ok: true, text: 'Saved.' })
+      setMainCurrencyMsg({ ok: true, text: p.saved })
     } catch {
-      setMainCurrencyMsg({ ok: false, text: 'Failed to save. Please try again.' })
+      setMainCurrencyMsg({ ok: false, text: p.saveFailed })
     } finally {
       setMainCurrencySaving(false)
     }
@@ -388,10 +397,10 @@ export function ProfilePage() {
           className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
           <ChevronLeft className="h-4 w-4" />
-          All spaces
+          {p.allSpaces}
         </button>
         {/* Centered title */}
-        <h1 className="absolute left-1/2 -translate-x-1/2 text-base font-semibold">Profile</h1>
+        <h1 className="absolute left-1/2 -translate-x-1/2 text-base font-semibold">{p.title}</h1>
       </header>
 
       {/* Install PWA banner — shown on mobile browsers only, hidden once installed */}
@@ -408,7 +417,7 @@ export function ProfilePage() {
             {initials}
           </div>
           <p className="text-lg font-semibold leading-tight">
-            {userProfile.displayName || 'No name set'}
+            {userProfile.displayName || p.noName}
           </p>
           {userProfile.nametag && (
             <p className="text-sm text-muted-foreground">@{userProfile.nametag}</p>
@@ -416,19 +425,19 @@ export function ProfilePage() {
         </div>
 
         {/* Identity */}
-        <Section title="Identity">
+        <Section title={p.sections.identity}>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="displayName">Display name</Label>
+            <Label htmlFor="displayName">{p.identity.displayName}</Label>
             <Input
               id="displayName"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="Your name"
+              placeholder={p.identity.displayNamePlaceholder}
             />
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="nametag">Username</Label>
+            <Label htmlFor="nametag">{p.identity.username}</Label>
             {/* Prefix @ is shown as a static label, the input holds the handle only */}
             <div className="flex items-center rounded-md border border-input bg-background px-3 focus-within:ring-2 focus-within:ring-ring">
               <span className="shrink-0 text-sm text-muted-foreground">@</span>
@@ -437,18 +446,18 @@ export function ProfilePage() {
                 type="text"
                 value={nametag}
                 onChange={(e) => setNametag(e.target.value.replace(/^@/, '').toLowerCase())}
-                placeholder="yourhandle"
+                placeholder={p.identity.usernamePlaceholder}
                 className="flex-1 bg-transparent py-2 pl-1 text-sm focus:outline-none"
               />
             </div>
             <p className="text-xs text-muted-foreground">
-              Used to find and add friends. Must be unique.
+              {p.identity.usernameHint}
             </p>
           </div>
 
           <div className="flex items-center gap-3">
             <Button type="button" onClick={handleSaveIdentity} disabled={identitySaving}>
-              {identitySaving ? 'Saving…' : 'Save'}
+              {identitySaving ? t.common.saving : t.common.save}
             </Button>
             {identityMsg && (
               <p className={`text-xs ${identityMsg.ok ? 'text-green-600' : 'text-destructive'}`}>
@@ -459,37 +468,40 @@ export function ProfilePage() {
         </Section>
 
         {/* Security */}
-        <Section title="Security">
+        <Section title={p.sections.security}>
           <div className="flex flex-col gap-1">
-            <Label>Email</Label>
+            <Label>{p.security.email}</Label>
             <p className="text-sm text-muted-foreground">{currentUser.email}</p>
           </div>
 
           <div className="flex flex-col gap-2">
-            <Label>Password</Label>
+            <Label>{p.security.password}</Label>
             <Button type="button" variant="outline" className="self-start" onClick={handlePasswordReset}>
-              Send password reset email
+              {p.security.sendReset}
             </Button>
             {resetState === 'sent' && (
               <p className="text-xs text-green-600">
-                Reset email sent to {currentUser.email}. Check your inbox.
+                {p.security.resetSent({ email: currentUser.email })}
               </p>
             )}
             {resetState === 'error' && (
               <p className="text-xs text-destructive">
-                Failed to send reset email. Please try again.
+                {p.security.resetFailed}
               </p>
             )}
           </div>
         </Section>
 
         {/* Preferences */}
-        <Section title="Preferences">
+        <Section title={p.sections.preferences}>
+          {/* UI language — applies immediately, saved on the profile */}
+          <LanguageSelect uid={currentUser.uid} />
+
           {/* Favorite main space currency — used as default when creating new spaces */}
           <div className="flex flex-col gap-2">
-            <Label htmlFor="mainCurrency">Favorite main space currency</Label>
+            <Label htmlFor="mainCurrency">{p.preferences.mainCurrency}</Label>
             <p className="text-xs text-muted-foreground">
-              Used as the default when you create a new space. Can be overridden per space.
+              {p.preferences.mainCurrencyHint}
             </p>
             <select
               id="mainCurrency"
@@ -497,8 +509,9 @@ export function ProfilePage() {
               onChange={(e) => setMainCurrency(e.target.value)}
               className="rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
-              {ALL_CURRENCIES.map(([code, symbol, name]) => (
-                <option key={code} value={code}>{code} ({symbol}) — {name}</option>
+              {/* Code and symbol are universal; only the name follows the UI language */}
+              {ALL_CURRENCIES.map(([code, symbol]) => (
+                <option key={code} value={code}>{code} ({symbol}) — {localizedCurrencyName(code, locale)}</option>
               ))}
             </select>
             <div className="flex items-center gap-3">
@@ -507,7 +520,7 @@ export function ProfilePage() {
                 onClick={handleSaveMainCurrency}
                 disabled={mainCurrencySaving || mainCurrency === userProfile.mainCurrency}
               >
-                {mainCurrencySaving ? 'Saving…' : 'Save'}
+                {mainCurrencySaving ? t.common.saving : t.common.save}
               </Button>
               {mainCurrencyMsg && (
                 <p className={`text-xs ${mainCurrencyMsg.ok ? 'text-green-600' : 'text-destructive'}`}>
@@ -524,15 +537,15 @@ export function ProfilePage() {
           {/* Theme toggle — v2 */}
           <div className="flex items-center justify-between opacity-50">
             <div>
-              <p className="text-sm font-medium">Dark mode</p>
-              <p className="text-xs text-muted-foreground">Theme preference</p>
+              <p className="text-sm font-medium">{p.preferences.darkMode}</p>
+              <p className="text-xs text-muted-foreground">{p.preferences.themePreference}</p>
             </div>
             <span className="rounded-full border px-2 py-0.5 text-xs text-muted-foreground">v2</span>
           </div>
         </Section>
 
         {/* ── Friends ─────────────────────────────────────────────── */}
-        <Section title="Friends">
+        <Section title={p.sections.friends}>
 
           {/* Share invite link */}
           <div className="flex flex-col gap-2">
@@ -544,7 +557,7 @@ export function ProfilePage() {
               disabled={shareLoading}
             >
               <Share2 className="h-4 w-4" />
-              {shareLoading ? 'Creating link…' : 'Generate invite link'}
+              {shareLoading ? p.friends.creatingLink : p.friends.generateLink}
             </Button>
 
             {/* Show the URL once generated — user can copy it manually too */}
@@ -559,11 +572,11 @@ export function ProfilePage() {
                     onClick={handleCopyInviteUrl}
                     className="shrink-0 text-xs text-primary hover:underline"
                   >
-                    {copyFeedback ? 'Copied!' : 'Copy'}
+                    {copyFeedback ? t.common.copied : t.common.copy}
                   </button>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Anyone who opens this link can add you as a friend.
+                  {p.friends.linkHint}
                 </p>
               </div>
             )}
@@ -571,7 +584,7 @@ export function ProfilePage() {
 
           {/* Search by nametag */}
           <div className="flex flex-col gap-2">
-            <Label>Find by @username</Label>
+            <Label>{p.friends.findByUsername}</Label>
             {/* Input with a search icon prefix, same pattern as the nametag field */}
             <div className="flex items-center rounded-md border border-input bg-background px-3 focus-within:ring-2 focus-within:ring-ring">
               <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -579,14 +592,14 @@ export function ProfilePage() {
                 type="text"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value.replace(/^@/, '').toLowerCase())}
-                placeholder="username"
+                placeholder={p.friends.searchPlaceholder}
                 className="flex-1 bg-transparent py-2 pl-2 text-sm focus:outline-none"
               />
             </div>
 
             {/* Search results */}
             {searchLoading && (
-              <p className="text-xs text-muted-foreground">Searching…</p>
+              <p className="text-xs text-muted-foreground">{p.friends.searching}</p>
             )}
             {!searchLoading && searchResults.length > 0 && (
               <ul className="flex flex-col gap-1">
@@ -602,10 +615,10 @@ export function ProfilePage() {
                         <p className="text-xs text-muted-foreground">@{user.nametag}</p>
                       </div>
                       {alreadyFriend ? (
-                        <span className="text-xs text-muted-foreground">Friends</span>
+                        <span className="text-xs text-muted-foreground">{p.friends.alreadyFriends}</span>
                       ) : alreadySent ? (
                         <span className="text-xs text-green-600 flex items-center gap-1">
-                          <Check className="h-3 w-3" /> Sent
+                          <Check className="h-3 w-3" /> {p.friends.sent}
                         </span>
                       ) : (
                         <button
@@ -614,7 +627,7 @@ export function ProfilePage() {
                           className="flex items-center gap-1 text-xs text-primary hover:underline"
                         >
                           <UserPlus className="h-3 w-3" />
-                          Add
+                          {p.friends.add}
                         </button>
                       )}
                     </li>
@@ -623,7 +636,7 @@ export function ProfilePage() {
               </ul>
             )}
             {!searchLoading && searchQuery.length > 0 && searchResults.length === 0 && (
-              <p className="text-xs text-muted-foreground">No users found for @{searchQuery}</p>
+              <p className="text-xs text-muted-foreground">{p.friends.noUsersFound({ query: searchQuery })}</p>
             )}
           </div>
 
@@ -631,7 +644,7 @@ export function ProfilePage() {
           {pendingInvites.filter(i => i.type === 'travel_member').length > 0 && (
             <div className="flex flex-col gap-2">
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Space invitations ({pendingInvites.filter(i => i.type === 'travel_member').length})
+                {p.friends.spaceInvitations(pendingInvites.filter(i => i.type === 'travel_member').length)}
               </p>
               <ul className="flex flex-col gap-2">
                 {pendingInvites.filter(i => i.type === 'travel_member').map(invite => (
@@ -639,9 +652,12 @@ export function ProfilePage() {
                     <MiniAvatar uid={invite.fromUid} name={invite.fromDisplayName} />
                     <div className="flex-1 min-w-0">
                       {/* Show the space name prominently, sender as secondary info */}
-                      <p className="text-sm font-medium truncate">{invite.travelName ?? 'Unknown space'}</p>
+                      <p className="text-sm font-medium truncate">{invite.travelName ?? p.friends.unknownSpace}</p>
                       <p className="text-xs text-muted-foreground truncate">
-                        from {invite.fromDisplayName}{invite.fromNametag ? ` (@${invite.fromNametag})` : ''}
+                        {p.friends.fromSender({
+                          name: invite.fromDisplayName,
+                          nametag: invite.fromNametag ? ` (@${invite.fromNametag})` : '',
+                        })}
                       </p>
                     </div>
                     <button
@@ -650,7 +666,7 @@ export function ProfilePage() {
                       className="flex items-center gap-1 rounded-full bg-primary px-2 py-1 text-xs text-primary-foreground hover:bg-primary/90"
                     >
                       <Check className="h-3 w-3" />
-                      Join
+                      {p.friends.join}
                     </button>
                     <button
                       type="button"
@@ -658,7 +674,7 @@ export function ProfilePage() {
                       className="flex items-center gap-1 rounded-full border px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
                     >
                       <X className="h-3 w-3" />
-                      Decline
+                      {p.friends.decline}
                     </button>
                   </li>
                 ))}
@@ -670,7 +686,7 @@ export function ProfilePage() {
           {pendingInvites.filter(i => i.type === 'friend').length > 0 && (
             <div className="flex flex-col gap-2">
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                Friend requests ({pendingInvites.filter(i => i.type === 'friend').length})
+                {p.friends.friendRequests(pendingInvites.filter(i => i.type === 'friend').length)}
               </p>
               <ul className="flex flex-col gap-2">
                 {pendingInvites.filter(i => i.type === 'friend').map(invite => (
@@ -688,7 +704,7 @@ export function ProfilePage() {
                       className="flex items-center gap-1 rounded-full bg-primary px-2 py-1 text-xs text-primary-foreground hover:bg-primary/90"
                     >
                       <Check className="h-3 w-3" />
-                      Accept
+                      {p.friends.accept}
                     </button>
                     <button
                       type="button"
@@ -696,7 +712,7 @@ export function ProfilePage() {
                       className="flex items-center gap-1 rounded-full border px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
                     >
                       <X className="h-3 w-3" />
-                      Decline
+                      {p.friends.decline}
                     </button>
                   </li>
                 ))}
@@ -709,7 +725,7 @@ export function ProfilePage() {
             {friends.length > 0 ? (
               <>
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Your friends ({friends.length})
+                  {p.friends.yourFriends(friends.length)}
                 </p>
                 <ul className="flex flex-col gap-1">
                   {friends.map(friend => (
@@ -727,14 +743,14 @@ export function ProfilePage() {
               </>
             ) : (
               <p className="text-sm text-muted-foreground">
-                No friends yet. Search by @username above to add someone.
+                {p.friends.noFriends}
               </p>
             )}
           </div>
         </Section>
 
         {/* Feedback — embedded form for quick beta feedback */}
-        <Section title="Feedback">
+        <Section title={p.sections.feedback}>
           <FeedbackForm source="ProfilePage" />
         </Section>
 
@@ -748,7 +764,7 @@ export function ProfilePage() {
             onClick={() => setSignOutOpen(true)}
           >
             <LogOut className="mr-2 h-4 w-4" />
-            Sign out
+            {p.signOut.button}
           </Button>
         </div>
 
@@ -758,22 +774,19 @@ export function ProfilePage() {
       <AlertDialog open={signOutOpen} onOpenChange={setSignOutOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Sign out?</AlertDialogTitle>
+            <AlertDialogTitle>{p.signOut.title}</AlertDialogTitle>
             <AlertDialogDescription>
-              You will be signed out of GlobeExpenses on this device. All locally cached data will
-              be cleared.
-              <br /><br />
-              <strong>Note:</strong> there is currently no way to reset your password from within
-              the app. If you lose access to your account, please contact the developer directly.
+              {/* Message function returning JSX (contains <br /> and <strong>) */}
+              {p.signOut.description()}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t.common.cancel}</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleSignOut}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              Sign out
+              {p.signOut.confirm}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

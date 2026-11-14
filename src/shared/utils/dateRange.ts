@@ -13,6 +13,7 @@
 // a stored range goes stale the moment the calendar moves on.
 
 import { parseTxDate } from '@/spaces/components/tabs/dashboardHelpers'
+import { getLocale, getT, type Messages } from '@/i18n'
 
 // ---------------------------------------------------------------------------
 // Model
@@ -28,12 +29,23 @@ export interface DateRange {
   to: Date | null
 }
 
-/** Display labels for the preset pills, in the order they are rendered. */
-export const RANGE_PRESETS: { id: Exclude<RangePresetId, 'custom'>; label: string }[] = [
-  { id: 'month', label: 'This month' },
-  { id: 'last30', label: 'Last 30 days' },
-  { id: 'all', label: 'All time' },
+/** The preset pills, in the order they are rendered. Only the ids live at
+ *  module level: a label array built here would be evaluated once at import
+ *  and freeze the language. Labels come from rangePresetLabel() at render. */
+export const RANGE_PRESETS: { id: Exclude<RangePresetId, 'custom'> }[] = [
+  { id: 'month' },
+  { id: 'last30' },
+  { id: 'all' },
 ]
+
+/** Display label of a preset pill, in the language of `t` (a component passes
+ *  its useT() result; plain code defaults to the current language). */
+export function rangePresetLabel(
+  id: RangePresetId,
+  t: Messages['dashboard'] = getT().dashboard,
+): string {
+  return t.range[id]
+}
 
 // ---------------------------------------------------------------------------
 // Internal date helpers
@@ -130,22 +142,27 @@ export function isDateInRange(dateStr: string, range: DateRange): boolean {
 // Display
 // ---------------------------------------------------------------------------
 
-function shortDate(d: Date): string {
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+/** "Mar 12" / "12 mars" — in the app's locale, read at call time. */
+function shortDate(d: Date, locale: string): string {
+  return d.toLocaleDateString(locale, { month: 'short', day: 'numeric' })
 }
 
-/** Compact human label for the active range, e.g. "Mar 1–14" or "All time". */
+/** Compact human label for the active range, e.g. "Mar 1–14" or "All time".
+ *  Language and locale are read when called (getT/getLocale), never cached:
+ *  callers run it during render, so a language change re-renders and re-calls. */
 export function rangeLabel(range: DateRange): string {
-  if (range.preset === 'all') return 'All time'
-  if (range.preset === 'month') return 'This month'
-  if (range.preset === 'last30') return 'Last 30 days'
+  const t = getT().dashboard
+  const locale = getLocale()
+  if (range.preset === 'all') return t.range.all
+  if (range.preset === 'month') return t.range.month
+  if (range.preset === 'last30') return t.range.last30
   if (range.from && range.to) {
     // `to` is end-of-day — normalise before diffing (see rangeDayCount).
     return diffDays(range.from, startOfDay(range.to)) === 0
-      ? shortDate(range.from)
-      : `${shortDate(range.from)}–${shortDate(range.to)}`
+      ? shortDate(range.from, locale)
+      : `${shortDate(range.from, locale)}–${shortDate(range.to, locale)}`
   }
-  return 'Custom'
+  return t.range.custom
 }
 
 /**

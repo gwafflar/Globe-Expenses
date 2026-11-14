@@ -30,6 +30,7 @@ import {
   type ObservedValues,
 } from '@/transactions/utils/filterDimensions'
 import { ALL_TIME, isDateInRange, type DateRange } from '@/shared/utils/dateRange'
+import { useLanguage } from '@/i18n'
 
 export {
   UNDEFINED_FILTER,
@@ -254,10 +255,16 @@ export function useTransactionFilters(
     }
   }, [transactions, space.members, config])
 
+  // The UI language. Dimension and option labels are translated inside
+  // allFilterDimensions() (via getT()), which useMemo cannot see — so the
+  // language is listed as a dependency to rebuild the labels when it changes.
+  const language = useLanguage()
+
   // -- The dimension list this space can filter on --
   const dimensions = useMemo(
     () => allFilterDimensions(space, config, isSolo, observed),
-    [space, config, isSolo, observed],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `language` is read via getT() inside
+    [space, config, isSolo, observed, language],
   )
 
   // Enabled custom 'text' fields feed the search box rather than the panel (§4).

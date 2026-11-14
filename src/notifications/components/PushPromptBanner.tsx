@@ -6,8 +6,11 @@
 
 import { Bell, X } from 'lucide-react'
 import { usePushPromptStore } from '@/notifications/store/usePushPromptStore'
+import { useT } from '@/i18n'
 
 export function PushPromptBanner() {
+  // translation hook — re-renders when the language changes
+  const t = useT()
   // Reading from the store subscribes this component to it: when `active`
   // changes, React re-renders the banner automatically.
   const { active, busy, enable, notNow, close } = usePushPromptStore()
@@ -24,14 +27,13 @@ export function PushPromptBanner() {
 
       {/* min-w-0 lets long text wrap instead of pushing the buttons off-screen */}
       <div className="min-w-0 flex-1">
-        <p className="text-sm">{active.message}</p>
+        {/* The caller's own text if it passed one, otherwise the moment's default */}
+        <p className="text-sm">{active.message ?? t.social.push.banner[active.moment]}</p>
 
         {active.variant === 'ios-install' ? (
           // iOS in a Safari tab: push is impossible until the app is installed.
           <p className="mt-1 text-xs text-blue-700 dark:text-blue-300">
-            On iPhone, first add GlobeExpenses to your Home Screen: tap <strong>Share</strong>{' '}
-            <span aria-hidden>&#11023;</span>, then <strong>"Add to Home Screen"</strong>, and enable
-            notifications from the installed app.
+            {t.social.push.bannerIosInstall({ icon: <span aria-hidden>&#11023;</span> })}
           </p>
         ) : (
           <div className="mt-2 flex items-center gap-2">
@@ -41,7 +43,7 @@ export function PushPromptBanner() {
               disabled={busy}
               className="rounded-md bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-60"
             >
-              {busy ? 'Enabling…' : 'Enable'}
+              {busy ? t.social.push.enabling : t.social.push.enable}
             </button>
             <button
               type="button"
@@ -49,7 +51,7 @@ export function PushPromptBanner() {
               disabled={busy}
               className="rounded-md px-3 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100 dark:text-blue-200 dark:hover:bg-blue-900"
             >
-              Not now
+              {t.social.push.notNow}
             </button>
           </div>
         )}
@@ -59,7 +61,7 @@ export function PushPromptBanner() {
         <button
           type="button"
           onClick={close}
-          aria-label="Dismiss"
+          aria-label={t.social.push.dismiss}
           className="shrink-0 text-blue-400 hover:text-blue-600"
         >
           <X className="h-4 w-4" />

@@ -23,10 +23,13 @@ import { PRESETS, configFromPreset } from '@/spaces/presets'
 import type { PresetId, SpaceConfig } from '@/spaces/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { useT } from '@/i18n'
 
 type Step = 'preset' | 'essentials' | 'created'
 
 export function SpaceCreatePage() {
+  // translation hook — re-renders when the language changes
+  const t = useT()
   const navigate = useNavigate()
   const { currentUser, userProfile } = useAuthStore()
 
@@ -80,7 +83,8 @@ export function SpaceCreatePage() {
 
     const spaceId = createSpace({
       uid: currentUser.uid,
-      displayName: currentUser.displayName?.trim() || currentUser.email || 'Unknown',
+      // Last-resort member name, stored in Firestore in the language current at creation.
+      displayName: currentUser.displayName?.trim() || currentUser.email || t.spaces.create.unknownMember,
       name: name.trim(),
       emoji: emoji || undefined,
       mainCurrency,
@@ -125,16 +129,16 @@ export function SpaceCreatePage() {
       <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 bg-background px-6 py-10 text-center">
         <div className="text-5xl">{emoji || '👥'}</div>
         <div>
-          <h1 className="text-lg font-bold">{name.trim()} is ready</h1>
+          <h1 className="text-lg font-bold">{t.spaces.create.ready({ name: name.trim() })}</h1>
           <p className="mt-1.5 text-sm text-muted-foreground">
-            Invite people now, or open the space and do it later.
+            {t.spaces.create.readyHint}
           </p>
         </div>
 
         <div className="flex w-full max-w-xs flex-col gap-2">
           <Button type="button" onClick={handleCopyInviteLink} className="gap-2">
             {copyFeedback ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-            {copyFeedback ? 'Link copied' : 'Copy invite link'}
+            {copyFeedback ? t.spaces.create.linkCopied : t.spaces.create.copyInviteLink}
           </Button>
           {inviteUrl && (
             <p className="break-all rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
@@ -142,7 +146,7 @@ export function SpaceCreatePage() {
             </p>
           )}
           <Button type="button" variant="outline" onClick={() => navigate(`/spaces/${createdSpaceId}`)} className="gap-1.5">
-            Open space
+            {t.spaces.create.openSpace}
             <ArrowRight className="h-4 w-4" />
           </Button>
         </div>
@@ -157,12 +161,12 @@ export function SpaceCreatePage() {
         <button
           type="button"
           onClick={handleBack}
-          aria-label="Back"
+          aria-label={t.common.back}
           className="flex h-8 w-8 items-center justify-center rounded-full text-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
           ←
         </button>
-        <h2 className="text-sm font-semibold">New space</h2>
+        <h2 className="text-sm font-semibold">{t.spaces.create.newSpace}</h2>
       </div>
 
       {/* Scrollable content */}
@@ -172,22 +176,22 @@ export function SpaceCreatePage() {
         {step === 'essentials' && (
           <div className="mx-auto flex max-w-lg flex-col gap-4 px-4 py-5">
             <h1 className="text-xl font-bold">
-              {PRESETS[presetId].emoji} {PRESETS[presetId].titleKey}
+              {PRESETS[presetId].emoji} {t.spaces.presets[presetId].title}
             </h1>
 
             {/* Name + emoji */}
             <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">Name</label>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">{t.spaces.create.name}</label>
               <div className="flex gap-2">
                 <EmojiInput
                   value={emoji}
                   onChange={(v) => { setEmoji(v); setEmojiEdited(true) }}
-                  ariaLabel="Space emoji"
+                  ariaLabel={t.spaces.create.spaceEmoji}
                 />
                 <Input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder={PRESETS[presetId].namePlaceholder}
+                  placeholder={t.spaces.presets[presetId].namePlaceholder}
                   className="min-w-0 flex-1"
                 />
               </div>
@@ -195,7 +199,7 @@ export function SpaceCreatePage() {
 
             {/* Main currency — searchable, full ALL_CURRENCIES list. Irreversible after creation. */}
             <div>
-              <label className="mb-1 block text-xs font-medium text-muted-foreground">Main currency</label>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">{t.spaces.create.mainCurrency}</label>
               <SmartCurrencySelect
                 value={mainCurrency}
                 onChange={setMainCurrency}
@@ -204,7 +208,7 @@ export function SpaceCreatePage() {
                 onCurrencyAdded={() => {}}
               />
               <p className="mt-1 text-xs text-amber-700 dark:text-amber-500">
-                Everything is converted to this. It can&apos;t be changed afterwards.
+                {t.spaces.create.mainCurrencyWarning}
               </p>
             </div>
 
@@ -213,7 +217,8 @@ export function SpaceCreatePage() {
               <>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                    Other currencies <span className="text-muted-foreground/70">— optional</span>
+                    {t.spaces.create.otherCurrencies}{' '}
+                    <span className="text-muted-foreground/70">{t.spaces.create.optionalSuffix}</span>
                   </label>
                   <CurrencyPicker
                     selected={[mainCurrency, ...extraCurrencies]}
@@ -229,7 +234,8 @@ export function SpaceCreatePage() {
                     onChange={(e) => setDatesEnabled(e.target.checked)}
                     className="h-4 w-4"
                   />
-                  Set trip dates <span className="text-muted-foreground">— optional</span>
+                  {t.spaces.create.setTripDates}{' '}
+                  <span className="text-muted-foreground">{t.spaces.create.optionalSuffix}</span>
                 </label>
                 {datesEnabled && (
                   <div className="flex gap-2">
@@ -255,8 +261,8 @@ export function SpaceCreatePage() {
             {/* Customize fields — mounts the exact FieldsEditor built in Phase 3.
                 Nothing is written until Create; onConfigChange is plain local state. */}
             <CollapsibleCard
-              title="Customize fields"
-              summary="Set up now, or leave it and change it later"
+              title={t.spaces.create.customizeFields}
+              summary={t.spaces.create.customizeFieldsSummary}
               defaultOpen={presetId === 'custom'}
             >
               <FieldsEditor
@@ -273,7 +279,7 @@ export function SpaceCreatePage() {
               onClick={handleCreate}
               className="mt-2 w-full py-6 text-sm font-semibold"
             >
-              Create space
+              {t.spaces.create.createSpace}
             </Button>
           </div>
         )}

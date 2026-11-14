@@ -45,7 +45,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { ALL_CURRENCIES, ALL_COUNTRIES } from '@/shared/data/pickerData'
+import {
+  ALL_CURRENCIES,
+  ALL_COUNTRIES,
+  displayCountryName,
+  localizedCountryName,
+  localizedCurrencyName,
+} from '@/shared/data/pickerData'
+import { useLocale, useT } from '@/i18n'
 import { getExchangeRate } from '@/shared/utils/exchangeRates'
 import { Share2, Check } from 'lucide-react'
 import { FeedbackForm } from '@/feedback/components/FeedbackForm'
@@ -106,12 +113,19 @@ export function CurrencyPicker({
   // The space's mainCurrency — always checked, cannot be unchecked.
   lockedCurrency?: string
 }) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  const locale = useLocale() // currency names are shown in the UI language
   const [search, setSearch] = useState('')
 
-  const filtered = ALL_CURRENCIES.filter(([code, , name]) => {
-    const q = search.toLowerCase()
-    return code.toLowerCase().includes(q) || name.toLowerCase().includes(q)
-  })
+  // [code, symbol, localised name]. The search matches the code, the localised
+  // name or the English name, so typing "dollar" or "yen" works in any language.
+  const q = search.toLowerCase()
+  const filtered = ALL_CURRENCIES.filter(([code, , english]) =>
+    code.toLowerCase().includes(q) ||
+    english.toLowerCase().includes(q) ||
+    localizedCurrencyName(code, locale).toLowerCase().includes(q),
+  ).map(([code, symbol]) => [code, symbol, localizedCurrencyName(code, locale)] as const)
 
   function toggle(code: string) {
     // Prevent unchecking the locked (main) currency
@@ -121,22 +135,22 @@ export function CurrencyPicker({
 
   const summary =
     selected.length === 0
-      ? 'No currencies selected'
+      ? t.parameters.currencies.noneSelected
       : selected.join(', ')
 
   return (
-    <CollapsiblePicker summary={<span><span className="font-medium">Currencies: </span>{summary}</span>}>
+    <CollapsiblePicker summary={<span><span className="font-medium">{t.parameters.currencies.pickerLabel}</span>{summary}</span>}>
       <div className="flex flex-col gap-2 rounded-lg border p-2">
         <input
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search currency…"
+          placeholder={t.parameters.currencies.searchPlaceholder}
           className="w-full rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
         />
         <div className="flex max-h-56 flex-col gap-0.5 overflow-y-auto">
           {filtered.length === 0 && (
-            <p className="px-3 py-2 text-xs text-muted-foreground">No currencies match.</p>
+            <p className="px-3 py-2 text-xs text-muted-foreground">{t.parameters.currencies.noMatch}</p>
           )}
           {filtered.map(([code, symbol, name]) => {
             const checked = selected.includes(code)
@@ -154,7 +168,7 @@ export function CurrencyPicker({
                 </span>
                 <span className="min-w-0">
                   <span className="font-medium">{code}</span>
-                  {isLocked && <span className="ml-1 text-xs text-muted-foreground">(main)</span>}
+                  {isLocked && <span className="ml-1 text-xs text-muted-foreground">{t.parameters.currencies.mainTag}</span>}
                   <span className="ml-1 text-muted-foreground">({symbol})</span>
                   <span className="ml-1 text-muted-foreground">— {name}</span>
                 </span>
@@ -283,6 +297,9 @@ function CountryPicker({
   spaceId: string
   onSelectedChange: (items: LabeledItem[]) => void
 }) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  const locale = useLocale()
   // Own open/search state — avoids delegating to CollapsiblePicker so both
   // states live in the same component instance and are never reset by re-renders
   const [open, setOpen] = useState(false)
@@ -290,11 +307,17 @@ function CountryPicker({
   const listRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
+  // Stored labels are ENGLISH country names (see pickerData.ts) — compare on those.
   const selectedNames = new Set(selected.map((i) => i.label.toLowerCase()))
 
-  const filtered = ALL_COUNTRIES.filter(([, , name]) =>
-    name.toLowerCase().includes(search.toLowerCase())
-  )
+  // The list shows each country in the UI language (sorted in that language),
+  // but toggling stores the English name (`name`, entry[2]). The search
+  // matches either the localised or the English name.
+  const q = search.toLowerCase()
+  const filtered = ALL_COUNTRIES
+    .map(([code, flag, name]) => ({ flag, name, display: localizedCountryName(code, locale) }))
+    .filter(({ name, display }) => display.toLowerCase().includes(q) || name.toLowerCase().includes(q))
+    .sort((a, b) => a.display.localeCompare(b.display, locale))
 
   function handleToggle() {
     const next = !open
@@ -322,8 +345,8 @@ function CountryPicker({
 
   const summary =
     selected.length === 0
-      ? 'No countries selected'
-      : selected.map((i) => `${i.emoji ?? '🌍'} ${i.label}`).join(', ')
+      ? t.parameters.countries.noneSelected
+      : selected.map((i) => `${i.emoji ?? '🌍'} ${displayCountryName(i.label, locale)}`).join(', ')
 
   return (
     <div className="flex flex-col gap-2">
@@ -333,7 +356,7 @@ function CountryPicker({
         onClick={handleToggle}
         className="flex items-center justify-between rounded-lg border bg-card px-3 py-2.5 text-sm transition-colors hover:bg-accent/30"
       >
-        <span><span className="font-medium">Countries: </span>{summary}</span>
+        <span><span className="font-medium">{t.parameters.countries.pickerLabel}</span>{summary}</span>
         <span className="text-muted-foreground text-xs">{open ? '▲' : '▼'}</span>
       </button>
 
@@ -345,14 +368,14 @@ function CountryPicker({
             type="text"
             value={search}
             onChange={(e) => handleSearch(e.target.value)}
-            placeholder="Search country…"
+            placeholder={t.parameters.countries.searchPlaceholder}
             className="w-full rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
           />
           <div ref={listRef} className="flex max-h-56 flex-col gap-0.5 overflow-y-auto">
             {filtered.length === 0 && (
-              <p className="px-3 py-2 text-xs text-muted-foreground">No countries match.</p>
+              <p className="px-3 py-2 text-xs text-muted-foreground">{t.parameters.countries.noMatch}</p>
             )}
-            {filtered.map(([, flag, name]) => {
+            {filtered.map(({ flag, name, display }) => {
               const checked = selectedNames.has(name.toLowerCase())
               return (
                 <button
@@ -365,7 +388,7 @@ function CountryPicker({
                     {checked && '✓'}
                   </span>
                   <span className="text-base">{flag}</span>
-                  <span className="text-sm">{name}</span>
+                  <span className="text-sm">{display}</span>
                 </button>
               )
             })}
@@ -420,6 +443,8 @@ interface EditableLabeledListProps {
 }
 
 function EditableLabeledList({ items, spaceId, field, placeholder, onItemsChange, hideEmoji }: EditableLabeledListProps) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editLabel, setEditLabel] = useState('')
   const [addLabel, setAddLabel] = useState('')
@@ -472,7 +497,7 @@ function EditableLabeledList({ items, spaceId, field, placeholder, onItemsChange
     <div className="flex flex-col gap-1.5">
       {items.map((item) => (
         <div key={item.id} className="flex items-center gap-2 rounded-lg border bg-card px-3 py-2">
-          {!hideEmoji && <EmojiInput value={item.emoji ?? ''} onChange={(v) => updateEmoji(item.id, v)} ariaLabel="Emoji" />}
+          {!hideEmoji && <EmojiInput value={item.emoji ?? ''} onChange={(v) => updateEmoji(item.id, v)} ariaLabel={t.parameters.lists.emojiAria} />}
           {editingId === item.id ? (
             <input
               ref={editInputRef}
@@ -488,7 +513,7 @@ function EditableLabeledList({ items, spaceId, field, placeholder, onItemsChange
               {item.label}
             </button>
           )}
-          <button type="button" onClick={() => deleteItem(item.id)} aria-label={`Delete ${item.label}`}
+          <button type="button" onClick={() => deleteItem(item.id)} aria-label={t.parameters.lists.deleteItem(item.label)}
             className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-destructive">
             ✕
           </button>
@@ -496,7 +521,7 @@ function EditableLabeledList({ items, spaceId, field, placeholder, onItemsChange
       ))}
 
       <div key={addRowKey} className="flex items-center gap-2 rounded-lg border border-dashed px-3 py-2">
-        {!hideEmoji && <EmojiInput value={addEmoji} onChange={setAddEmoji} ariaLabel="New item emoji" />}
+        {!hideEmoji && <EmojiInput value={addEmoji} onChange={setAddEmoji} ariaLabel={t.parameters.lists.newItemEmojiAria} />}
         <input
           type="text"
           value={addLabel}
@@ -506,7 +531,7 @@ function EditableLabeledList({ items, spaceId, field, placeholder, onItemsChange
           className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
         />
         <Button type="button" size="sm" variant="outline" onClick={addItem} disabled={!addLabel.trim()} className="shrink-0">
-          Add
+          {t.common.add}
         </Button>
       </div>
     </div>
@@ -600,6 +625,9 @@ function AddMemberModal({
   onShareLink,
   onCopyInviteUrl,
 }: AddMemberModalProps) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  const ta = t.parameters.addMember
   const [nameInput, setNameInput] = useState('')
   const [addingName, setAddingName] = useState(false)
   const nameInputRef = useRef<HTMLInputElement>(null)
@@ -621,10 +649,10 @@ function AddMemberModal({
   }
 
   const TABS = [
-    { id: 'name' as const, label: 'By Name' },
-    { id: 'friend' as const, label: 'Friend' },
-    { id: 'username' as const, label: '@Username' },
-    { id: 'link' as const, label: 'Link' },
+    { id: 'name' as const, label: ta.tabs.name },
+    { id: 'friend' as const, label: ta.tabs.friend },
+    { id: 'username' as const, label: ta.tabs.username },
+    { id: 'link' as const, label: ta.tabs.link },
   ]
 
   return (
@@ -639,7 +667,7 @@ function AddMemberModal({
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b px-4 py-3">
-          <h2 className="font-semibold">Add a member</h2>
+          <h2 className="font-semibold">{ta.title}</h2>
           <button
             type="button"
             onClick={onClose}
@@ -674,7 +702,7 @@ function AddMemberModal({
           {tab === 'name' && (
             <div className="flex flex-col gap-3">
               <p className="text-xs text-muted-foreground">
-                Add someone who doesn&apos;t have an account. They won&apos;t be able to log in, but you can track their share of expenses.
+                {ta.byNameHint}
               </p>
               <div className="flex gap-2">
                 <input
@@ -685,7 +713,7 @@ function AddMemberModal({
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !addingName) handleAddByName()
                   }}
-                  placeholder="Their name…"
+                  placeholder={ta.namePlaceholder}
                   disabled={addingName}
                   className="min-w-0 flex-1 rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
                 />
@@ -695,7 +723,7 @@ function AddMemberModal({
                   disabled={!nameInput.trim() || addingName}
                   className="shrink-0 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {addingName ? '…' : 'Add'}
+                  {addingName ? '…' : t.common.add}
                 </button>
               </div>
             </div>
@@ -705,13 +733,13 @@ function AddMemberModal({
           {tab === 'friend' && (
             <div className="flex flex-col gap-2">
               {friendsLoading && (
-                <p className="py-4 text-center text-xs text-muted-foreground">Loading friends…</p>
+                <p className="py-4 text-center text-xs text-muted-foreground">{ta.loadingFriends}</p>
               )}
               {!friendsLoading && invitableFriends.length === 0 && (
                 <p className="py-4 text-center text-xs text-muted-foreground">
                   {friends.length === 0
-                    ? 'No friends yet. Use the @Username tab to find people, or share the invite link.'
-                    : 'All your friends are already in this space.'}
+                    ? ta.noFriends
+                    : ta.allFriendsIn}
                 </p>
               )}
               {!friendsLoading && invitableFriends.map(friend => {
@@ -733,7 +761,7 @@ function AddMemberModal({
                     </div>
                     {alreadyInvited ? (
                       <span className="flex items-center gap-1 text-xs text-green-600 shrink-0">
-                        <Check className="h-3 w-3" /> Invited
+                        <Check className="h-3 w-3" /> {ta.invited}
                       </span>
                     ) : (
                       <button
@@ -741,7 +769,7 @@ function AddMemberModal({
                         onClick={() => onInviteFriend(friend.uid)}
                         className="shrink-0 rounded-md border px-2 py-1 text-xs text-primary transition-colors hover:bg-primary/10"
                       >
-                        Invite
+                        {ta.invite}
                       </button>
                     )}
                   </div>
@@ -754,7 +782,7 @@ function AddMemberModal({
           {tab === 'username' && (
             <div className="flex flex-col gap-3">
               <p className="text-xs text-muted-foreground">
-                Search by @username. An invite will be sent — they must accept to join.
+                {ta.usernameHint}
               </p>
               {/* Input only — results update as you type (debounced 300ms in parent) */}
               <div className="relative">
@@ -762,7 +790,7 @@ function AddMemberModal({
                   type="text"
                   value={usernameQuery}
                   onChange={(e) => onUsernameQueryChange(e.target.value)}
-                  placeholder="@username…"
+                  placeholder={ta.usernamePlaceholder}
                   className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring pr-8"
                 />
                 {usernameSearching && (
@@ -789,10 +817,10 @@ function AddMemberModal({
                           <p className="text-xs text-muted-foreground">@{user.nametag}</p>
                         </div>
                         {alreadyInSpace ? (
-                          <span className="shrink-0 text-xs text-muted-foreground">In space</span>
+                          <span className="shrink-0 text-xs text-muted-foreground">{ta.inSpace}</span>
                         ) : alreadyInvited ? (
                           <span className="flex items-center gap-1 text-xs text-green-600 shrink-0">
-                            <Check className="h-3 w-3" /> Invited
+                            <Check className="h-3 w-3" /> {ta.invited}
                           </span>
                         ) : (
                           <button
@@ -800,7 +828,7 @@ function AddMemberModal({
                             onClick={() => onInviteByUsername(user.uid)}
                             className="shrink-0 rounded-md border px-2 py-1 text-xs text-primary transition-colors hover:bg-primary/10"
                           >
-                            Invite
+                            {ta.invite}
                           </button>
                         )}
                       </div>
@@ -811,7 +839,7 @@ function AddMemberModal({
 
               {/* Empty state after search */}
               {!usernameSearching && usernameResults.length === 0 && usernameQuery && (
-                <p className="text-center text-xs text-muted-foreground">No users found.</p>
+                <p className="text-center text-xs text-muted-foreground">{ta.noUsers}</p>
               )}
             </div>
           )}
@@ -820,7 +848,7 @@ function AddMemberModal({
           {tab === 'link' && (
             <div className="flex flex-col gap-3">
               <p className="text-xs text-muted-foreground">
-                Share this link with anyone. They can join the space and become your friend.
+                {ta.linkHint}
               </p>
               {!generatedInviteUrl ? (
                 <button
@@ -830,7 +858,7 @@ function AddMemberModal({
                   className="flex items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Share2 className="h-4 w-4" />
-                  {shareLoading ? 'Creating link…' : 'Generate invite link'}
+                  {shareLoading ? ta.creatingLink : ta.generateLink}
                 </button>
               ) : (
                 <div className="flex flex-col gap-2">
@@ -843,11 +871,11 @@ function AddMemberModal({
                       onClick={onCopyInviteUrl}
                       className="shrink-0 text-xs text-primary hover:underline"
                     >
-                      {copyFeedback ? '✓ Copied!' : 'Copy'}
+                      {copyFeedback ? `✓ ${t.common.copied}` : t.common.copy}
                     </button>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Anyone with this link can join this space.
+                    {ta.linkAnyone}
                   </p>
                 </div>
               )}
@@ -872,6 +900,11 @@ function MembersSection({
   onSpaceChange: (updated: Partial<Space>) => void
 }) {
   const { currentUser, userProfile } = useAuthStore()
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  const tm = t.parameters.members
+  const tmerge = t.parameters.merge
+  const tu = t.parameters.unlink
 
   // The current user's linked SpaceMember slot (null if they have no slot yet)
   const myMember = space.members.find((m) => m.userId === currentUser?.uid) ?? null
@@ -1262,17 +1295,17 @@ function MembersSection({
       <div className="flex flex-col gap-3">
         {/* Simplified solo display */}
         <div className="rounded-lg border bg-muted/30 px-3 py-2">
-          <p className="text-sm font-medium">Members: You</p>
+          <p className="text-sm font-medium">{tm.soloTitle}</p>
           <p className="text-xs text-muted-foreground mt-1">
-            You're the only member in this space.
+            {tm.soloOnly}
           </p>
         </div>
 
         {/* Educational message */}
         <div className="rounded-lg border border-dashed border-primary/30 bg-primary/5 px-3 py-2.5">
-          <p className="text-xs font-medium text-primary mb-1">ℹ️ Did you know?</p>
+          <p className="text-xs font-medium text-primary mb-1">{tm.didYouKnow}</p>
           <p className="text-xs text-muted-foreground">
-            You can add other people in this space, and share your transactions with them.
+            {tm.soloHint}
           </p>
         </div>
 
@@ -1283,7 +1316,7 @@ function MembersSection({
           className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3.5 text-sm font-semibold text-primary-foreground shadow-sm transition-opacity hover:opacity-90 active:opacity-80"
         >
           <span className="text-base leading-none">+</span>
-          Add member
+          {tm.addMember}
         </button>
 
         {/* Unified Add Member modal — portal to escape overflow:hidden */}
@@ -1324,7 +1357,7 @@ function MembersSection({
       {/* "No slot" nudge — shown when user has space access but no claimed slot */}
       {hasNoSlot && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-          You haven&apos;t claimed a slot yet — pick who you are below.
+          {tm.noSlot}
         </div>
       )}
 
@@ -1365,9 +1398,9 @@ function MembersSection({
 
                   {/* Sub-label: "You", "Linked account", or "Unclaimed" */}
                   <p className="text-xs text-muted-foreground">
-                    {isMine ? 'You' : isUnclaimed ? 'Unclaimed' : 'Linked account'}
+                    {isMine ? tm.you : isUnclaimed ? tm.unclaimed : tm.linkedAccount}
                     {member.userId === space.createdBy && (
-                      <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px]">creator</span>
+                      <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px]">{tm.creator}</span>
                     )}
                   </p>
                 </div>
@@ -1377,7 +1410,7 @@ function MembersSection({
                   <button
                     type="button"
                     onClick={() => { setRenamingId(member.travelMemberId); setRenameValue(member.displayName) }}
-                    aria-label={`Rename ${member.displayName}`}
+                    aria-label={tm.renameAria(member.displayName)}
                     className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                   >
                     ✏️
@@ -1395,7 +1428,7 @@ function MembersSection({
                       onClick={() => handleClaim(member)}
                       className="rounded-md border border-primary px-2 py-0.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
                     >
-                      🎯 This is me
+                      {tm.thisIsMe}
                     </button>
                   )}
 
@@ -1406,7 +1439,7 @@ function MembersSection({
                       onClick={() => handleThisIsNotMe(member)}
                       className="rounded-md border border-muted-foreground/40 px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:border-destructive hover:text-destructive"
                     >
-                      ❌ This is not me
+                      {tm.thisIsNotMe}
                     </button>
                   )}
 
@@ -1417,7 +1450,7 @@ function MembersSection({
                       onClick={() => handleAllowRenameToggle(member)}
                       className="rounded-md border border-muted-foreground/40 px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted"
                     >
-                      {member.allowRename ? '🔓 Others can rename' : '🔒 Rename locked'}
+                      {member.allowRename ? tm.othersCanRename : tm.renameLocked}
                     </button>
                   )}
                 </div>
@@ -1434,7 +1467,7 @@ function MembersSection({
         className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3.5 text-sm font-semibold text-primary-foreground shadow-sm transition-opacity hover:opacity-90 active:opacity-80"
       >
         <span className="text-base leading-none">+</span>
-        Add member
+        {tm.addMember}
       </button>
 
       {/* Merge members — only shown when 2+ members exist */}
@@ -1444,7 +1477,7 @@ function MembersSection({
           onClick={openMergeModal}
           className="text-xs text-muted-foreground hover:text-foreground transition-colors text-center w-full py-1"
         >
-          Merge duplicate members
+          {tm.mergeDuplicates}
         </button>
       )}
 
@@ -1490,7 +1523,7 @@ function MembersSection({
             {/* Header */}
             <div className="flex items-center justify-between border-b px-4 py-3">
               <h2 className="font-semibold">
-                {mergeDone ? '✅ Members merged' : mergeStep === 'select' ? 'Merge duplicate members' : 'Confirm merge'}
+                {mergeDone ? tmerge.doneTitle : mergeStep === 'select' ? tm.mergeDuplicates : tmerge.confirmTitle}
               </h2>
               <button
                 type="button"
@@ -1507,19 +1540,19 @@ function MembersSection({
               {/* ── Done state ── */}
               {mergeDone && (
                 <div className="flex flex-col gap-3 text-center">
+                  {/* The bold, quoted member name is passed into the sentence as JSX */}
                   <p className="text-sm">
-                    <span className="font-medium">"{mergeDone.deletedName}"</span> deleted.
-                    All transactions updated.
+                    {tmerge.doneDeleted({ name: <span className="font-medium">"{mergeDone.deletedName}"</span> })}
                   </p>
                   <p className="text-sm text-muted-foreground">
-                    Expenses are now under <span className="font-medium">"{mergeDone.keptName}"</span>.
+                    {tmerge.doneKept({ name: <span className="font-medium">"{mergeDone.keptName}"</span> })}
                   </p>
                   <button
                     type="button"
                     onClick={() => setMergeModalOpen(false)}
                     className="mt-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
                   >
-                    Done
+                    {t.common.done}
                   </button>
                 </div>
               )}
@@ -1528,7 +1561,7 @@ function MembersSection({
               {!mergeDone && mergeStep === 'select' && (
                 <div className="flex flex-col gap-3">
                   <p className="text-xs text-muted-foreground">
-                    Select two member slots that represent the same person. Their expenses will be combined.
+                    {tmerge.selectHint}
                   </p>
                   <div className="flex flex-col gap-2">
                     {space.members.map((member) => {
@@ -1556,7 +1589,7 @@ function MembersSection({
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium truncate">{member.displayName}</p>
                             <p className="text-xs text-muted-foreground">
-                              {member.userId === null ? 'Unclaimed' : member.userId === currentUser?.uid ? 'You' : 'Linked account'}
+                              {member.userId === null ? tm.unclaimed : member.userId === currentUser?.uid ? tm.you : tm.linkedAccount}
                             </p>
                           </div>
                         </button>
@@ -1569,7 +1602,7 @@ function MembersSection({
                     disabled={mergeSelected.size !== 2}
                     className="mt-1 w-full rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Continue
+                    {t.common.continue}
                   </button>
                 </div>
               )}
@@ -1584,7 +1617,7 @@ function MembersSection({
                 return (
                   <div className="flex flex-col gap-4">
                     <p className="text-xs text-muted-foreground">
-                      Choose which member slot to keep. The other will be deleted and all their expenses will move to the kept slot.
+                      {tmerge.confirmHint}
                     </p>
 
                     {/* Keep/delete radio choice */}
@@ -1608,9 +1641,9 @@ function MembersSection({
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-medium">{member.displayName}</p>
                               <p className="text-xs text-muted-foreground">
-                                {member.userId === null ? 'Unclaimed' : member.userId === currentUser?.uid ? 'You' : 'Linked account'}
-                                {isKeep && <span className="ml-1 font-medium text-primary">← Keep</span>}
-                                {!isKeep && <span className="ml-1 text-destructive">← Delete</span>}
+                                {member.userId === null ? tm.unclaimed : member.userId === currentUser?.uid ? tm.you : tm.linkedAccount}
+                                {isKeep && <span className="ml-1 font-medium text-primary">{tmerge.keep}</span>}
+                                {!isKeep && <span className="ml-1 text-destructive">{tmerge.delete}</span>}
                               </p>
                             </div>
                           </button>
@@ -1620,9 +1653,13 @@ function MembersSection({
 
                     {/* Warning */}
                     <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-                      <p className="font-medium">⚠️ This cannot be undone.</p>
+                      <p className="font-medium">{tmerge.cannotUndo}</p>
                       <p className="mt-0.5">
-                        "{deletedMember.displayName}" will be permanently deleted. All their transactions will move to "{space.members.find(m => m.travelMemberId === mergeKeepId)?.displayName}".
+                        {tmerge.warning({
+                          deleted: deletedMember.displayName,
+                          // `?? ''` matches the old JSX, which rendered nothing for undefined
+                          kept: space.members.find(m => m.travelMemberId === mergeKeepId)?.displayName ?? '',
+                        })}
                       </p>
                     </div>
 
@@ -1634,7 +1671,7 @@ function MembersSection({
                         disabled={mergeLoading}
                         className="flex-1 rounded-md border px-4 py-2 text-sm transition-colors hover:bg-muted disabled:opacity-50"
                       >
-                        Back
+                        {t.common.back}
                       </button>
                       <button
                         type="button"
@@ -1642,7 +1679,7 @@ function MembersSection({
                         disabled={mergeLoading}
                         className="flex-1 rounded-md bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground disabled:opacity-50"
                       >
-                        {mergeLoading ? 'Merging…' : 'Merge & delete'}
+                        {mergeLoading ? tmerge.merging : tmerge.mergeAndDelete}
                       </button>
                     </div>
                   </div>
@@ -1666,9 +1703,9 @@ function MembersSection({
             onClick={(e) => e.stopPropagation()}
           >
             <div className="border-b px-4 py-3">
-              <h2 className="font-semibold">Who are you in this trip?</h2>
+              <h2 className="font-semibold">{tu.title}</h2>
               <p className="text-xs text-muted-foreground mt-1">
-                Choose a member to continue. You can pick yourself or a new person.
+                {tu.hint}
               </p>
             </div>
 
@@ -1689,12 +1726,12 @@ function MembersSection({
                     </div>
                     <div className="flex-1 min-w-0">
                       <span className="text-sm font-medium">{member.displayName}</span>
-                      {isCurrent && <span className="text-xs text-muted-foreground ml-1">(currently you)</span>}
+                      {isCurrent && <span className="text-xs text-muted-foreground ml-1">{tu.currentlyYou}</span>}
                     </div>
                     {unlinkLoading ? (
                       <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
                     ) : (
-                      <span className="text-xs text-primary font-medium">This is me</span>
+                      <span className="text-xs text-primary font-medium">{tu.thisIsMe}</span>
                     )}
                   </button>
                 )
@@ -1709,7 +1746,7 @@ function MembersSection({
                     disabled={unlinkLoading}
                     className="w-full rounded-lg border border-dashed px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent/20 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    + Create new member
+                    {tu.createNew}
                   </button>
                 ) : (
                   <div className="flex items-center gap-2">
@@ -1723,7 +1760,7 @@ function MembersSection({
                         if (e.key === 'Escape') resetUnlinkNewMember()
                       }}
                       disabled={unlinkLoading}
-                      placeholder="Name…"
+                      placeholder={tu.namePlaceholder}
                       className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
                       autoFocus
                     />
@@ -1733,7 +1770,7 @@ function MembersSection({
                       disabled={!unlinkNewMemberName.trim() || unlinkLoading}
                       className="shrink-0 rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {unlinkLoading ? '...' : 'Add'}
+                      {unlinkLoading ? '...' : t.common.add}
                     </button>
                   </div>
                 )}
@@ -1747,7 +1784,7 @@ function MembersSection({
                 disabled={unlinkLoading}
                 className="rounded-md border px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Cancel
+                {t.common.cancel}
               </button>
             </div>
           </div>
@@ -1771,6 +1808,10 @@ interface ParametersTabProps {
 export function ParametersTab({ space, transactions, onSpaceChange }: ParametersTabProps) {
   const navigate = useNavigate()
   const { currentUser } = useAuthStore()
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  const tp = t.parameters
+  const locale = useLocale()
   const [name, setName] = useState(space.name)
   const [emoji, setEmoji] = useState(space.emoji ?? '')
 
@@ -1920,21 +1961,21 @@ export function ParametersTab({ space, transactions, onSpaceChange }: Parameters
     <div className="flex flex-col gap-6 pb-8">
 
       {/* Space identity */}
-      <Section title="Space">
+      <Section title={tp.sections.space}>
         <div className="flex gap-3">
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-muted-foreground">Emoji</label>
-            <EmojiInput value={emoji} onChange={setEmoji} onBlur={handleEmojiBlur} ariaLabel="Space emoji" />
-            <span className="text-[10px] text-muted-foreground">Tap 🌐</span>
+            <label className="text-xs font-medium text-muted-foreground">{tp.identity.emoji}</label>
+            <EmojiInput value={emoji} onChange={setEmoji} onBlur={handleEmojiBlur} ariaLabel={tp.identity.emojiAria} />
+            <span className="text-[10px] text-muted-foreground">{tp.identity.emojiHint}</span>
           </div>
           <div className="flex flex-1 flex-col gap-1">
-            <label className="text-xs font-medium text-muted-foreground">Name</label>
+            <label className="text-xs font-medium text-muted-foreground">{tp.identity.name}</label>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
               onBlur={handleNameBlur}
-              placeholder="Space name"
+              placeholder={tp.identity.namePlaceholder}
               className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
@@ -1942,14 +1983,14 @@ export function ParametersTab({ space, transactions, onSpaceChange }: Parameters
       </Section>
 
       {/* Members — MembersSection receives onSpaceChange so it can update members array */}
-      <Section title="Members">
+      <Section title={tp.sections.members}>
         <MembersSection space={space} onSpaceChange={onSpaceChange} />
       </Section>
 
       {/* Fields — built-in toggles, feature toggles, custom field editor. Hiding a
           section below never deletes its stored list; re-enabling the field
           brings the section back with its contents intact. */}
-      <Section title="Fields">
+      <Section title={tp.sections.fields}>
         <FieldsEditor
           config={spaceConfig}
           onConfigChange={handleConfigChange}
@@ -1965,10 +2006,10 @@ export function ParametersTab({ space, transactions, onSpaceChange }: Parameters
           sticky flag on and reveals the full section, same as the form's inline
           control. */}
       {!spaceConfig.features.multiCurrency && (
-        <Section title="Currencies">
+        <Section title={tp.sections.currencies}>
           <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-3 py-2">
             <div>
-              <p className="text-sm font-medium">Main currency</p>
+              <p className="text-sm font-medium">{tp.currencies.mainCurrency}</p>
               <p className="text-xs text-muted-foreground">{spaceMainCurrency}</p>
             </div>
             <InlineCurrencyControl
@@ -1986,20 +2027,21 @@ export function ParametersTab({ space, transactions, onSpaceChange }: Parameters
       )}
 
       {spaceConfig.features.multiCurrency && (
-        <Section title="Currencies">
+        <Section title={tp.sections.currencies}>
           {/* Read-only main currency display — locked after creation (editable + recompute is v2). */}
           {(() => {
             const mc = getSpaceMainCurrency(space)
             const match = ALL_CURRENCIES.find(([code]) => code === mc)
-            const label = match ? `${mc} (${match[1]}) — ${match[2]}` : mc
+            // Currency name in the UI language (code and symbol unchanged)
+            const label = match ? `${mc} (${match[1]}) — ${localizedCurrencyName(mc, locale)}` : mc
             return (
               <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-3 py-2">
                 <div>
-                  <p className="text-sm font-medium">Main currency</p>
+                  <p className="text-sm font-medium">{tp.currencies.mainCurrency}</p>
                   <p className="text-xs text-muted-foreground">{label}</p>
                 </div>
                 <span className="rounded-full border px-2 py-0.5 text-[10px] text-muted-foreground">
-                  set at creation — cannot be modified
+                  {tp.currencies.lockedBadge}
                 </span>
               </div>
             )
@@ -2022,9 +2064,9 @@ export function ParametersTab({ space, transactions, onSpaceChange }: Parameters
         if (currenciesWithRates.length === 0) return null
 
         return (
-          <Section title="Exchange rates">
+          <Section title={tp.sections.exchangeRates}>
             <p className="text-xs text-muted-foreground">
-              Default rates for new transactions. Editing a rate only affects future transactions.
+              {tp.rates.hint}
             </p>
             {currenciesWithRates.map((code) => {
               // Read from space.defaultRates, fall back to hardcoded cross-rate
@@ -2052,12 +2094,12 @@ export function ParametersTab({ space, transactions, onSpaceChange }: Parameters
 
       {/* Categories — hidden when builtInFields.category is off */}
       {spaceConfig.builtInFields.category && (
-        <Section title="Categories">
+        <Section title={tp.sections.categories}>
           <EditableLabeledList
             items={space.categories ?? []}
             spaceId={space.spaceId}
             field="categories"
-            placeholder="Category name…"
+            placeholder={tp.lists.categoryPlaceholder}
             onItemsChange={handleListChange('categories')}
           />
         </Section>
@@ -2065,12 +2107,12 @@ export function ParametersTab({ space, transactions, onSpaceChange }: Parameters
 
       {/* Payment methods — hidden when builtInFields.paymentMethod is off */}
       {spaceConfig.builtInFields.paymentMethod && (
-        <Section title="Payment methods">
+        <Section title={tp.sections.paymentMethods}>
           <EditableLabeledList
             items={space.paymentMethods ?? []}
             spaceId={space.spaceId}
             field="paymentMethods"
-            placeholder="Payment method…"
+            placeholder={tp.lists.paymentMethodPlaceholder}
             onItemsChange={handleListChange('paymentMethods')}
           />
         </Section>
@@ -2078,7 +2120,7 @@ export function ParametersTab({ space, transactions, onSpaceChange }: Parameters
 
       {/* Countries — hidden when builtInFields.country is off */}
       {spaceConfig.builtInFields.country && (
-        <Section title="Countries">
+        <Section title={tp.sections.countries}>
           <CountryPicker
             selected={space.countries ?? []}
             spaceId={space.spaceId}
@@ -2089,12 +2131,12 @@ export function ParametersTab({ space, transactions, onSpaceChange }: Parameters
 
       {/* Cities — hidden when builtInFields.city is off. Still auto-seeded from transactions. */}
       {spaceConfig.builtInFields.city && (
-        <Section title="Cities">
+        <Section title={tp.sections.cities}>
           <EditableLabeledList
             items={effectiveCities}
             spaceId={space.spaceId}
             field="cities"
-            placeholder="City name…"
+            placeholder={tp.lists.cityPlaceholder}
             onItemsChange={handleListChange('cities')}
             hideEmoji
           />
@@ -2102,14 +2144,14 @@ export function ParametersTab({ space, transactions, onSpaceChange }: Parameters
       )}
 
       {/* Feedback — embedded form for quick beta feedback */}
-      <Section title="Feedback">
+      <Section title={tp.sections.feedback}>
         <FeedbackForm source="ParametersTab" />
       </Section>
 
       {/* ----------------------------------------------------------------- */}
       {/* Manage space — archive and leave/delete actions                   */}
       {/* ----------------------------------------------------------------- */}
-      <Section title="Manage space">
+      <Section title={tp.sections.manageSpace}>
         <div className="flex flex-col gap-2">
           {/* Push notifications for this space — a personal setting, stored on
               my own user document, invisible to other members (NOTIFICATIONS_SPEC §9.3) */}
@@ -2128,17 +2170,17 @@ export function ParametersTab({ space, transactions, onSpaceChange }: Parameters
             disabled={archiving}
           >
             {archiving
-              ? (isArchived ? 'Unarchiving…' : 'Archiving…')
+              ? (isArchived ? tp.manage.unarchiving : tp.manage.archiving)
               : archiveDone
-                ? (isArchived ? 'Archived!' : 'Unarchived!')
-                : (isArchived ? 'Unarchive this space' : 'Archive this space')}
+                ? (isArchived ? tp.manage.archived : tp.manage.unarchived)
+                : (isArchived ? tp.manage.unarchive : tp.manage.archive)}
           </Button>
           {/* Explanation label — different wording for solo vs multi-user spaces */}
           {!isArchived && !archiveDone && (
             <p className="text-xs text-muted-foreground">
               {isOnlyClaimedUser
-                ? 'Move this space to an archive directory. You will still be able to open it and add or edit transactions.'
-                : 'Move this space to an archive directory. You will remain a member of this space, and still be able to open it and add or edit transactions. This will have no impact on other participants.'}
+                ? tp.manage.archiveHintSolo
+                : tp.manage.archiveHintMulti}
             </p>
           )}
 
@@ -2150,8 +2192,8 @@ export function ParametersTab({ space, transactions, onSpaceChange }: Parameters
                 : 'bg-green-50 text-green-800 border border-green-200 dark:bg-green-950 dark:text-green-200 dark:border-green-800'
             }`}>
               {isArchived
-                ? 'This space is now archived. It will appear in your "Archived" section.'
-                : 'This space has been unarchived and is back in your active list.'}
+                ? tp.manage.archivedBanner
+                : tp.manage.unarchivedBanner}
             </div>
           )}
 
@@ -2162,15 +2204,15 @@ export function ParametersTab({ space, transactions, onSpaceChange }: Parameters
             className="w-full justify-start"
             onClick={() => setConfirmOpen(true)}
           >
-            {isOnlyClaimedUser ? 'Delete this space' : 'Leave this space'}
+            {isOnlyClaimedUser ? tp.manage.deleteSpace : tp.manage.leaveSpace}
           </Button>
         </div>
 
         {/* Explanation text */}
         <p className="text-xs text-muted-foreground">
           {isOnlyClaimedUser
-            ? 'You are the only user. Deleting will permanently remove this space and all its transactions.'
-            : 'Leaving will remove you from the space. Other members will still have access. Your past transactions will be preserved.'}
+            ? tp.manage.deleteExplain
+            : tp.manage.leaveExplain}
         </p>
       </Section>
 
@@ -2179,24 +2221,24 @@ export function ParametersTab({ space, transactions, onSpaceChange }: Parameters
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {isOnlyClaimedUser ? 'Delete this space?' : 'Leave this space?'}
+              {isOnlyClaimedUser ? tp.manage.deleteTitle : tp.manage.leaveTitle}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {isOnlyClaimedUser
-                ? 'This will permanently delete the space and all its transactions. This action cannot be undone.'
-                : 'You will lose access to this space. Your expense history will be preserved for other members.'}
+                ? tp.manage.deleteDescription
+                : tp.manage.leaveDescription}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={actionInProgress}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={actionInProgress}>{t.common.cancel}</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleLeaveOrDelete}
               disabled={actionInProgress}
               className="bg-destructive text-white hover:bg-destructive/90"
             >
               {actionInProgress
-                ? (isOnlyClaimedUser ? 'Deleting…' : 'Leaving…')
-                : (isOnlyClaimedUser ? 'Delete' : 'Leave')}
+                ? (isOnlyClaimedUser ? tp.manage.deleting : tp.manage.leaving)
+                : (isOnlyClaimedUser ? t.common.delete : tp.manage.leave)}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

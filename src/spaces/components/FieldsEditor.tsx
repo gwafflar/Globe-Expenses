@@ -30,29 +30,31 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { useT } from '@/i18n'
 
 // ---------------------------------------------------------------------------
 // Static metadata for built-in fields / features (display only — never behaviour)
 // ---------------------------------------------------------------------------
 
-const BUILT_IN_META: Record<keyof SpaceConfig['builtInFields'], { label: string; icon: typeof MapPin; hint: string }> = {
-  country: { label: 'Country', icon: MapPin, hint: 'Picker with flags' },
-  city: { label: 'City', icon: Building2, hint: 'Auto-filled from your entries' },
-  category: { label: 'Category', icon: Tag, hint: 'Used by the dashboard breakdown' },
-  paymentMethod: { label: 'Payment method', icon: CreditCard, hint: 'Required for cash wallets' },
-  notes: { label: 'Notes', icon: FileText, hint: 'Free text on each transaction' },
+// Only the icons live at module level. The labels and hints are looked up at
+// render time from t.parameters.fields.builtIn[key] / .features[key] /
+// .types[id] — a module-level label would be frozen in the language that was
+// active when this file was first imported.
+const BUILT_IN_META: Record<keyof SpaceConfig['builtInFields'], { icon: typeof MapPin }> = {
+  country: { icon: MapPin },
+  city: { icon: Building2 },
+  category: { icon: Tag },
+  paymentMethod: { icon: CreditCard },
+  notes: { icon: FileText },
 }
 
-const FEATURE_META: Record<keyof SpaceConfig['features'], { label: string; icon: typeof Wallet; hint: string }> = {
-  wallets: { label: 'Cash wallet', icon: Wallet, hint: 'Withdrawals, adjustments, balance tracking' },
-  multiCurrency: { label: 'Multiple currencies', icon: Coins, hint: 'Turns on by itself the first time you use another currency' },
+const FEATURE_META: Record<keyof SpaceConfig['features'], { icon: typeof Wallet }> = {
+  wallets: { icon: Wallet },
+  multiCurrency: { icon: Coins },
 }
 
-const CUSTOM_TYPES: { id: CustomFieldType; label: string }[] = [
-  { id: 'select', label: 'Choice' },
-  { id: 'text', label: 'Text' },
-  { id: 'boolean', label: 'Yes-no' },
-]
+// Display order of the custom field types (labels: t.parameters.fields.types[id]).
+const CUSTOM_TYPES: CustomFieldType[] = ['select', 'text', 'boolean']
 
 // ---------------------------------------------------------------------------
 // Small building blocks
@@ -113,6 +115,9 @@ function CustomFieldCard({
   onChange: (patch: Partial<CustomFieldDef>) => void
   onRemove: () => void
 }) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  const tf = t.parameters.fields
   const [newOption, setNewOption] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const isProvisional = field.label.trim() === ''
@@ -135,13 +140,13 @@ function CustomFieldCard({
           )}
           <span className="text-base">{field.emoji || '🏷️'}</span>
           <span className={`truncate text-sm font-medium ${field.label ? '' : 'text-muted-foreground'}`}>
-            {field.label || 'Untitled field'}
+            {field.label || tf.untitled}
           </span>
           <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
-            {CUSTOM_TYPES.find((t) => t.id === field.type)?.label}
+            {tf.types[field.type]}
           </span>
         </button>
-        <Switch checked={field.enabled} onChange={(v) => onChange({ enabled: v })} label={`Enable ${field.label || 'field'}`} />
+        <Switch checked={field.enabled} onChange={(v) => onChange({ enabled: v })} label={tf.enableField(field.label)} />
       </div>
 
       {expanded && (
@@ -151,33 +156,33 @@ function CustomFieldCard({
               value={field.emoji ?? ''}
               onChange={(e) => onChange({ emoji: e.target.value })}
               placeholder="🏷️"
-              aria-label="Field emoji"
+              aria-label={tf.emojiAria}
               className="w-12 rounded-md border bg-background px-2 py-1.5 text-center text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             />
             <input
               value={field.label}
               onChange={(e) => onChange({ label: e.target.value })}
-              placeholder="Field name"
-              aria-label="Field label"
+              placeholder={tf.namePlaceholder}
+              aria-label={tf.labelAria}
               className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
 
           <div>
-            <div className="mb-1 text-xs font-medium text-muted-foreground">Type</div>
+            <div className="mb-1 text-xs font-medium text-muted-foreground">{tf.type}</div>
             <div className="flex gap-1.5">
-              {CUSTOM_TYPES.map((t) => (
+              {CUSTOM_TYPES.map((typeId) => (
                 <button
-                  key={t.id}
+                  key={typeId}
                   type="button"
-                  onClick={() => onChange({ type: t.id })}
+                  onClick={() => onChange({ type: typeId })}
                   className={`flex-1 rounded-md border px-2 py-1.5 text-xs font-medium ${
-                    field.type === t.id
+                    field.type === typeId
                       ? 'border-primary bg-primary text-primary-foreground'
                       : 'border-border bg-background text-muted-foreground'
                   }`}
                 >
-                  {t.label}
+                  {tf.types[typeId]}
                 </button>
               ))}
             </div>
@@ -185,7 +190,7 @@ function CustomFieldCard({
 
           {field.type === 'select' && (
             <div>
-              <div className="mb-1 text-xs font-medium text-muted-foreground">Choices</div>
+              <div className="mb-1 text-xs font-medium text-muted-foreground">{tf.choices}</div>
               <div className="space-y-1.5">
                 {(field.options ?? []).map((o: LabeledItem) => (
                   <div key={o.id} className="flex items-center gap-2 rounded-md bg-background px-2 py-1.5">
@@ -193,7 +198,7 @@ function CustomFieldCard({
                     <button
                       type="button"
                       onClick={() => onChange({ options: (field.options ?? []).filter((x) => x.id !== o.id) })}
-                      aria-label={`Remove ${o.label}`}
+                      aria-label={tf.removeChoice(o.label)}
                       className="text-muted-foreground"
                     >
                       <X className="h-3.5 w-3.5" />
@@ -205,8 +210,8 @@ function CustomFieldCard({
                     value={newOption}
                     onChange={(e) => setNewOption(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addOption() } }}
-                    placeholder="Add a choice…"
-                    aria-label="Add a choice"
+                    placeholder={tf.addChoicePlaceholder}
+                    aria-label={tf.addChoiceAria}
                     className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                   />
                   <button type="button" onClick={addOption} className="rounded-md bg-foreground px-2.5 text-background">
@@ -215,20 +220,20 @@ function CustomFieldCard({
                 </div>
               </div>
               <p className="mt-1.5 text-xs text-muted-foreground">
-                Renaming a choice updates it everywhere, past transactions included.
+                {tf.choicesHint}
               </p>
             </div>
           )}
 
           {field.type === 'text' && (
             <p className="text-xs text-muted-foreground">
-              Free text. Searchable, but not summed or charted.
+              {tf.textHint}
             </p>
           )}
 
           {field.type === 'boolean' && (
             <p className="text-xs text-muted-foreground">
-              A yes/no switch. You can filter on it and total the amounts marked yes.
+              {tf.booleanHint}
             </p>
           )}
 
@@ -239,26 +244,25 @@ function CustomFieldCard({
               className="flex items-center gap-1.5 text-xs font-medium text-destructive"
             >
               <Trash2 className="h-3.5 w-3.5" />
-              Delete this field
+              {tf.deleteField}
             </button>
           )}
 
           <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>Delete "{field.label}"?</AlertDialogTitle>
+                <AlertDialogTitle>{tf.deleteTitle(field.label)}</AlertDialogTitle>
                 <AlertDialogDescription>
-                  Values already recorded in this field will no longer be visible. You can instead
-                  use the switch above to hide the field without losing anything.
+                  {tf.deleteDescription}
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogCancel>{t.common.cancel}</AlertDialogCancel>
                 <AlertDialogAction
                   onClick={onRemove}
                   className="bg-destructive text-white hover:bg-destructive/90"
                 >
-                  Delete
+                  {t.common.delete}
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
@@ -296,6 +300,9 @@ export function FieldsEditor({
   canDisableMultiCurrency = true,
   foreignCurrencyTxCount = 0,
 }: FieldsEditorProps) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  const tf = t.parameters.fields
   const [editingId, setEditingId] = useState<string | null>(null)
   const [confirmReset, setConfirmReset] = useState(false)
   // Provisional custom fields — held here, never emitted until they get a label.
@@ -370,10 +377,10 @@ export function FieldsEditor({
     ? [
         ...(Object.keys(PRESETS[presetOrigin].builtInFields) as (keyof SpaceConfig['builtInFields'])[])
           .filter((k) => config.builtInFields[k] !== PRESETS[presetOrigin].builtInFields[k])
-          .map((k) => ({ label: BUILT_IN_META[k].label, next: PRESETS[presetOrigin].builtInFields[k] })),
+          .map((k) => ({ label: tf.builtIn[k].label, next: PRESETS[presetOrigin].builtInFields[k] })),
         ...(Object.keys(PRESETS[presetOrigin].features) as (keyof SpaceConfig['features'])[])
           .filter((k) => config.features[k] !== PRESETS[presetOrigin].features[k])
-          .map((k) => ({ label: FEATURE_META[k].label, next: PRESETS[presetOrigin].features[k] })),
+          .map((k) => ({ label: tf.features[k].label, next: PRESETS[presetOrigin].features[k] })),
       ]
     : []
 
@@ -387,18 +394,18 @@ export function FieldsEditor({
     <div>
       {showPresetSection && presetOrigin && (
         <>
-          <SectionTitle>Preset</SectionTitle>
+          <SectionTitle>{tf.preset}</SectionTitle>
           <div className="rounded-lg border bg-muted/30 p-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="text-lg">{PRESETS[presetOrigin].emoji}</span>
                 <div>
                   <div className="text-sm font-medium">
-                    {PRESETS[presetOrigin].titleKey}
-                    {drifted && <span className="text-muted-foreground"> (modified)</span>}
+                    {t.spaces.presets[presetOrigin].title}
+                    {drifted && <span className="text-muted-foreground"> {tf.modified}</span>}
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    {drifted ? 'Your settings differ from the preset' : 'Matches the preset'}
+                    {drifted ? tf.differs : tf.matches}
                   </div>
                 </div>
               </div>
@@ -411,7 +418,7 @@ export function FieldsEditor({
                 className="gap-1"
               >
                 <RotateCcw className="h-3 w-3" />
-                Reset
+                {tf.reset}
               </Button>
             </div>
           </div>
@@ -419,28 +426,28 @@ export function FieldsEditor({
           <AlertDialog open={confirmReset} onOpenChange={setConfirmReset}>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>Reset to {PRESETS[presetOrigin].titleKey}?</AlertDialogTitle>
+                <AlertDialogTitle>{tf.resetTitle(t.spaces.presets[presetOrigin].title)}</AlertDialogTitle>
                 <AlertDialogDescription>
-                  Your own fields, categories and members are not affected.
+                  {tf.resetDescription}
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <ul className="-mt-2 space-y-0.5 text-left">
                 {resetDiff.map(({ label, next }) => (
                   <li key={label} className="text-xs text-muted-foreground">
-                    {label} → <strong className="text-foreground">{next ? 'on' : 'off'}</strong>
+                    {label} → <strong className="text-foreground">{next ? tf.on : tf.off}</strong>
                   </li>
                 ))}
               </ul>
               <AlertDialogFooter>
-                <AlertDialogCancel>Keep mine</AlertDialogCancel>
-                <AlertDialogAction onClick={handleReset}>Reset toggles</AlertDialogAction>
+                <AlertDialogCancel>{tf.keepMine}</AlertDialogCancel>
+                <AlertDialogAction onClick={handleReset}>{tf.resetToggles}</AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
         </>
       )}
 
-      <SectionTitle>Fields on each transaction</SectionTitle>
+      <SectionTitle>{tf.onEachTransaction}</SectionTitle>
       <div className="divide-y divide-border rounded-lg border px-3">
         {(Object.keys(BUILT_IN_META) as (keyof SpaceConfig['builtInFields'])[]).map((key) => {
           const meta = BUILT_IN_META[key]
@@ -448,21 +455,21 @@ export function FieldsEditor({
             <ToggleRow
               key={key}
               icon={meta.icon}
-              label={meta.label}
-              hint={meta.hint}
+              label={tf.builtIn[key].label}
+              hint={tf.builtIn[key].hint}
               checked={config.builtInFields[key]}
               onChange={(v) => setBuiltIn(key, v)}
               disabled={key === 'paymentMethod' && config.features.wallets}
-              note={key === 'paymentMethod' && walletNeedsPm ? 'The cash wallet needs this field.' : undefined}
+              note={key === 'paymentMethod' && walletNeedsPm ? tf.walletNeedsPm : undefined}
             />
           )
         })}
       </div>
       <p className="mt-1.5 text-xs text-muted-foreground">
-        Turning a field off hides it. Nothing you already entered is deleted.
+        {tf.offHint}
       </p>
 
-      <SectionTitle>Features</SectionTitle>
+      <SectionTitle>{tf.featuresTitle}</SectionTitle>
       <div className="divide-y divide-border rounded-lg border px-3">
         {(Object.keys(FEATURE_META) as (keyof SpaceConfig['features'])[]).map((key) => {
           const meta = FEATURE_META[key]
@@ -472,12 +479,12 @@ export function FieldsEditor({
             <ToggleRow
               key={key}
               icon={meta.icon}
-              label={meta.label}
-              hint={meta.hint}
+              label={tf.features[key].label}
+              hint={tf.features[key].hint}
               checked={config.features[key]}
               onChange={(v) => setFeature(key, v)}
               disabled={blocked}
-              note={blocked ? `${foreignCurrencyTxCount} transaction${foreignCurrencyTxCount === 1 ? '' : 's'} use another currency.` : undefined}
+              note={blocked ? tf.foreignCurrencyTx(foreignCurrencyTxCount) : undefined}
             />
           )
         })}
@@ -487,16 +494,16 @@ export function FieldsEditor({
         action={
           <Button type="button" variant="outline" size="sm" onClick={addCustomField} className="gap-1">
             <Plus className="h-3 w-3" />
-            Add
+            {t.common.add}
           </Button>
         }
       >
-        Your own fields
+        {tf.customTitle}
       </SectionTitle>
 
       {allCustomFields.length === 0 ? (
         <div className="rounded-lg border border-dashed px-3 py-4 text-center text-xs text-muted-foreground">
-          Add a field of your own — a project, a shop, a "reimbursable?" flag.
+          {tf.customEmpty}
         </div>
       ) : (
         <div className="space-y-2">

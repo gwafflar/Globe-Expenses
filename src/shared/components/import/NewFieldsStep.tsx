@@ -7,22 +7,15 @@
 
 import type { CustomFieldType } from '@/spaces/types'
 import { inferColumnType, type ColumnTarget, type ForeignColumn } from '@/shared/utils/foreignSheet'
+import { useT } from '@/i18n'
 
 /** Ceiling on fields creatable in one import, so a malformed sheet cannot
  *  generate fifty. Ten is far more than any real import needs. */
 export const MAX_NEW_FIELDS = 10
 
-const TYPE_LABELS: Record<CustomFieldType, string> = {
-  select: 'Choice list',
-  text: 'Free text',
-  boolean: 'Yes / no',
-}
-
-const TYPE_HINTS: Record<CustomFieldType, string> = {
-  select: 'A fixed set of values you can filter and group by',
-  text: 'Anything — searchable, but not groupable',
-  boolean: 'A simple flag',
-}
+// Type ids in dropdown order. Their labels and hints come from the
+// translations (t.importExport.newFields.typeLabels / typeHints) at render.
+const FIELD_TYPES: CustomFieldType[] = ['select', 'text', 'boolean']
 
 export interface NewFieldDraft {
   column: ForeignColumn
@@ -38,10 +31,14 @@ interface NewFieldsStepProps {
 }
 
 export function NewFieldsStep({ drafts, onChange, onRemove }: NewFieldsStepProps) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  const tn = t.importExport.newFields
+
   if (drafts.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
-        No new fields to create. Go back if you meant to add one.
+        {tn.noneToCreate}
       </p>
     )
   }
@@ -49,12 +46,12 @@ export function NewFieldsStep({ drafts, onChange, onRemove }: NewFieldsStepProps
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-muted-foreground">
-        These columns will become new fields in this space. Check the name and type of each.
+        {tn.intro}
       </p>
 
       {drafts.length >= MAX_NEW_FIELDS && (
         <div className="rounded-md bg-yellow-50 px-3 py-2 text-xs text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300">
-          You've reached the limit of {MAX_NEW_FIELDS} new fields per import.
+          {tn.limitReached(MAX_NEW_FIELDS)}
         </div>
       )}
 
@@ -67,7 +64,7 @@ export function NewFieldsStep({ drafts, onChange, onRemove }: NewFieldsStepProps
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <p className="truncate text-xs text-muted-foreground">
-                  From column “{column.header}”
+                  {tn.fromColumn(column.header)}
                 </p>
               </div>
               <button
@@ -75,12 +72,12 @@ export function NewFieldsStep({ drafts, onChange, onRemove }: NewFieldsStepProps
                 className="shrink-0 text-xs text-muted-foreground underline hover:text-foreground"
                 onClick={() => onRemove(column.index)}
               >
-                Don't import
+                {tn.dontImport}
               </button>
             </div>
 
             <label className="flex flex-col gap-1">
-              <span className="text-xs font-medium text-muted-foreground">Field name</span>
+              <span className="text-xs font-medium text-muted-foreground">{tn.fieldName}</span>
               <input
                 type="text"
                 className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
@@ -91,30 +88,29 @@ export function NewFieldsStep({ drafts, onChange, onRemove }: NewFieldsStepProps
             </label>
 
             <label className="flex flex-col gap-1">
-              <span className="text-xs font-medium text-muted-foreground">Type</span>
+              <span className="text-xs font-medium text-muted-foreground">{tn.type}</span>
               <select
                 className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 value={type}
                 onChange={(e) => onChange(column.index, { type: e.target.value as CustomFieldType })}
               >
-                {(Object.keys(TYPE_LABELS) as CustomFieldType[]).map((t) => (
-                  <option key={t} value={t}>{TYPE_LABELS[t]}</option>
+                {FIELD_TYPES.map((ft) => (
+                  <option key={ft} value={ft}>{tn.typeLabels[ft]}</option>
                 ))}
               </select>
-              <span className="text-xs text-muted-foreground">{TYPE_HINTS[type]}</span>
+              <span className="text-xs text-muted-foreground">{tn.typeHints[type]}</span>
             </label>
 
             {/* The evidence, always shown — this is what makes a wrong guess
                 visible instead of something the user discovers days later. */}
             <p className="rounded-md bg-muted/40 px-2 py-1.5 text-xs text-muted-foreground">
               {overridden
-                ? `Suggested ${TYPE_LABELS[inference.type].toLowerCase()}: ${inference.evidence}`
+                ? tn.suggested({ type: tn.typeLabels[inference.type], evidence: inference.evidence })
                 : inference.evidence}
               {type === 'select' && inference.suggestedOptions.length > 0 && (
                 <>
                   {' · '}
-                  {inference.suggestedOptions.length} option
-                  {inference.suggestedOptions.length !== 1 ? 's' : ''} will be created
+                  {tn.optionsCreated(inference.suggestedOptions.length)}
                 </>
               )}
             </p>

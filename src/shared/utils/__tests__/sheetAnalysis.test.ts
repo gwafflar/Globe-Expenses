@@ -5,6 +5,7 @@ import * as XLSX from 'xlsx'
 import type { SpaceConfig } from '@/spaces/types'
 import { getSpaceConfig } from '@/spaces/config'
 import { columnMapForConfig, colLetter } from '../sheetColumns'
+import { useLanguageStore } from '@/i18n'
 import {
   buildSpaceWorkbook,
   SHEET_ANALYSIS,
@@ -101,6 +102,19 @@ describe('Analysis sheet — generated from dashboard cards', () => {
     const fs = formulas(analysisOf(space, transactions))
     expect(fs.length).toBeGreaterThan(0)
     expect(fs.every((f) => f.startsWith('SUMPRODUCT('))).toBe(true)
+  })
+
+  it('stays English when the UI is in French (Spec decision #102)', () => {
+    const { space, transactions } = legacySpace()
+    useLanguageStore.getState().setPreference('fr')
+    try {
+      const labels = columnA(analysisOf(space, transactions))
+      expect(labels).toContain('By category')
+      expect(labels).toContain('By country')
+      expect(labels.some((l) => /catégorie|Par /.test(l))).toBe(false)
+    } finally {
+      useLanguageStore.getState().setPreference('auto') // other tests expect English
+    }
   })
 
   it('emits no #REF! anywhere', () => {

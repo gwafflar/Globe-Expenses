@@ -73,6 +73,13 @@ import {
   type DateRange,
 } from '@/shared/utils/dateRange'
 import type { FilterRequest, FilterSelection } from '@/transactions/utils/filterDimensions'
+import { useT } from '@/i18n'
+
+/** Colour-hash key for transactions with no category. Deliberately NOT
+ *  translated: it only feeds categoryColor(), and a translated key would give
+ *  the bucket a different colour in each language. The DISPLAYED text is
+ *  t.dashboard.tab.uncategorized. */
+const UNCATEGORIZED_COLOR_KEY = 'Uncategorized'
 
 // ---------------------------------------------------------------------------
 // Props
@@ -167,6 +174,11 @@ export function DashboardTab({
   onSpaceChange,
   onDrillDown,
 }: DashboardTabProps) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  // Shorthand for this tab's own messages.
+  const tt = t.dashboard.tab
+
   // Resolved once and passed down. Legacy spaces (no space.config) resolve to
   // full travel-mode defaults, so every gate below is `true` and the dashboard
   // shows what it always showed.
@@ -530,7 +542,7 @@ export function DashboardTab({
     return Array.from(map.entries())
       .map(([name, items]) => ({
         categoryName: name,
-        color: showCategory ? categoryColor(name || 'Uncategorized') : CATEGORY_PALETTE[0],
+        color: showCategory ? categoryColor(name || UNCATEGORIZED_COLOR_KEY) : CATEGORY_PALETTE[0],
         items,
         total: scopedTotal(items),
       }))
@@ -569,7 +581,7 @@ export function DashboardTab({
           .map(([name, amount]) => ({
             name,
             amount,
-            color: showCategory ? categoryColor(name || 'Uncategorized') : CATEGORY_PALETTE[0],
+            color: showCategory ? categoryColor(name || UNCATEGORIZED_COLOR_KEY) : CATEGORY_PALETTE[0],
           }))
           .sort((a, b) => b.amount - a.amount)
         return { dateStr, total, categories }
@@ -612,7 +624,7 @@ export function DashboardTab({
   )
 
   const tappedSegmentColor = tappedSegmentKey && showCategory
-    ? categoryColor(tappedSegmentKey.categoryName || 'Uncategorized')
+    ? categoryColor(tappedSegmentKey.categoryName || UNCATEGORIZED_COLOR_KEY)
     : CATEGORY_PALETTE[0]
 
   // ---------------------------------------------------------------------------
@@ -673,22 +685,22 @@ export function DashboardTab({
       <div className="rounded-xl border bg-card px-4 py-4 shadow-sm">
         <div className="mb-1 text-center text-xs font-medium uppercase tracking-wide text-muted-foreground">
           {scopedMember === null
-            ? 'Total spent'
+            ? tt.totalSpent
             : scopedMember.travelMemberId === currentTravelMemberId
-              ? 'Your share'
-              : `${scopedMember.displayName}'s share`}
+              ? tt.yourShare
+              : tt.memberShare({ name: scopedMember.displayName })}
         </div>
         <div className="mb-1 text-center text-3xl font-bold text-foreground">
           {formatAmount(totalSpent, mainCurrency)}
         </div>
 
         <div className="mb-4 text-center text-xs text-muted-foreground">
-          {scoped.length} transaction{scoped.length !== 1 ? 's' : ''} · {rangeLabel(range)}
+          {tt.txCountInRange({ count: scoped.length, range: rangeLabel(range) })}
         </div>
 
         <div className={`grid gap-2 ${isSolo ? 'grid-cols-2' : 'grid-cols-3'}`}>
           <div className="rounded-lg border bg-muted/30 px-3 py-2 text-center">
-            <div className="text-xs text-muted-foreground">Avg/day</div>
+            <div className="text-xs text-muted-foreground">{tt.avgPerDay}</div>
             <div className="mt-0.5 text-sm font-semibold">
               {formatAmount(avgPerDay, mainCurrency)}
             </div>
@@ -698,19 +710,19 @@ export function DashboardTab({
           {!isSolo && (
             <div className="rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 text-center">
               <div className="truncate text-xs text-primary">
-                {currentMember?.displayName ?? 'You'} (you)
+                {tt.nameYou({ name: currentMember?.displayName ?? tt.you })}
               </div>
               <div className="mt-0.5 text-sm font-semibold text-foreground">
                 {formatAmount(focusStats.consumed, mainCurrency)}
               </div>
               <div className="text-xs text-muted-foreground">
-                paid: {formatAmount(focusStats.paid, mainCurrency)}
+                {tt.paidColon({ amount: formatAmount(focusStats.paid, mainCurrency) })}
               </div>
             </div>
           )}
 
           <div className="rounded-lg border bg-muted/30 px-3 py-2 text-center">
-            <div className="text-xs text-muted-foreground">Transactions</div>
+            <div className="text-xs text-muted-foreground">{tt.transactions}</div>
             <div className="mt-0.5 text-sm font-semibold">{scoped.length}</div>
           </div>
         </div>
@@ -720,12 +732,12 @@ export function DashboardTab({
       {/* Card ② — Spending over time                                       */}
       {/* ================================================================ */}
       <CollapsibleCard
-        title="Spending over time"
+        title={tt.spendingOverTime}
         summary={formatAmount(totalSpent, mainCurrency)}
       >
         {sortedDays.length < 2 ? (
           <p className="py-4 text-center text-sm text-muted-foreground">
-            Not enough data
+            {tt.notEnoughData}
           </p>
         ) : (
           <>
@@ -767,7 +779,10 @@ export function DashboardTab({
                         }
                       >
                         <div
-                          title={`${formatDayLabel(dateStr)}: ${formatAmount(total, mainCurrency)}`}
+                          title={tt.labelValue({
+                            label: formatDayLabel(dateStr),
+                            value: formatAmount(total, mainCurrency),
+                          })}
                           className={`w-full rounded-t transition-opacity ${
                             isTapped ? 'bg-primary' : 'bg-primary/70'
                           } ${tappedDayKey && !isTapped ? 'opacity-40' : ''}`}
@@ -803,7 +818,7 @@ export function DashboardTab({
                   </span>
                   <span className="text-xs text-muted-foreground">
                     {formatAmount(tappedDayTotal, mainCurrency)}
-                    {' · '}{tappedDayScoped.length} tx{tappedDayScoped.length !== 1 ? 's' : ''}
+                    {' · '}{tt.txCountShort(tappedDayScoped.length)}
                   </span>
                 </div>
 
@@ -820,7 +835,7 @@ export function DashboardTab({
                               style={{ width: 8, height: 8, backgroundColor: group.color }}
                             />
                             <span className="flex-1 text-xs font-medium text-foreground">
-                              {group.categoryName || 'Uncategorized'}
+                              {group.categoryName || tt.uncategorized}
                             </span>
                             <span className="text-xs text-muted-foreground">
                               {formatAmount(group.total, mainCurrency)}
@@ -828,7 +843,7 @@ export function DashboardTab({
                             <button
                               type="button"
                               className="shrink-0 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                              title={isCatHidden ? 'Show this category' : 'Hide entire category from chart'}
+                              title={isCatHidden ? tt.showCategory : tt.hideCategoryFromChart}
                               onClick={() => {
                                 setHiddenSpendingCategories((prev) => {
                                   const next = new Set(prev)
@@ -838,7 +853,7 @@ export function DashboardTab({
                                 })
                               }}
                             >
-                              {isCatHidden ? '👁️ Show' : '👁️‍🗨️ Hide all'}
+                              {isCatHidden ? tt.showPill : tt.hideAllPill}
                             </button>
                           </div>
                         )}
@@ -863,7 +878,7 @@ export function DashboardTab({
                                 <button
                                   type="button"
                                   className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-                                  title="Edit this transaction"
+                                  title={tt.editTransaction}
                                   onClick={() => onEditTransaction(tx.txId)}
                                 >
                                   ✏️
@@ -872,7 +887,7 @@ export function DashboardTab({
                                   <button
                                     type="button"
                                     className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-                                    title={hiddenSpendingTxIds.has(tx.txId) ? 'Show this transaction' : 'Hide this transaction'}
+                                    title={hiddenSpendingTxIds.has(tx.txId) ? tt.showTransaction : tt.hideTransaction}
                                     onClick={() => {
                                       setHiddenSpendingTxIds((prev) => {
                                         const next = new Set(prev)
@@ -899,7 +914,7 @@ export function DashboardTab({
             {/* Hidden items pills — click to re-show */}
             {(hiddenSpendingCategories.size > 0 || hiddenSpendingTxIds.size > 0) && (
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                <span className="text-xs text-muted-foreground">Hidden:</span>
+                <span className="text-xs text-muted-foreground">{tt.hidden}</span>
                 {Array.from(hiddenSpendingCategories).map((name) => (
                   <button
                     key={`spending-cat-${name}`}
@@ -915,9 +930,9 @@ export function DashboardTab({
                   >
                     <span
                       className="inline-block rounded-full"
-                      style={{ width: 6, height: 6, backgroundColor: categoryColor(name || 'Uncategorized') }}
+                      style={{ width: 6, height: 6, backgroundColor: categoryColor(name || UNCATEGORIZED_COLOR_KEY) }}
                     />
-                    {name || 'Uncategorized'}
+                    {name || tt.uncategorized}
                     <span className="text-[10px]">👁️</span>
                   </button>
                 ))}
@@ -952,11 +967,11 @@ export function DashboardTab({
       {/* Card ③ — Day by day                                              */}
       {/* ================================================================ */}
       <CollapsibleCard
-        title="Day by day"
-        summary={`${filteredDayRows.length} day${filteredDayRows.length !== 1 ? 's' : ''}`}
+        title={tt.dayByDay}
+        summary={tt.dayCount(filteredDayRows.length)}
       >
         {shownDayRows.length === 0 ? (
-          <p className="py-4 text-center text-sm text-muted-foreground">No expenses in this range</p>
+          <p className="py-4 text-center text-sm text-muted-foreground">{tt.noExpensesInRange}</p>
         ) : (
           <>
             <div className="flex flex-col gap-2">
@@ -978,7 +993,7 @@ export function DashboardTab({
                     {categories.length === 0 ? (
                       <div className="relative z-10 flex items-center gap-2">
                         <div style={{ width: 20, height: 14, borderRadius: 3, backgroundColor: '#d1d5db' }} />
-                        <span className="text-xs text-muted-foreground">No expenses</span>
+                        <span className="text-xs text-muted-foreground">{tt.noExpenses}</span>
                       </div>
                     ) : (
                       <div
@@ -992,7 +1007,10 @@ export function DashboardTab({
                               key={cat.name}
                               title={
                                 showCategory
-                                  ? `${cat.name || 'Uncategorized'}: ${formatAmount(cat.amount, mainCurrency)}`
+                                  ? tt.labelValue({
+                                      label: cat.name || tt.uncategorized,
+                                      value: formatAmount(cat.amount, mainCurrency),
+                                    })
                                   : formatAmount(cat.amount, mainCurrency)
                               }
                               className="cursor-pointer transition-opacity hover:opacity-80"
@@ -1053,8 +1071,8 @@ export function DashboardTab({
                 className="mt-2 w-full text-xs text-muted-foreground underline hover:text-foreground"
               >
                 {showAllDays
-                  ? 'Show fewer days'
-                  : `Show all ${filteredDayRows.length} days`}
+                  ? tt.showFewerDays
+                  : tt.showAllDays(filteredDayRows.length)}
               </button>
             )}
 
@@ -1068,7 +1086,7 @@ export function DashboardTab({
                   />
                   {showCategory && (
                     <span className="text-xs font-medium text-foreground">
-                      {tappedSegmentKey.categoryName || 'Uncategorized'}
+                      {tappedSegmentKey.categoryName || tt.uncategorized}
                     </span>
                   )}
                   <span className="text-xs text-muted-foreground">
@@ -1078,13 +1096,13 @@ export function DashboardTab({
                     <button
                       type="button"
                       className="ml-auto text-xs text-muted-foreground hover:text-foreground transition-colors"
-                      title="Hide entire category from the chart"
+                      title={tt.hideCategoryFromTheChart}
                       onClick={() => {
                         setHiddenCategories((prev) => new Set(prev).add(tappedSegmentKey.categoryName))
                         setTappedSegmentKey(null)
                       }}
                     >
-                      👁️‍🗨️ Hide all
+                      {tt.hideAllPill}
                     </button>
                   )}
                 </div>
@@ -1109,7 +1127,7 @@ export function DashboardTab({
                         <button
                           type="button"
                           className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-                          title="Edit this transaction"
+                          title={tt.editTransaction}
                           onClick={() => onEditTransaction(tx.txId)}
                         >
                           ✏️
@@ -1117,7 +1135,7 @@ export function DashboardTab({
                         <button
                           type="button"
                           className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-                          title={isHidden ? 'Show this transaction' : 'Hide this transaction'}
+                          title={isHidden ? tt.showTransaction : tt.hideTransaction}
                           onClick={() => {
                             setHiddenTxIds((prev) => {
                               const next = new Set(prev)
@@ -1139,7 +1157,7 @@ export function DashboardTab({
             {/* Hidden items — pills to re-show */}
             {(hiddenCategories.size > 0 || hiddenTxIds.size > 0) && (
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                <span className="text-xs text-muted-foreground">Hidden:</span>
+                <span className="text-xs text-muted-foreground">{tt.hidden}</span>
                 {Array.from(hiddenCategories).map((name) => (
                   <button
                     key={`cat-${name}`}
@@ -1155,9 +1173,9 @@ export function DashboardTab({
                   >
                     <span
                       className="inline-block rounded-full"
-                      style={{ width: 6, height: 6, backgroundColor: categoryColor(name || 'Uncategorized') }}
+                      style={{ width: 6, height: 6, backgroundColor: categoryColor(name || UNCATEGORIZED_COLOR_KEY) }}
                     />
-                    {name || 'Uncategorized'}
+                    {name || tt.uncategorized}
                     <span className="text-[10px]">👁️</span>
                   </button>
                 ))}
@@ -1198,20 +1216,20 @@ export function DashboardTab({
         const actions = cardsEditMode ? (
           <>
             <CardActionButton
-              label="Move card up"
+              label={tt.moveCardUp}
               glyph="↑"
               disabled={storedIndex <= 0}
               onClick={() => handleMoveCard(card.id, -1)}
             />
             <CardActionButton
-              label="Move card down"
+              label={tt.moveCardDown}
               glyph="↓"
               disabled={storedIndex >= storedCards.length - 1}
               onClick={() => handleMoveCard(card.id, 1)}
             />
-            <CardActionButton label="Edit card" glyph="✏️" onClick={() => openBuilder(card)} />
+            <CardActionButton label={tt.editCard} glyph="✏️" onClick={() => openBuilder(card)} />
             <CardActionButton
-              label="Delete card"
+              label={tt.deleteCard}
               glyph="✕"
               onClick={() => handleDeleteCard(card.id)}
             />
@@ -1259,8 +1277,8 @@ export function DashboardTab({
           onClick={() => openBuilder()}
           className="rounded-xl border border-dashed px-4 py-6 text-center text-sm text-muted-foreground transition-colors hover:bg-muted/30"
         >
-          Break your spending down by {dimensions[0].label.toLowerCase()} — or any other field.
-          <span className="mt-1 block text-xs font-medium text-primary">+ Add a card</span>
+          {tt.emptyCardsInvite({ dimension: dimensions[0].label })}
+          <span className="mt-1 block text-xs font-medium text-primary">{tt.addACard}</span>
         </button>
       )}
 
@@ -1272,7 +1290,7 @@ export function DashboardTab({
             onClick={() => openBuilder()}
             className="flex-1 rounded-lg border border-dashed border-primary/30 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/5"
           >
-            + Add card
+            {tt.addCard}
           </button>
           <button
             type="button"
@@ -1280,7 +1298,7 @@ export function DashboardTab({
             aria-pressed={cardsEditMode}
             className="rounded-lg border px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
-            {cardsEditMode ? 'Done' : 'Edit cards'}
+            {cardsEditMode ? t.common.done : tt.editCards}
           </button>
         </div>
       )}
@@ -1293,8 +1311,11 @@ export function DashboardTab({
 
         return (
           <CollapsibleCard
-            title="Per person"
-            summary={`${currentMember?.displayName ?? 'You'}: ${formatAmount(focusStats.consumed, mainCurrency)}`}
+            title={tt.perPerson}
+            summary={tt.labelValue({
+              label: currentMember?.displayName ?? tt.you,
+              value: formatAmount(focusStats.consumed, mainCurrency),
+            })}
           >
             <div className="flex flex-col gap-3">
               {perMemberStats.map(({ member, memberIndex, consumed, paid }) => {
@@ -1309,7 +1330,7 @@ export function DashboardTab({
                       <div className="mb-1 text-xs font-medium text-foreground">
                         {member.displayName}
                         {isCurrentUser ? (
-                          <span className="ml-1 text-muted-foreground">(you)</span>
+                          <span className="ml-1 text-muted-foreground">{tt.youSuffix}</span>
                         ) : null}
                       </div>
                       <div className="h-1 w-full rounded bg-muted">
@@ -1328,7 +1349,7 @@ export function DashboardTab({
                         {formatAmount(consumed, mainCurrency)}
                       </div>
                       <div className="text-xs text-muted-foreground">
-                        paid {formatAmount(paid, mainCurrency)}
+                        {tt.paidAmount({ amount: formatAmount(paid, mainCurrency) })}
                       </div>
                     </div>
                   </div>
@@ -1344,8 +1365,8 @@ export function DashboardTab({
       {/* ================================================================ */}
       {showWallets && (
         <CollapsibleCard
-          title="Wallet balances"
-          summary={walletBalances.length > 0 ? `${walletBalances.length} wallet(s)` : 'No wallets yet'}
+          title={tt.walletBalances}
+          summary={walletBalances.length > 0 ? tt.walletCount(walletBalances.length) : tt.noWalletsYet}
         >
           {walletBalances.length > 0 ? (
             <div className="flex flex-col gap-3">
@@ -1383,7 +1404,7 @@ export function DashboardTab({
                       }`}>
                         {formatAmount(wb.remaining, wb.currency)}
                       </span>
-                      <span className="text-[10px] text-muted-foreground">{wb.currency} remaining</span>
+                      <span className="text-[10px] text-muted-foreground">{tt.currencyRemaining({ currency: wb.currency })}</span>
                     </button>
                   )
                 })}
@@ -1394,16 +1415,16 @@ export function DashboardTab({
                 <div className="rounded-lg border bg-muted/20 px-3 py-2.5 space-y-2">
                   <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
                     <div>
-                      <span className="text-muted-foreground">Total deposited: </span>
+                      <span className="text-muted-foreground">{tt.totalDeposited}</span>
                       <span className="font-medium">{formatAmount(selectedWalletDetail.wb.deposited, selectedWalletDetail.wb.currency)}</span>
                     </div>
                     <div>
-                      <span className="text-muted-foreground">Total spent: </span>
+                      <span className="text-muted-foreground">{tt.totalSpentColon}</span>
                       <span className="font-medium">{formatAmount(selectedWalletDetail.wb.spent, selectedWalletDetail.wb.currency)}</span>
                     </div>
                     {selectedWalletDetail.wb.adjustments !== 0 && (
                       <div>
-                        <span className="text-muted-foreground">Adjustments: </span>
+                        <span className="text-muted-foreground">{tt.adjustments}</span>
                         <span className="font-medium">
                           {selectedWalletDetail.wb.adjustments > 0 ? '+' : ''}{formatAmount(selectedWalletDetail.wb.adjustments, selectedWalletDetail.wb.currency)}
                         </span>
@@ -1413,28 +1434,28 @@ export function DashboardTab({
 
                   {selectedWalletDetail.lastTopup && (
                     <div className="border-t pt-2 space-y-1">
-                      <div className="text-xs font-medium text-muted-foreground">Since last top-up</div>
-                      <div className="text-[10px] text-muted-foreground italic">Includes all transactions from end of day of last top-up</div>
+                      <div className="text-xs font-medium text-muted-foreground">{tt.sinceLastTopup}</div>
+                      <div className="text-[10px] text-muted-foreground italic">{tt.sinceLastTopupNote}</div>
                       <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
                         <div>
-                          <span className="text-muted-foreground">Date: </span>
+                          <span className="text-muted-foreground">{tt.date}</span>
                           <span className="font-medium">{formatDayLabel(selectedWalletDetail.lastTopup.date)}</span>
                         </div>
                         <div>
-                          <span className="text-muted-foreground">Amount: </span>
+                          <span className="text-muted-foreground">{tt.amount}</span>
                           <span className="font-medium">{formatAmount(selectedWalletDetail.lastTopupNetAmount, selectedWalletDetail.wb.currency)}</span>
                         </div>
                         <div>
-                          <span className="text-muted-foreground">Balance after: </span>
+                          <span className="text-muted-foreground">{tt.balanceAfter}</span>
                           <span className="font-medium">{formatAmount(selectedWalletDetail.balanceAfterLastTopup, selectedWalletDetail.wb.currency)}</span>
                         </div>
                         <div>
-                          <span className="text-muted-foreground">Spent since: </span>
+                          <span className="text-muted-foreground">{tt.spentSince}</span>
                           <span className="font-medium">{formatAmount(selectedWalletDetail.spentSinceLastTopup, selectedWalletDetail.wb.currency)}</span>
                         </div>
                       </div>
                       <div className="pt-1 text-xs">
-                        <span className="text-muted-foreground">Est. remaining: </span>
+                        <span className="text-muted-foreground">{tt.estRemaining}</span>
                         <span className={`font-semibold ${
                           selectedWalletDetail.wb.remaining > 0 ? 'text-green-600 dark:text-green-400'
                             : selectedWalletDetail.wb.remaining < 0 ? 'text-red-600 dark:text-red-400'
@@ -1444,13 +1465,13 @@ export function DashboardTab({
                         </span>
                       </div>
                       <div className="flex items-center gap-2 pt-1.5">
-                        <span className="text-[11px] text-muted-foreground">Not the amount you have?</span>
+                        <span className="text-[11px] text-muted-foreground">{tt.notTheAmount}</span>
                         <button
                           type="button"
                           onClick={() => setReconcileBalance(selectedWalletDetail.wb)}
                           className="rounded-md border border-primary/30 px-2 py-0.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/5"
                         >
-                          Reconcile with current amount
+                          {tt.reconcile}
                         </button>
                       </div>
                     </div>
@@ -1467,7 +1488,7 @@ export function DashboardTab({
                 if (displayedEvents.length === 0) {
                   return (
                     <p className="py-1 text-center text-xs text-muted-foreground">
-                      No wallet events recorded yet.
+                      {tt.noWalletEvents}
                     </p>
                   )
                 }
@@ -1475,7 +1496,7 @@ export function DashboardTab({
                 return (
                   <div className="space-y-1">
                     <div className="text-xs font-medium text-muted-foreground">
-                      {selectedWalletDetail ? 'History' : 'All wallet events'}
+                      {selectedWalletDetail ? tt.history : tt.allWalletEvents}
                     </div>
                     <div className="max-h-[200px] space-y-1 overflow-y-auto">
                       {displayedEvents.map((tx, idx) => {
@@ -1504,7 +1525,7 @@ export function DashboardTab({
                                   </span>
                                   {tx.fees != null && tx.fees > 0 && (
                                     <div className="text-[10px] text-muted-foreground">
-                                      fees: {formatAmount(tx.fees, tx.currency)}
+                                      {tt.feesAmount({ amount: formatAmount(tx.fees, tx.currency) })}
                                     </div>
                                   )}
                                 </div>
@@ -1512,7 +1533,7 @@ export function DashboardTab({
                                   type="button"
                                   onClick={(e) => { e.stopPropagation(); onEditTransaction(tx.txId) }}
                                   className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                                  title="Edit"
+                                  title={t.common.edit}
                                 >
                                   ✏️
                                 </button>
@@ -1522,7 +1543,10 @@ export function DashboardTab({
                               <div className="flex items-center gap-1.5 px-3 py-1 text-[10px] text-muted-foreground">
                                 <span>↕</span>
                                 <span>
-                                  Spent between {formatDayLabel(gap.fromDate)} and {formatDayLabel(gap.toDate)}:
+                                  {tt.spentBetween({
+                                    from: formatDayLabel(gap.fromDate),
+                                    to: formatDayLabel(gap.toDate),
+                                  })}
                                 </span>
                                 <span className="font-medium">
                                   {gap.amount > 0
@@ -1543,7 +1567,7 @@ export function DashboardTab({
             </div>
           ) : (
             <p className="py-2 text-center text-sm text-muted-foreground">
-              Record a withdrawal to start tracking a payment method balance.
+              {tt.recordWithdrawalHint}
             </p>
           )}
           {onAddWithdrawal && (
@@ -1552,12 +1576,11 @@ export function DashboardTab({
               onClick={onAddWithdrawal}
               className="mt-2 w-full rounded-lg border border-dashed border-primary/30 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/5"
             >
-              + Record withdrawal
+              {tt.recordWithdrawal}
             </button>
           )}
           <p className="mt-2 text-xs text-muted-foreground">
-            Only your wallet balances are shown. Withdrawal data is stored alongside shared transactions.
-            Transfers between participants are not included in wallet computation.
+            {tt.walletPrivacyNote}
           </p>
         </CollapsibleCard>
       )}
@@ -1567,11 +1590,11 @@ export function DashboardTab({
       {/* ================================================================ */}
       {showCurrencies && (
         <CollapsibleCard
-          title="Currencies"
-          summary={currenciesData.map(([code]) => code).join(' · ') || 'None'}
+          title={tt.currencies}
+          summary={currenciesData.map(([code]) => code).join(' · ') || t.common.none}
         >
           {currenciesData.length === 0 ? (
-            <p className="py-4 text-center text-sm text-muted-foreground">No data</p>
+            <p className="py-4 text-center text-sm text-muted-foreground">{t.dashboard.breakdown.noData}</p>
           ) : (
             <>
               <div className="flex flex-wrap gap-2">
@@ -1590,7 +1613,7 @@ export function DashboardTab({
                 ))}
               </div>
               <p className="mt-2 text-xs text-muted-foreground">
-                Amounts converted at rate stored per transaction
+                {tt.convertedNote}
               </p>
             </>
           )}

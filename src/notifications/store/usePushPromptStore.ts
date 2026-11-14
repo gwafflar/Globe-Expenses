@@ -24,13 +24,9 @@ import {
 /** Per device, like the permission the banner leads to. A new device starts fresh. */
 const HISTORY_KEY = 'notifBanners'
 
-const DEFAULT_MESSAGES: Record<BannerMoment, string> = {
-  a: 'Get notified when members join your space and add or edit transactions.',
-  d: 'Get notified when members join your space and add or edit transactions.',
-  b: 'Get notified when members add or edit transactions involving you.',
-  e2: 'Get notified when members add or edit transactions involving you.',
-  e1: 'Someone added a transaction involving you. Get notified next time?',
-}
+// The default text of each moment's banner lives in the translations
+// (t.social.push.banner[moment]) and is looked up by PushPromptBanner at render
+// time — not stored here, so it follows a language change.
 
 function loadHistory(): BannerHistory {
   try {
@@ -53,7 +49,8 @@ function saveHistory(history: BannerHistory) {
 
 interface ActiveBanner {
   moment: BannerMoment
-  message: string
+  /** Caller-supplied text; undefined = the moment's default message. */
+  message?: string
   /** 'enable': offers the Enable button. 'ios-install': Safari tab on iOS,
    *  where push is impossible until the app is added to the Home Screen. */
   variant: 'enable' | 'ios-install'
@@ -98,7 +95,7 @@ export const usePushPromptStore = create<PushPromptState>((set, get) => ({
     set({
       active: {
         moment,
-        message: message ?? DEFAULT_MESSAGES[moment],
+        message,
         variant: state === 'ios-needs-install' ? 'ios-install' : 'enable',
       },
     })

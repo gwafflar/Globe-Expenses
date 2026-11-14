@@ -2897,3 +2897,17 @@ Details and decisions: `docs/notification-implementation-journal.md`. Manual tes
 - **Verified:** `tsc -b`, `pnpm test` 644/644, `build`, functions typecheck + 79/79, rules 28/28.
 - **Released:** one ✨ feat commit, PR to `main` (also carries the Space refactor branches, PRs 1–2), production deploy of rules, functions and hosting.
 - **Open:** Activity Feed UI; `mergeMembers()` burst; Windows Firefox delivery unexplained (not a target).
+
+---
+
+## ✨ Working Session 031 — 14 November 2026 — French translation (i18n)
+
+Design: Architecture §3.3, Spec §3.1 and decisions #99–103. Manual tests: `docs/I18N_TEST_PLAN.md`.
+
+- **Infrastructure**: home-made typed i18n in `src/i18n/` (FR typed against EN, `useT()` / `getT()`, `plural()`, `useLanguageStore`). Profile → Preferences → Language (`LanguageSelect`), default "Automatic" = browser language; saved on `users/{uid}.language` + localStorage.
+- **Translation**: every screen, ~1,000 keys in 13 namespaces, done by six parallel helpers on disjoint files (English text kept byte-identical, so existing tests were untouched).
+- **Push**: per-device `fcmTokens/{token}.language`; `deliverPush()` sends one multicast per language; FR strings in `functions/src/push/text.ts`.
+- **Non-obvious**: stored values stay language-neutral (countries stored in English, shown via `Intl.DisplayNames`); the XLSX build runs under `withLanguage('en', …)` because shared label helpers now follow the UI language; preset texts moved out of `PRESETS` into the translations.
+- **Bug fixed in passing**: `getFlagForCountry()` returned the ISO code ("JP") instead of the flag for countries auto-added from a transaction or an import.
+- **Verified**: `tsc -b`, `pnpm test` 661/661, `build`, functions typecheck + 84/84, lint no worse on any touched file. Rules unchanged (`fcmTokens` and `users/{uid}` accept the new field). Not deployed.
+- **Open**: device run of the test plan (L1–L6); deploy functions + hosting; pre-existing hooks-after-early-return in `ProfilePage` and `TransactionForm` (flagged as a separate task).

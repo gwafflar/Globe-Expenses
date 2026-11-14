@@ -42,6 +42,7 @@ The product is distributed as a Progressive Web App (PWA), installable directly 
 - A user may optionally claim a **nametag** — a unique lowercase handle (3–20 alphanumeric + underscore characters, e.g. `alice`). The nametag is used for friend search and displayed in invites. Claiming a nametag is atomic: a sentinel document in `nametags/{tag}` is written in a batch alongside the user profile update; the batch fails if the tag is already taken.
 - The User document carries a `type` field fixed to `'human'`, distinguishing human actors from agent actors in the CreatedByRef union type. Agent actors do not have User documents.
 - Global categories and payment methods are available across all spaces as a fallback when a space has no per-space list defined.
+- **UI language** (since Nov 2026): English or French, chosen in Profile → Preferences. Default "Automatic" follows the browser language (first supported one, else English). The choice is saved on the profile and follows the user to other devices; it applies immediately, also on the login page of that device. Push notifications use each device's language.
 
 ## 3.2 Space Management
 
@@ -355,7 +356,8 @@ The Activity Feed is a pull-model notification center surfacing collaborative ev
 - Bank rate / cash withdrawal rate input
 - Conflict resolution UI
 - Receipt photo attachment
-- Multi-language / i18n
+- Languages beyond English and French (adding one is a translation task, see Architecture §3.3)
+- Translated XLSX workbook content (sheet names, headers stay English)
 - App Store / Play Store distribution
 - Settlement recording (marking a debt as paid)
 - Bank import agent and draft transaction flow (v2)
@@ -456,3 +458,8 @@ The Activity Feed is a pull-model notification center surfacing collaborative ev
 | 96 | Space delete cascade is server-side | Client deletes the space doc; `onTravelDeleted` recursively deletes subcollections | No `tx_deleted` event per row, no 500-write cap, survives a client crash |
 | 97 | Second Firestore mapping in `functions/` | `functions/src/mapping.ts`, pinned by tests | Functions cannot import from `src/`; a shared package needs a build step for one small function |
 | 98 | Push SW via Workbox `importScripts` | `public/push-sw.js` added to the generated service worker; data-only FCM messages | One service worker on iOS; caching strategy untouched |
+| 99 | Home-made typed i18n, no library | Messages are TS objects (`src/i18n/messages/<lang>/`), FR typed against EN; `useT()` hook over a Zustand store | Missing/extra translations are compile errors; ~100 lines, no runtime parser. i18next would add lazy loading and ICU syntax, not needed for two languages |
+| 100 | Language preference: profile + device cache | `users/{uid}.language` (`'en' \| 'fr' \| 'auto'`, absent = never chose), mirrored in localStorage | Follows the user across devices; login page already localized before sign-in |
+| 101 | Stored values stay language-neutral | Countries stored as English names, displayed via `Intl.DisplayNames`; categories etc. are user data, not translated | Translating stored values would split "Japan"/"Japon" in mixed-language spaces and break filters and exports |
+| 102 | XLSX workbook stays English | Sheet names, headers and cells are not translated; only the import/export UI is. Foreign-file import also recognises French headers | The importer matches on them and round-trip tests pin them |
+| 103 | Push language per device | `fcmTokens/{token}.language`, messages grouped by language in `deliverPush()` | `'auto'` resolves differently per browser; one user can have devices in two languages |

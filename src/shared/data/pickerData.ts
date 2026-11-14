@@ -362,8 +362,77 @@ export const ALL_COUNTRIES: [string, string, string][] = [
   ['MO', '🇲🇴', 'Macau'],
 ]
 
-// Lookup flag for a country name (case-insensitive, partial match) 
-export function getFlagForCountry(name: string): string { 
-  const lower = name.toLowerCase() 
-  const found = ALL_COUNTRIES.find(([, n]) => n.toLowerCase() === lower) 
-  return found ? found[0] : '🌍' }
+// ---------------------------------------------------------------------------
+// Localised names
+// ---------------------------------------------------------------------------
+//
+// ⚠️ STORED country values stay the English names above (Transaction.country,
+// Space.countries[].label — see Architecture §4.2). Translating what is stored
+// would split one country into two ("Japan" / "Japon") in a space shared by
+// EN and FR members, and break filters, dashboard grouping and exports.
+// So: store English, DISPLAY through displayCountryName().
+//
+// Names come from the browser's own CLDR tables via Intl.DisplayNames, so no
+// country/currency list has to be translated by hand for a new language.
+
+// Intl.DisplayNames objects are relatively costly to build: one per locale+type.
+const displayNamesCache = new Map<string, Intl.DisplayNames | null>()
+
+function displayNames(locale: string, type: 'region' | 'currency'): Intl.DisplayNames | null {
+  const key = `${type}:${locale}`
+  if (!displayNamesCache.has(key)) {
+    try {
+      displayNamesCache.set(key, new Intl.DisplayNames([locale], { type, fallback: 'none' }))
+    } catch {
+      displayNamesCache.set(key, null) // very old browser: callers fall back to English
+    }
+  }
+  return displayNamesCache.get(key) ?? null
+}
+
+// Index of the English names, lowercased → [code, flag, name] entry.
+const COUNTRY_BY_ENGLISH_NAME = new Map(ALL_COUNTRIES.map((entry) => [entry[2].toLowerCase(), entry]))
+
+/** Localised name of a country from its ISO 3166 code ('JP', 'fr-BE' → 'Japon'). */
+export function localizedCountryName(code: string, locale: string): string {
+  const english = ALL_COUNTRIES.find(([c]) => c === code)?.[2] ?? code
+  return displayNames(locale, 'region')?.of(code) ?? english
+}
+
+/**
+ * Display text for a STORED country value. Known English names are shown in
+ * the UI language; anything else (a city-state typed by hand, a legacy value)
+ * is returned unchanged.
+ */
+export function displayCountryName(stored: string, locale: string): string {
+  const entry = COUNTRY_BY_ENGLISH_NAME.get(stored.trim().toLowerCase())
+  return entry ? localizedCountryName(entry[0], locale) : stored
+}
+
+/**
+ * Finds a known country from what a user typed, in English OR in the UI
+ * language ('Japon' with locale 'fr' → the JP entry). Case-insensitive, exact.
+ * Use it to turn typed text back into the canonical English name to store.
+ */
+export function findCountry(typed: string, locale: string): [string, string, string] | undefined {
+  const lower = typed.trim().toLowerCase()
+  if (!lower) return undefined
+  return (
+    COUNTRY_BY_ENGLISH_NAME.get(lower) ??
+    ALL_COUNTRIES.find(([code]) => localizedCountryName(code, locale).toLowerCase() === lower)
+  )
+}
+
+/** Localised currency name from its ISO 4217 code ('JPY', 'fr' → 'yen japonais'). */
+export function localizedCurrencyName(code: string, locale: string): string {
+  const english = ALL_CURRENCIES.find(([c]) => c === code)?.[2] ?? code
+  return displayNames(locale, 'currency')?.of(code) ?? english
+}
+
+/** Flag emoji for a stored (English) country name; 🌍 when unknown. */
+export function getFlagForCountry(name: string): string {
+  const found = COUNTRY_BY_ENGLISH_NAME.get(name.trim().toLowerCase())
+  // Entries are [code, flag, name]: the flag is index 1. (This used to return
+  // index 0, so auto-added countries showed "JP" instead of 🇯🇵.)
+  return found ? found[1] : '🌍'
+}

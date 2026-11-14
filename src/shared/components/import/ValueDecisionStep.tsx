@@ -10,6 +10,7 @@
 import { useState } from 'react'
 import type { LabeledItem } from '@/spaces/types'
 import type { SelectDecision, SelectDecisions, SelectColumnSummary } from '@/shared/utils/foreignSheet'
+import { useT } from '@/i18n'
 
 export interface SelectColumnInfo extends SelectColumnSummary {
   /** What the column maps to, for the heading. */
@@ -23,17 +24,18 @@ interface ValueDecisionStepProps {
   onChange: (next: SelectDecisions) => void
 }
 
-const CHOICES: { kind: SelectDecision['kind']; label: string; hint: string }[] = [
-  { kind: 'createAll',     label: 'Add the new values',  hint: 'Missing values are added to the field' },
-  { kind: 'matchExisting', label: 'Only existing values', hint: 'Unmatched cells import empty' },
-  { kind: 'skip',          label: "Don't import this",    hint: 'The column is ignored entirely' },
-]
+// The three choices, in display order. Their label and hint come from the
+// translations (t.importExport.values.choices[kind]) at render time.
+const CHOICES: SelectDecision['kind'][] = ['createAll', 'matchExisting', 'skip']
 
 export function ValueDecisionStep({ columns, decisions, onChange }: ValueDecisionStepProps) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
+
   if (columns.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
-        Every value in the mapped columns already exists in this space. Nothing to decide.
+        {t.importExport.values.nothingToDecide}
       </p>
     )
   }
@@ -41,7 +43,7 @@ export function ValueDecisionStep({ columns, decisions, onChange }: ValueDecisio
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-muted-foreground">
-        Some columns contain values this space doesn't have yet. Choose what to do with each.
+        {t.importExport.values.intro}
       </p>
 
       {columns.map((col) => (
@@ -65,6 +67,9 @@ function ColumnDecision({
   decision: SelectDecision
   onChange: (next: SelectDecision) => void
 }) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  const tv = t.importExport.values
   const [expanded, setExpanded] = useState(false)
   const excluded = decision.kind === 'createAll' ? decision.excluded : []
   const willCreate = column.unmatched.filter((v) => !excluded.includes(v))
@@ -82,31 +87,34 @@ function ColumnDecision({
       <div className="min-w-0">
         <p className="truncate text-sm font-medium">{column.header}</p>
         <p className="text-xs text-muted-foreground">
-          → {column.fieldLabel} · {column.matched.length} match
-          {column.matched.length !== 1 ? 'es' : ''}, {column.unmatched.length} new
+          {tv.matchSummary({
+            field: column.fieldLabel,
+            matched: column.matched.length,
+            unmatched: column.unmatched.length,
+          })}
         </p>
       </div>
 
       <div className="flex flex-col gap-1.5">
-        {CHOICES.map((choice) => (
+        {CHOICES.map((kind) => (
           <label
-            key={choice.kind}
+            key={kind}
             className="flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent/40"
           >
             <input
               type="radio"
               className="mt-0.5"
               name={`decision-${column.columnIndex}`}
-              checked={decision.kind === choice.kind}
+              checked={decision.kind === kind}
               onChange={() =>
-                onChange(choice.kind === 'createAll' ? { kind: 'createAll', excluded: [] } : { kind: choice.kind })
+                onChange(kind === 'createAll' ? { kind: 'createAll', excluded: [] } : { kind })
               }
             />
             <span className="min-w-0">
               <span className="block font-medium">
-                {choice.kind === 'createAll' ? `${choice.label} (${willCreate.length})` : choice.label}
+                {kind === 'createAll' ? tv.createAllWithCount(willCreate.length) : tv.choices[kind].label}
               </span>
-              <span className="block text-xs text-muted-foreground">{choice.hint}</span>
+              <span className="block text-xs text-muted-foreground">{tv.choices[kind].hint}</span>
             </span>
           </label>
         ))}
@@ -121,8 +129,8 @@ function ColumnDecision({
             onClick={() => setExpanded((v) => !v)}
           >
             <span className="min-w-0 truncate pr-2 text-left">
-              {expanded ? 'Untick anything you don’t want' : column.unmatched.slice(0, 3).join(', ')}
-              {!expanded && column.unmatched.length > 3 && ` +${column.unmatched.length - 3} more`}
+              {expanded ? tv.untick : column.unmatched.slice(0, 3).join(', ')}
+              {!expanded && column.unmatched.length > 3 && tv.more(column.unmatched.length - 3)}
             </span>
             <span className="shrink-0">{expanded ? '▲' : '▼'}</span>
           </button>

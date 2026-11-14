@@ -27,10 +27,12 @@ import type { ScopedTransaction } from '@/spaces/utils/dashboardScope'
 import {
   computePivot,
   cardTitle,
+  displayValueLabel,
   drillValues,
   type PivotRow,
   type PivotSection,
 } from '@/spaces/utils/dashboardCards'
+import { useLocale, useT } from '@/i18n'
 
 interface PivotCardProps {
   card: DashboardCardDef
@@ -57,12 +59,16 @@ export function PivotCard({
   preview = false,
 }: PivotCardProps) {
   const [primary, secondary] = dims
+  // translation hook — re-renders when the language changes
+  const t = useT()
 
   // Recomputed only when the scoped list or either descriptor changes — i.e.
   // once per range / mode / config change, not on every render.
+  // `t.dashboard` is a dependency too: the "Other" / "No …" labels are built
+  // inside, so a language switch must recompute them.
   const { sections, total } = useMemo(
-    () => computePivot(scoped, primary, secondary),
-    [scoped, primary, secondary],
+    () => computePivot(scoped, primary, secondary, undefined, undefined, t.dashboard),
+    [scoped, primary, secondary, t.dashboard],
   )
 
   // Which sections are open. Component-local and NOT persisted (§3).
@@ -97,17 +103,19 @@ export function PivotCard({
     ])
   }
 
-  const title = cardTitle(card, dims)
+  const title = cardTitle(card, dims, t.dashboard)
 
   const body =
     sections.length === 0 ? (
-      <p className="py-4 text-center text-sm text-muted-foreground">No data</p>
+      <p className="py-4 text-center text-sm text-muted-foreground">{t.dashboard.breakdown.noData}</p>
     ) : (
       <div className="flex flex-col gap-1">
         {sections.map((section) => (
           <Section
             key={section.key}
             section={section}
+            primary={primary}
+            secondary={secondary}
             cardTotal={total}
             mainCurrency={mainCurrency}
             isOpen={expanded.has(section.key)}
@@ -146,6 +154,8 @@ export function PivotCard({
 
 function Section({
   section,
+  primary,
+  secondary,
   cardTotal,
   mainCurrency,
   isOpen,
@@ -154,6 +164,10 @@ function Section({
   onDrillRow,
 }: {
   section: PivotSection
+  /** The two dimensions — needed to know whether a label is a stored country
+   *  name that must be displayed in the UI language. */
+  primary: FilterDimension
+  secondary: FilterDimension
   cardTotal: number
   mainCurrency: string
   isOpen: boolean
@@ -161,9 +175,15 @@ function Section({
   onDrillSection?: () => void
   onDrillRow?: (row: PivotRow) => void
 }) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  // Intl locale tag for country display names.
+  const locale = useLocale()
+  const label = displayValueLabel(primary, section, locale)
   const pct = cardTotal > 0 ? Math.round((section.total / cardTotal) * 100) : 0
   // The Other and "No value" sections get neutral grey rather than a palette
   // colour, so they read as meta-entries rather than as another value.
+  // Hashed on the STORED label so a value keeps its colour in every language.
   const isMeta = section.isOther || section.isMissing
   const color = isMeta ? '#9CA3AF' : categoryColor(section.label)
 
@@ -192,7 +212,11 @@ function Section({
             aria-expanded={isOpen}
             // Accessible name says what the chevron does, since the visible
             // glyph alone does not.
-            aria-label={`${isOpen ? 'Collapse' : 'Expand'} ${section.label}`}
+            aria-label={
+              isOpen
+                ? t.dashboard.breakdown.collapse({ label })
+                : t.dashboard.breakdown.expand({ label })
+            }
             className="flex min-w-0 flex-1 items-center gap-2 text-left"
           >
             <span className="w-3 shrink-0 text-[10px] text-muted-foreground">
@@ -207,7 +231,7 @@ function Section({
                 section.isMissing ? 'italic text-muted-foreground' : 'text-foreground'
               }`}
             >
-              {section.label}
+              {label}
             </span>
           </button>
         ) : (
@@ -219,7 +243,7 @@ function Section({
               style={{ width: 8, height: 8, backgroundColor: color }}
             />
             <span className="min-w-0 flex-1 truncate text-sm font-medium italic text-muted-foreground">
-              {section.label}
+              {label}
             </span>
           </div>
         )}
@@ -229,7 +253,7 @@ function Section({
         {onDrillSection ? (
           <button
             type="button"
-            aria-label={`Show transactions for ${section.label}`}
+            aria-label={t.dashboard.breakdown.showTransactionsFor({ label })}
             onClick={onDrillSection}
             className="flex shrink-0 items-center gap-2 rounded-md px-1 py-0.5 underline decoration-dotted underline-offset-2 transition-colors hover:bg-muted/50"
           >
@@ -247,6 +271,7 @@ function Section({
             <Row
               key={row.key}
               row={row}
+              displayLabel={displayValueLabel(secondary, row, locale)}
               sectionTotal={section.total}
               mainCurrency={mainCurrency}
               onDrillDown={onDrillRow ? () => onDrillRow(row) : undefined}
@@ -264,17 +289,22 @@ function Section({
 
 function Row({
   row,
+  displayLabel,
   sectionTotal,
   mainCurrency,
   onDrillDown,
 }: {
   row: PivotRow
+  /** What to show — row.label, or its translation for a stored country name. */
+  displayLabel: string
   /** The percentage is of the SECTION, not the card: inside "Japan", what the
    *  user is comparing is Japan's own composition. */
   sectionTotal: number
   mainCurrency: string
   onDrillDown?: () => void
 }) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
   const pct = sectionTotal > 0 ? Math.round((row.total / sectionTotal) * 100) : 0
   const isMeta = row.isOther || row.isMissing
 
@@ -285,7 +315,7 @@ function Row({
           isMeta ? 'italic text-muted-foreground' : 'text-foreground'
         }`}
       >
-        {row.label}
+        {displayLabel}
       </span>
       <span className="shrink-0 text-sm text-foreground">
         {formatAmount(row.total, mainCurrency)}
@@ -301,7 +331,7 @@ function Row({
   return (
     <button
       type="button"
-      aria-label={`Show transactions for ${row.label}`}
+      aria-label={t.dashboard.breakdown.showTransactionsFor({ label: displayLabel })}
       onClick={onDrillDown}
       className="flex w-full items-center gap-2 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-muted/50"
     >

@@ -20,7 +20,8 @@ import { Textarea } from '@/components/ui/textarea'
 import type { CustomFieldDef, CustomValue, LabeledItem, Space, SpaceMember } from '@/spaces/types'
 import { updateSpaceCurrencies, updateSpaceList, updateSpaceDefaultRate, syncTransactionLocation, ensureMultiCurrency } from '@/spaces/services/spaceService'
 import { getSpaceConfig, enabledCustomFields, mergeCustomPayload } from '@/spaces/config'
-import { ALL_COUNTRIES } from '@/shared/data/pickerData'
+import { ALL_COUNTRIES, displayCountryName, localizedCountryName } from '@/shared/data/pickerData'
+import { useT, useLocale } from '@/i18n'
 import type { Split, TransactionType } from '@/transactions/types'
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
 import { getTransactionType, availableTransactionTypes } from '@/transactions/utils/walletHelpers'
@@ -111,6 +112,10 @@ interface SmartCountrySelectProps {
 }
 
 function SmartCountrySelect({ value, onChange, orderedCountries, onCountryAdded }: SmartCountrySelectProps) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  // Intl locale tag, used to show country names in the UI language
+  const locale = useLocale()
   const [pickerOpen, setPickerOpen] = useState(false)
   const [search, setSearch] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
@@ -119,8 +124,21 @@ function SmartCountrySelect({ value, onChange, orderedCountries, onCountryAdded 
     if (pickerOpen && searchRef.current) searchRef.current.focus()
   }, [pickerOpen])
 
-  const filtered = ALL_COUNTRIES.filter(([, , name]) =>
-    name.toLowerCase().includes(search.toLowerCase())
+  // Every country with its name in the UI language, sorted in that language.
+  // The STORED value stays the English name (entry[2]) — only display changes.
+  // useMemo: rebuilt only when the locale changes (≈250 Intl lookups).
+  const localizedCountries = useMemo(
+    () =>
+      ALL_COUNTRIES
+        .map(([code, flag, name]) => ({ code, flag, name, display: localizedCountryName(code, locale) }))
+        .sort((a, b) => a.display.localeCompare(b.display, locale)),
+    [locale],
+  )
+
+  // Search matches the localized name OR the English one ("Japon" and "Japan").
+  const query = search.toLowerCase()
+  const filtered = localizedCountries.filter(
+    (c) => c.display.toLowerCase().includes(query) || c.name.toLowerCase().includes(query),
   )
 
   const selectOptions = [
@@ -133,22 +151,23 @@ function SmartCountrySelect({ value, onChange, orderedCountries, onCountryAdded 
   if (pickerOpen) {
     return (
       <div className="flex flex-col gap-1">
-        <label className="text-xs font-medium text-muted-foreground">Country</label>
+        <label className="text-xs font-medium text-muted-foreground">{t.transactionForm.fields.country}</label>
         <div className="flex flex-col gap-1 rounded-md border bg-background p-2 shadow-md">
           <input
             ref={searchRef}
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search country…"
+            placeholder={t.transactionForm.select.searchCountry}
             className="rounded border px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
           />
           <div className="max-h-40 overflow-y-auto">
-            {filtered.map(([, flag, name]) => (
+            {filtered.map(({ flag, name, display }) => (
               <button
                 key={name}
                 type="button"
                 onClick={() => {
+                  // Store the English name; the label shown was `display`.
                   onChange(name)
                   onCountryAdded(name, flag)
                   setPickerOpen(false)
@@ -157,13 +176,13 @@ function SmartCountrySelect({ value, onChange, orderedCountries, onCountryAdded 
                 className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs hover:bg-accent/40"
               >
                 <span className="text-base">{flag}</span>
-                <span>{name}</span>
+                <span>{display}</span>
               </button>
             ))}
           </div>
           <button type="button" onClick={() => { setPickerOpen(false); setSearch('') }}
             className="text-xs text-muted-foreground hover:text-foreground text-right">
-            Cancel
+            {t.common.cancel}
           </button>
         </div>
       </div>
@@ -172,7 +191,7 @@ function SmartCountrySelect({ value, onChange, orderedCountries, onCountryAdded 
 
   return (
     <div className="flex flex-col gap-1">
-      <label className="text-xs font-medium text-muted-foreground">Country</label>
+      <label className="text-xs font-medium text-muted-foreground">{t.transactionForm.fields.country}</label>
       <select
         className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
         value={value}
@@ -181,13 +200,17 @@ function SmartCountrySelect({ value, onChange, orderedCountries, onCountryAdded 
           else onChange(e.target.value)
         }}
       >
-        <option value="">— optional —</option>
-        {selectOptions.map((c) => (
-          <option key={c.id} value={c.label}>
-            {c.emoji ? `${c.emoji} ${c.label}` : c.label}
-          </option>
-        ))}
-        <option value="__add__">+ Add…</option>
+        <option value="">{t.transactionForm.select.optional}</option>
+        {selectOptions.map((c) => {
+          // option value = stored English name; visible text = UI-language name
+          const shown = displayCountryName(c.label, locale)
+          return (
+            <option key={c.id} value={c.label}>
+              {c.emoji ? `${c.emoji} ${shown}` : shown}
+            </option>
+          )
+        })}
+        <option value="__add__">{t.transactionForm.select.add}</option>
       </select>
     </div>
   )
@@ -203,6 +226,9 @@ interface SmartLabeledItemSelectProps {
   onChange: (val: string) => void
   items: string[]
   onAddNew: (label: string) => void
+  /** Placeholder of the inline "new item" input, e.g. "New category…".
+   *  Passed in (not built from `label`) because French needs gender agreement. */
+  newItemPlaceholder: string
   placeholder?: string
   required?: boolean
 }
@@ -213,9 +239,14 @@ function SmartLabeledItemSelect({
   onChange,
   items,
   onAddNew,
-  placeholder = '— optional —',
+  newItemPlaceholder,
+  placeholder,
   required,
 }: SmartLabeledItemSelectProps) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  // Default placeholder resolved here (a default parameter can't use the hook)
+  const emptyLabel = placeholder ?? t.transactionForm.select.optional
   const [addingNew, setAddingNew] = useState(false)
   const [newInput, setNewInput] = useState('')
 
@@ -250,12 +281,12 @@ function SmartLabeledItemSelect({
           <Input
             autoFocus
             type="text"
-            placeholder={`New ${label.toLowerCase()}…`}
+            placeholder={newItemPlaceholder}
             value={newInput}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewInput(e.target.value)}
             onKeyDown={handleKeyDown}
           />
-          <Button type="button" size="sm" onClick={handleConfirm}>OK</Button>
+          <Button type="button" size="sm" onClick={handleConfirm}>{t.common.ok}</Button>
           <Button type="button" size="sm" variant="outline" onClick={() => setAddingNew(false)}>
             ✕
           </Button>
@@ -272,12 +303,12 @@ function SmartLabeledItemSelect({
         value={value}
         onChange={handleSelectChange}
       >
-        {!required && <option value="">{placeholder}</option>}
-        {required && !value && <option value="">— select —</option>}
+        {!required && <option value="">{emptyLabel}</option>}
+        {required && !value && <option value="">{t.transactionForm.select.required}</option>}
         {items.map((item) => (
           <option key={item} value={item}>{item}</option>
         ))}
-        <option value="__add_new__">+ Add new…</option>
+        <option value="__add_new__">{t.transactionForm.select.addNew}</option>
       </select>
     </div>
   )
@@ -308,11 +339,13 @@ function detectSplitMode(splits: Split[]): 'equal' | 'custom' {
 // Type selector pill button
 // ---------------------------------------------------------------------------
 
-const TYPE_CONFIG: { type: TransactionType; label: string; emoji: string }[] = [
-  { type: 'expense',    label: 'Expense',    emoji: '💸' },
-  { type: 'transfer',   label: 'Transfer',   emoji: '🤝' },
-  { type: 'withdrawal', label: 'Withdrawal', emoji: '🏧' },
-  { type: 'adjustment', label: 'Adjustment', emoji: '⚖️' },
+// Labels are NOT stored here: a module-level constant is evaluated once and
+// would freeze the language. They are looked up at render (t.transactions.types).
+const TYPE_CONFIG: { type: TransactionType; emoji: string }[] = [
+  { type: 'expense',    emoji: '💸' },
+  { type: 'transfer',   emoji: '🤝' },
+  { type: 'withdrawal', emoji: '🏧' },
+  { type: 'adjustment', emoji: '⚖️' },
 ]
 
 function TypeSelector({
@@ -324,13 +357,16 @@ function TypeSelector({
   onChange: (t: TransactionType) => void
   availableTypes: TransactionType[]
 }) {
+  // translation hook — re-renders when the language changes (before the early return)
+  const t = useT()
+
   // Hidden entirely when only one type is available (e.g. solo space, wallets off) —
   // a single dead pill would just be noise. See availableTransactionTypes().
   if (availableTypes.length <= 1) return null
 
   return (
     <div className="flex gap-1">
-      {TYPE_CONFIG.filter(({ type }) => availableTypes.includes(type)).map(({ type, label, emoji }) => (
+      {TYPE_CONFIG.filter(({ type }) => availableTypes.includes(type)).map(({ type, emoji }) => (
         <button
           key={type}
           type="button"
@@ -343,7 +379,7 @@ function TypeSelector({
             }
           `}
         >
-          {emoji} {label}
+          {emoji} {t.transactions.types[type]}
         </button>
       ))}
     </div>
@@ -365,9 +401,11 @@ function TransferSenderPicker({
   onChange: (travelMemberId: string) => void
   currentUserTravelMemberId: string
 }) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
   return (
     <div className="flex flex-col gap-1">
-      <label className="text-xs font-medium text-muted-foreground">From</label>
+      <label className="text-xs font-medium text-muted-foreground">{t.transactionForm.fields.from}</label>
       <select
         className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
         value={selectedId}
@@ -375,7 +413,9 @@ function TransferSenderPicker({
       >
         {members.map((m) => (
           <option key={m.travelMemberId} value={m.travelMemberId}>
-            {m.displayName}{m.travelMemberId === currentUserTravelMemberId ? ' (you)' : ''}
+            {m.travelMemberId === currentUserTravelMemberId
+              ? t.transactionForm.select.you({ name: m.displayName })
+              : m.displayName}
           </option>
         ))}
       </select>
@@ -398,6 +438,8 @@ function CustomFieldRow({
   value: CustomValue | undefined
   onChange: (v: CustomValue) => void
 }) {
+  // translation hook — re-renders when the language changes (before any early return)
+  const t = useT()
   const label = def.emoji ? `${def.emoji} ${def.label}` : def.label
 
   if (def.type === 'boolean') {
@@ -420,7 +462,7 @@ function CustomFieldRow({
           value={typeof value === 'string' ? value : ''}
           onChange={(e) => onChange(e.target.value)}
         >
-          <option value="">— optional —</option>
+          <option value="">{t.transactionForm.select.optional}</option>
           {(def.options ?? []).map((opt) => (
             <option key={opt.id} value={opt.id}>
               {opt.emoji ? `${opt.emoji} ${opt.label}` : opt.label}
@@ -517,6 +559,9 @@ export function TransactionForm({
 }: TransactionFormProps) {
   const isEdit = !!initialValues
   const { currentUser, userProfile } = useAuthStore()
+  // translation hook — re-renders when the language changes (before the early return below)
+  const t = useT()
+  const tf = t.transactionForm
 
   // Per-space lists, aliased for minimal churn against the rest of this file.
   const spaceCategories = space.categories
@@ -534,7 +579,7 @@ export function TransactionForm({
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-background">
         <p className="text-sm text-destructive">
-          User profile unavailable. Please sign out and sign in again.
+          {tf.profileUnavailable}
         </p>
       </div>
     )
@@ -656,7 +701,8 @@ export function TransactionForm({
   )
   const [name, setName] = useState<string>(
     isEdit ? initialValues!.name
-      : transferPrefill ? 'Settlement'
+      // Default name, saved to Firestore in the current language if left as is
+      : transferPrefill ? tf.defaults.settlementName
       : ''
   )
   const [amountStr, setAmountStr] = useState<string>(
@@ -881,38 +927,40 @@ export function TransactionForm({
 
   function validate(): Record<string, string> {
     const errs: Record<string, string> = {}
-    if (!date) errs.date = 'Date is required.'
+    // Messages are resolved at validation time, in the current language.
+    const e = tf.errors
+    if (!date) errs.date = e.dateRequired
 
     // Name: required for expense and transfer, optional for withdrawal/adjustment
     if ((txType === 'expense' || txType === 'transfer') && !name.trim()) {
-      errs.name = 'Name is required.'
+      errs.name = e.nameRequired
     }
 
     const amount = parseFloat(amountStr)
     if (amountStr === '' || isNaN(amount)) {
-      errs.amount = 'Enter a valid amount.'
+      errs.amount = e.invalidAmount
     }
     // Withdrawals require a positive amount
     if (txType === 'withdrawal' && (isNaN(amount) || amount <= 0)) {
-      errs.amount = 'Enter a positive amount.'
+      errs.amount = e.positiveAmount
     }
 
     // Payment method: required for withdrawal and adjustment
     if ((txType === 'withdrawal' || txType === 'adjustment') && !paymentMethod) {
-      errs.paymentMethod = 'Payment method is required.'
+      errs.paymentMethod = e.paymentMethodRequired
     }
 
     // Fees validation (withdrawal only)
     if (txType === 'withdrawal' && feesStr.trim()) {
       const feesVal = parseFloat(feesStr)
-      if (isNaN(feesVal) || feesVal < 0) errs.fees = 'Fees must be 0 or positive.'
-      else if (feesVal >= amount) errs.fees = 'Fees must be less than the withdrawal amount.'
+      if (isNaN(feesVal) || feesVal < 0) errs.fees = e.feesNonNegative
+      else if (feesVal >= amount) errs.fees = e.feesTooHigh
     }
 
     // Split validation (expense and transfer only)
     if (fieldVisible('split') && !isSolo) {
-      if (!paidByValid) errs.paidBy = 'Paid by amounts must equal the total.'
-      if (!beneficiaryValid) errs.beneficiaries = 'Split amounts must equal the total.'
+      if (!paidByValid) errs.paidBy = e.paidByTotal
+      if (!beneficiaryValid) errs.beneficiaries = e.splitTotal
     }
 
     return errs
@@ -937,12 +985,13 @@ export function TransactionForm({
     const exchangeRate = effectiveRate
     const totalAmountMain = Math.round(total * exchangeRate * 100) / 100
 
-    // Auto-generate name for withdrawal/adjustment if blank
+    // Auto-generate name for withdrawal/adjustment if blank.
+    // Stored in Firestore in the language in use at save time.
     let txName = name.trim()
     if (!txName) {
-      if (txType === 'withdrawal') txName = `Top-up ${paymentMethod}`
-      else if (txType === 'adjustment') txName = `Adjustment — ${paymentMethod}`
-      else txName = 'Transaction'
+      if (txType === 'withdrawal') txName = tf.defaults.topUpName({ method: paymentMethod })
+      else if (txType === 'adjustment') txName = tf.defaults.adjustmentName({ method: paymentMethod })
+      else txName = tf.defaults.transactionName
     }
 
     // Sync country/city to space document (expense only)
@@ -1013,14 +1062,13 @@ export function TransactionForm({
   }
 
   // --- Amount label adapts to type ---
-  const amountLabel = txType === 'transfer' ? 'Transfer amount'
-    : txType === 'withdrawal' ? 'Withdraw amount'
-    : 'Amount'
+  const amountLabel = txType === 'transfer' ? tf.amount.transfer
+    : txType === 'withdrawal' ? tf.amount.withdrawal
+    : tf.amount.default
 
   // --- Form title ---
-  const formTitle = isEdit
-    ? `Edit ${txType === 'expense' ? 'expense' : txType}`
-    : `New ${txType === 'expense' ? 'expense' : txType}`
+  // One string per type (not "New " + type): French nouns have genders.
+  const formTitle = isEdit ? tf.title.edit[txType] : tf.title.new[txType]
 
   // Sticky multiCurrency upgrade (SPEC §6.2): the moment the user picks a
   // non-main currency while multiCurrency is off, flip the space's flag on
@@ -1059,11 +1107,11 @@ export function TransactionForm({
       key: 'city',
       node: (
         <LocationSelect
-          label="City"
+          label={tf.fields.city}
           value={city}
           onChange={(v) => { setCity(v); markDirty() }}
           previousValues={previousCities}
-          placeholder="— optional —"
+          placeholder={tf.select.optional}
         />
       ),
     })
@@ -1073,7 +1121,8 @@ export function TransactionForm({
       key: 'category',
       node: (
         <SmartLabeledItemSelect
-          label="Category"
+          label={tf.fields.category}
+          newItemPlaceholder={tf.select.newCategory}
           value={category}
           onChange={(v) => { setCategory(v); markDirty() }}
           items={effectiveCategories}
@@ -1093,7 +1142,8 @@ export function TransactionForm({
       node: (
         <>
           <SmartLabeledItemSelect
-            label={txType === 'withdrawal' ? 'Top up' : 'Payment Method'}
+            label={txType === 'withdrawal' ? tf.fields.topUp : tf.fields.paymentMethod}
+            newItemPlaceholder={txType === 'withdrawal' ? tf.select.newTopUp : tf.select.newPaymentMethod}
             value={paymentMethod}
             onChange={(v) => { setPaymentMethod(v); markDirty() }}
             items={effectivePaymentMethods}
@@ -1125,7 +1175,7 @@ export function TransactionForm({
           type="button"
           onClick={handleClose}
           className="flex h-8 w-8 items-center justify-center rounded-full text-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          aria-label="Close"
+          aria-label={t.common.close}
         >
           ✕
         </button>
@@ -1136,7 +1186,7 @@ export function TransactionForm({
           className={`min-w-[60px] transition-colors ${saveFlash ? 'bg-destructive text-destructive-foreground hover:bg-destructive' : ''}`}
           onClick={handleSave}
         >
-          Save
+          {t.common.save}
         </Button>
       </div>
 
@@ -1152,12 +1202,7 @@ export function TransactionForm({
             <div className="flex flex-col gap-1">
               <Input
                 type="text"
-                placeholder={
-                  txType === 'withdrawal' ? 'e.g. ATM Bangkok (optional)'
-                  : txType === 'adjustment' ? 'e.g. Cash reconciliation (optional)'
-                  : txType === 'transfer' ? 'e.g. Settlement, Loan to Bob'
-                  : 'e.g. Dinner, Taxi, Hotel night'
-                }
+                placeholder={tf.namePlaceholder[txType]}
                 value={name}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setName(e.target.value); markDirty() }}
               />
@@ -1213,7 +1258,7 @@ export function TransactionForm({
                         setFormulaMode(true)
                       }
                     }}
-                    title={formulaMode ? 'Close formula mode' : 'Enter formula mode'}
+                    title={formulaMode ? tf.formula.close : tf.formula.open}
                     aria-pressed={formulaMode}
                     className={[
                       'flex h-9 w-9 shrink-0 items-center justify-center rounded-md border text-base transition-colors',
@@ -1233,7 +1278,7 @@ export function TransactionForm({
                   </label>
                   {formulaMode ? (
                     <div className="flex h-9 items-center rounded-md border border-border bg-muted px-3 text-sm text-muted-foreground">
-                      {amountStr || <span className="italic">enter formula above</span>}
+                      {amountStr || <span className="italic">{tf.formula.enterAbove}</span>}
                     </div>
                   ) : (
                     <Input
@@ -1294,7 +1339,7 @@ export function TransactionForm({
                   this pair, so the amount below is not actually converted (1:1 fallback). */}
               {currency !== mainCurrency && rateIsUnknown && (
                 <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
-                  ⚠️ No exchange rate known for {currency} → {mainCurrency}. Amount shown unconverted — enter a rate below.
+                  {tf.rate.unknown({ from: currency, to: mainCurrency })}
                 </p>
               )}
 
@@ -1310,7 +1355,7 @@ export function TransactionForm({
                     >
                       <span>
                         1 {currency} = {effectiveRate.toPrecision(6)} {mainCurrency}
-                        {rateOverride !== null && ' (custom)'}
+                        {rateOverride !== null && tf.rate.customSuffix}
                       </span>
                       <span>
                         1 {mainCurrency} = {effectiveRate > 0 ? parseFloat((1 / effectiveRate).toPrecision(6)) : '—'} {currency}
@@ -1375,7 +1420,7 @@ export function TransactionForm({
                             }}
                             className="text-[10px] text-primary hover:underline"
                           >
-                            Save as default rate
+                            {tf.rate.saveAsDefault}
                           </button>
                         )}
                         {/* Reset to default */}
@@ -1385,7 +1430,7 @@ export function TransactionForm({
                             onClick={() => { setRateOverride(null); markDirty() }}
                             className="text-[10px] text-muted-foreground hover:underline"
                           >
-                            Reset
+                            {tf.rate.reset}
                           </button>
                         )}
                         <button
@@ -1393,7 +1438,7 @@ export function TransactionForm({
                           onClick={() => setRateExpanded(false)}
                           className="ml-auto text-[10px] text-muted-foreground hover:underline"
                         >
-                          Close
+                          {t.common.close}
                         </button>
                       </div>
                     </div>
@@ -1406,7 +1451,7 @@ export function TransactionForm({
           {/* ── Fees (withdrawal only) ── */}
           {fieldVisible('fees') && (
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-muted-foreground">Fees (optional)</label>
+              <label className="text-xs font-medium text-muted-foreground">{tf.fields.fees}</label>
               <Input
                 type="number"
                 inputMode="decimal"
@@ -1417,7 +1462,7 @@ export function TransactionForm({
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setFeesStr(e.target.value); markDirty() }}
               />
               <p className="text-xs text-muted-foreground">
-                Deducted from wallet balance (you received amount minus fees)
+                {tf.feesHint}
               </p>
               {submitted && errors.fees && (
                 <p className="text-xs text-destructive">{errors.fees}</p>
@@ -1428,7 +1473,7 @@ export function TransactionForm({
           {/* ── Adjustment mode ── */}
           {fieldVisible('adjustmentMode') && (
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-muted-foreground">Adjustment mode</label>
+              <label className="text-xs font-medium text-muted-foreground">{tf.fields.adjustmentMode}</label>
               <div className="flex gap-2">
                 <button
                   type="button"
@@ -1439,7 +1484,7 @@ export function TransactionForm({
                       : 'border-input bg-background text-muted-foreground hover:bg-accent'
                   }`}
                 >
-                  Balance only
+                  {tf.adjustment.balanceOnly}
                 </button>
                 <button
                   type="button"
@@ -1450,13 +1495,13 @@ export function TransactionForm({
                       : 'border-input bg-background text-muted-foreground hover:bg-accent'
                   }`}
                 >
-                  Count as expense
+                  {tf.adjustment.countAsExpense}
                 </button>
               </div>
               <p className="text-xs text-muted-foreground">
                 {adjustmentMode === 'balance_only'
-                  ? 'Only corrects the wallet balance. Does not appear in spending stats or category breakdowns.'
-                  : 'Corrects the wallet balance and counts toward spending analytics (totals, categories, charts).'}
+                  ? tf.adjustment.balanceOnlyHint
+                  : tf.adjustment.expenseHint}
               </p>
             </div>
           )}
@@ -1468,7 +1513,7 @@ export function TransactionForm({
                 /* Solo space CTA — saves the transaction first, then navigates to Parameters */
                 <div className="rounded-lg border border-dashed border-primary/30 bg-primary/5 px-4 py-3">
                   <p className="text-xs text-muted-foreground">
-                    👥 Share this expense with your friends? Add them to this space.
+                    {tf.solo.prompt}
                   </p>
                   {onNavigateToParameters && (
                     <button
@@ -1484,7 +1529,7 @@ export function TransactionForm({
                       }}
                       className="mt-2 text-xs font-medium text-primary hover:underline"
                     >
-                      Save & add friends →
+                      {tf.solo.cta}
                     </button>
                   )}
                 </div>
@@ -1498,7 +1543,7 @@ export function TransactionForm({
                     currentUserTravelMemberId={myTravelMemberId}
                   />
                   <SplitSummaryRow
-                    label="To"
+                    label={tf.fields.to}
                     splits={beneficiaries}
                     members={members}
                     mode={beneficiaryMode}
@@ -1514,7 +1559,7 @@ export function TransactionForm({
                 /* Expense: standard Paid by + Split rows */
                 <div className="flex flex-col gap-2">
                   <SplitSummaryRow
-                    label="Paid by"
+                    label={tf.fields.paidBy}
                     splits={paidBy}
                     members={members}
                     mode={paidByMode}
@@ -1527,10 +1572,12 @@ export function TransactionForm({
                   )}
 
                   <SplitSummaryRow
-                    label="Split"
+                    label={tf.fields.split}
                     splits={beneficiaries}
                     members={members}
                     mode={beneficiaryMode}
+                    // Mode hint ("· Equal") — was inferred from the label text before i18n
+                    showMode
                     isValid={beneficiaryValid}
                     currentUserTravelMemberId={myTravelMemberId}
                     onClick={() => setBeneficiaryDrawerOpen(true)}
@@ -1573,9 +1620,9 @@ export function TransactionForm({
           {/* ── Notes (full width) ── */}
           {fieldVisible('notes') && (
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-muted-foreground">Notes</label>
+              <label className="text-xs font-medium text-muted-foreground">{tf.fields.notes}</label>
               <Textarea
-                placeholder="Any additional details…"
+                placeholder={tf.notesPlaceholder}
                 maxLength={300}
                 rows={2}
                 value={notes}
@@ -1587,13 +1634,11 @@ export function TransactionForm({
           {/* After-save error summary */}
           {submitted && Object.keys(errors).length > 0 && (
             <p className="text-center text-xs text-destructive">
-              {'Please fix: ' + Object.keys(errors).map((k) =>
-                ({
-                  date: 'Date', name: 'Name', amount: 'Amount',
-                  paidBy: 'Paid by', beneficiaries: 'Split',
-                  paymentMethod: 'Payment method', fees: 'Fees',
-                } as Record<string, string>)[k] ?? k
-              ).join(', ')}
+              {tf.pleaseFix({
+                fields: Object.keys(errors)
+                  .map((k) => (tf.errorFields as Record<string, string>)[k] ?? k)
+                  .join(', '),
+              })}
             </p>
           )}
 
@@ -1601,14 +1646,14 @@ export function TransactionForm({
           <div className="flex flex-col gap-2 pt-2">
             <div className="flex gap-2">
               <Button type="button" variant="outline" className="flex-1" onClick={handleClose}>
-                Close
+                {t.common.close}
               </Button>
               <Button
                 type="button"
                 className={`flex-1 transition-colors ${saveFlash ? 'bg-destructive text-destructive-foreground hover:bg-destructive' : ''}`}
                 onClick={handleSave}
               >
-                Save
+                {t.common.save}
               </Button>
             </div>
             {/* Delete button — only in edit mode */}
@@ -1619,7 +1664,7 @@ export function TransactionForm({
                 className="w-full"
                 onClick={() => onDelete(initialValues!.txId)}
               >
-                Delete
+                {t.common.delete}
               </Button>
             )}
           </div>
@@ -1631,7 +1676,7 @@ export function TransactionForm({
       <Drawer open={paidByDrawerOpen} onOpenChange={setPaidByDrawerOpen}>
         <DrawerContent>
           <DrawerHeader>
-            <DrawerTitle>Paid by</DrawerTitle>
+            <DrawerTitle>{tf.drawer.paidBy}</DrawerTitle>
           </DrawerHeader>
           <SplitEditor
             members={members}
@@ -1640,11 +1685,11 @@ export function TransactionForm({
             onChange={setPaidBy}
             mode={paidByMode}
             onModeChange={setPaidByMode}
-            label="Paid by"
+            label={tf.drawer.paidBy}
           />
           <div className="px-4 pb-6 pt-2">
             <Button type="button" className="w-full" onClick={() => setPaidByDrawerOpen(false)}>
-              Done
+              {t.common.done}
             </Button>
           </div>
         </DrawerContent>
@@ -1654,7 +1699,7 @@ export function TransactionForm({
       <Drawer open={beneficiaryDrawerOpen} onOpenChange={setBeneficiaryDrawerOpen}>
         <DrawerContent>
           <DrawerHeader>
-            <DrawerTitle>{txType === 'transfer' ? 'Transfer to' : 'Split between'}</DrawerTitle>
+            <DrawerTitle>{txType === 'transfer' ? tf.drawer.transferTo : tf.drawer.splitBetween}</DrawerTitle>
           </DrawerHeader>
           <SplitEditor
             members={members}
@@ -1663,11 +1708,11 @@ export function TransactionForm({
             onChange={setBeneficiaries}
             mode={beneficiaryMode}
             onModeChange={setBeneficiaryMode}
-            label={txType === 'transfer' ? 'Transfer to' : 'Split between'}
+            label={txType === 'transfer' ? tf.drawer.transferTo : tf.drawer.splitBetween}
           />
           <div className="px-4 pb-6 pt-2">
             <Button type="button" className="w-full" onClick={() => setBeneficiaryDrawerOpen(false)}>
-              Done
+              {t.common.done}
             </Button>
           </div>
         </DrawerContent>
@@ -1677,17 +1722,17 @@ export function TransactionForm({
       <AlertDialog open={closeDialogOpen} onOpenChange={setCloseDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{isEdit ? 'Discard changes?' : 'Discard transaction?'}</AlertDialogTitle>
+            <AlertDialogTitle>{isEdit ? tf.discard.titleEdit : tf.discard.titleNew}</AlertDialogTitle>
             <AlertDialogDescription>
               {isEdit
-                ? 'The changes are not saved and will be lost.'
-                : 'The transaction is not saved and will be lost.'}
+                ? tf.discard.descriptionEdit
+                : tf.discard.descriptionNew}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t.common.cancel}</AlertDialogCancel>
             <AlertDialogAction onClick={onCancel} className="bg-destructive text-white hover:bg-destructive/90">
-              Discard
+              {tf.discard.confirm}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

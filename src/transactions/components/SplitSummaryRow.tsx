@@ -20,12 +20,17 @@
 
 import type { SpaceMember } from '@/spaces/types'
 import type { Split } from '@/transactions/types'
+import { useT, type Messages } from '@/i18n'
 
 interface SplitSummaryRowProps {
   label: string
   splits: Split[]
   members: SpaceMember[]
   mode: 'equal' | 'custom'
+  /** Append the mode hint ("· Equal" / "· Custom") when there are 2+ people.
+   *  Set on the beneficiaries "Split" row. (This used to be inferred from the
+   *  label starting with "split", which stops working once labels are translated.) */
+  showMode?: boolean
   isValid: boolean
   /** The current user's travelMemberId (NOT their Firebase Auth UID). Used to show "You". */
   currentUserTravelMemberId: string
@@ -37,11 +42,14 @@ export function SplitSummaryRow({
   splits,
   members,
   mode,
+  showMode = false,
   isValid,
   currentUserTravelMemberId,
   onClick,
 }: SplitSummaryRowProps) {
-  const summary = buildSummary(splits, members, mode, currentUserTravelMemberId, label)
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  const summary = buildSummary(t, splits, members, mode, currentUserTravelMemberId, showMode)
 
   return (
     <button
@@ -53,7 +61,7 @@ export function SplitSummaryRow({
         {!isValid && (
           <span
             className="inline-block h-2 w-2 shrink-0 rounded-full bg-destructive"
-            aria-label="Split is incomplete"
+            aria-label={t.transactions.split.incomplete}
           />
         )}
         <span className="text-sm font-medium text-muted-foreground w-24 shrink-0">
@@ -85,14 +93,17 @@ export function SplitSummaryRow({
 // Helper
 // ---------------------------------------------------------------------------
 
+/** `t` is the translated message bundle, passed in from the component. */
 function buildSummary(
+  t: Messages,
   splits: Split[],
   members: SpaceMember[],
   mode: 'equal' | 'custom',
   currentUserTravelMemberId: string,
-  label: string,
+  showMode: boolean,
 ): string {
-  if (splits.length === 0) return 'Not set'
+  const ts = t.transactions.split
+  if (splits.length === 0) return ts.notSet
 
   // Compare split travelMemberIds against the current user's travelMemberId
   const includesMe = splits.some((s) => s.travelMemberId === currentUserTravelMemberId)
@@ -102,18 +113,17 @@ function buildSummary(
   let namePart: string
   if (splits.length === 1) {
     namePart = includesMe
-      ? 'You'
+      ? ts.you
       : (members.find((m) => m.travelMemberId === splits[0].travelMemberId)?.displayName ?? splits[0].travelMemberId)
   } else if (includesMe) {
-    namePart = othersCount === 1 ? 'You + 1 other' : `You + ${othersCount} others`
+    namePart = ts.youPlusOthers(othersCount)
   } else {
-    namePart = `${splits.length} people`
+    namePart = ts.people(splits.length)
   }
 
 
-  if (label.toLowerCase().startsWith('split') && splits.length > 1) {
-    const modeLabel = mode === 'equal' ? 'Equal' : 'Custom'
-    return `${namePart} · ${modeLabel}`
+  if (showMode && splits.length > 1) {
+    return ts.withMode({ names: namePart, mode: ts.modes[mode] })
   }
 
   return namePart

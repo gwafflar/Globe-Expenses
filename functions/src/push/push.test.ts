@@ -5,7 +5,7 @@ import { buildTransactionEvents } from '../events/transactions'
 import { SOCIAL_THROTTLE_KEY, type ActivityBody } from '../model'
 import { ALICE, makeSpace, makeTx, split } from '../testing/fixtures'
 import { PUSH_LIMIT_N, PUSH_WINDOW_MS, decidePush, type ThrottleState } from './limiter'
-import { buildFinalPushMessage, buildPushMessage, formatAmount } from './text'
+import { buildFinalPushMessage, buildPushMessage, formatAmount, toPushLanguage } from './text'
 
 describe('decidePush (§6.1)', () => {
   const T0 = 1_700_000_000_000
@@ -179,6 +179,46 @@ describe('buildFinalPushMessage (§6.1)', () => {
     const msg = buildFinalPushMessage({ kind: 'friend_request', actor: ALICE }, SOCIAL_THROTTLE_KEY)
     expect(msg.url).toBe('/profile')
     expect(msg.body).toContain('invitations and requests')
+  })
+})
+
+describe('French push texts', () => {
+  const space = makeSpace()
+
+  it('formats amounts the French way', () => {
+    // Intl puts a (narrow) no-break space before the € sign in French.
+    expect(formatAmount(84, 'EUR', 'fr').replace(/\s/g, ' ')).toBe('84 €')
+    expect(formatAmount(41.5, 'EUR', 'fr').replace(/\s/g, ' ')).toBe('41,50 €')
+  })
+
+  it('tx_created in French', () => {
+    const [draft] = buildTransactionEvents({ type: 'create', after: makeTx() }, space, ALICE)
+    const msg = buildPushMessage(draft.body, 'fr')
+    expect(msg.title).toBe('🇯🇵 Japan')
+    expect(msg.body.replace(/\s/g, ' ')).toBe('Alice a ajouté Dinner (84 €) · votre part 42 €')
+    expect(msg.url).toBe('/spaces/space1?tx=tx1')
+  })
+
+  it('import_completed uses French plural rules (0 and 1 are singular)', () => {
+    const body = (rowCount: number, involvingMe: number): ActivityBody => ({
+      kind: 'import_completed',
+      actor: ALICE,
+      space: { id: 'space1', name: 'Japan', emoji: '🇯🇵' },
+      import: { rowCount, involvingMe },
+    })
+    expect(buildPushMessage(body(120, 35), 'fr').body).toBe('Alice a importé 120 transactions, dont 35 vous concernent')
+    expect(buildPushMessage(body(1, 0), 'fr').body).toBe('Alice a importé 1 transaction, dont 0 vous concerne')
+  })
+
+  it('the "more changes" push in French', () => {
+    const msg = buildFinalPushMessage({ kind: 'friend_request', actor: ALICE }, SOCIAL_THROTTLE_KEY, 'fr')
+    expect(msg.body).toContain('invitations et demandes')
+  })
+
+  it('unknown or missing token language falls back to English', () => {
+    expect(toPushLanguage(undefined)).toBe('en')
+    expect(toPushLanguage('de')).toBe('en')
+    expect(toPushLanguage('fr')).toBe('fr')
   })
 })
 

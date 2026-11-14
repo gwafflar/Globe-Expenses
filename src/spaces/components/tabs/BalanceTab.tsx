@@ -21,6 +21,7 @@ import { affectsBalance } from '@/transactions/utils/walletHelpers'
 import { SettlementCurrencyDrawer } from '@/spaces/components/SettlementCurrencyDrawer'
 import type { TransferPrefill } from '@/transactions/components/TransactionForm'
 import { Check, Plus } from 'lucide-react'
+import { useT } from '@/i18n'
 
 // ---------------------------------------------------------------------------
 // Avatar colour palette — cycles when members > palette length
@@ -140,6 +141,8 @@ export function BalanceTab({
   defaultRates,
   onCreateTransfer,
 }: BalanceTabProps) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
   const [copied, setCopied] = useState(false)
   const [currencyDialogOpen, setCurrencyDrawerOpen] = useState(false)
 
@@ -199,12 +202,10 @@ export function BalanceTab({
     return (
       <Card className="border-primary/30">
         <CardContent className="px-5 py-4">
-          <p className="text-xs text-muted-foreground">✦ Did you know?</p>
-          <p className="mt-1 text-sm font-semibold">Travelling solo?</p>
+          <p className="text-xs text-muted-foreground">{t.balance.soloKicker}</p>
+          <p className="mt-1 text-sm font-semibold">{t.balance.soloTitle}</p>
           <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-            Add friends to a space and GlobeExpenses will automatically track
-            who paid what, split expenses any way you like, and compute the
-            exact settlements so nobody has to do the maths.
+            {t.balance.soloBody}
           </p>
         </CardContent>
       </Card>
@@ -215,7 +216,7 @@ export function BalanceTab({
   if (transactions.length === 0) {
     return (
       <p className="py-12 text-center text-sm text-muted-foreground">
-        No transactions yet. Add your first expense to see balances.
+        {t.balance.empty}
       </p>
     )
   }
@@ -232,13 +233,15 @@ export function BalanceTab({
     const lines = settlements.map(
       (s) => `${s.fromName} → ${s.toName}: ${fmt(toSettlement(s.amount, displayRate), settlementCurrency)}`,
     )
+    // The copied text is meant to be pasted to other people, so it is written
+    // in the current UI language (it is not a data format).
     const text = [
-      `${spaceName} — settlement summary`,
+      t.balance.summary.header({ spaceName }),
       '──────────────────────────────────',
       ...lines,
       '──────────────────────────────────',
-      'Made with GlobeExpenses 🌏',
-      'Invite link: [placeholder — TODO: real invite link]',
+      t.balance.summary.madeWith,
+      t.balance.summary.inviteLink,
     ].join('\n')
 
     navigator.clipboard.writeText(text).then(() => {
@@ -270,7 +273,7 @@ export function BalanceTab({
     <div className="flex flex-col gap-0">
       {/* ── Net balances (always in mainCurrency) ── */}
       <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        Net balances
+        {t.balance.netBalances}
       </h3>
 
       <div className="flex flex-col gap-3">
@@ -288,7 +291,10 @@ export function BalanceTab({
                 <p className="truncate text-sm font-medium">{b.displayName}</p>
                 {totals && (
                   <p className="text-xs text-muted-foreground">
-                    Total spent: {fmt(totals.share, balanceDisplayCurrency)} · Total paid: {fmt(totals.paid, balanceDisplayCurrency)}
+                    {t.balance.totals({
+                      spent: fmt(totals.share, balanceDisplayCurrency),
+                      paid: fmt(totals.paid, balanceDisplayCurrency),
+                    })}
                   </p>
                 )}
               </div>
@@ -318,7 +324,7 @@ export function BalanceTab({
           <div className="my-4 border-t" />
 
           <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Suggested settlements
+            {t.balance.suggestedSettlements}
           </h3>
 
           <div className="flex flex-col gap-2">
@@ -351,7 +357,7 @@ export function BalanceTab({
                       })}
                     >
                       <Check className="mr-1 h-3.5 w-3.5" />
-                      Mark as paid
+                      {t.balance.markAsPaid}
                     </Button>
                   )}
                 </Card>
@@ -368,7 +374,7 @@ export function BalanceTab({
               onClick={() => setCurrencyDrawerOpen(true)}
             >
               {settlementCurrency === mainCurrency
-                ? 'Change currency'
+                ? t.balance.changeCurrency
                 : `${settlementCurrency} ↗`}
             </Button>
             <Button
@@ -376,7 +382,7 @@ export function BalanceTab({
               className="w-full"
               onClick={handleCopy}
             >
-              {copied ? 'Copied!' : 'Copy settlement summary'}
+              {copied ? t.common.copied : t.balance.copySummary}
             </Button>
             {/* General "Add a settlement" — opens a blank transfer form */}
             {onCreateTransfer && (
@@ -385,7 +391,7 @@ export function BalanceTab({
                 onClick={() => onCreateTransfer()}
               >
                 <Plus className="mr-1 h-4 w-4" />
-                Add a settlement
+                {t.balance.addSettlement}
               </Button>
             )}
           </div>

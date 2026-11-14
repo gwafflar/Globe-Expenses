@@ -15,7 +15,13 @@ import { categoryColor, formatAmount } from '@/spaces/components/tabs/dashboardH
 import type { DashboardCardDef } from '@/spaces/types'
 import type { FilterDimension } from '@/transactions/utils/filterDimensions'
 import type { ScopedTransaction } from '@/spaces/utils/dashboardScope'
-import { computeBreakdown, cardTitle, type BreakdownRow } from '@/spaces/utils/dashboardCards'
+import {
+  computeBreakdown,
+  cardTitle,
+  displayValueLabel,
+  type BreakdownRow,
+} from '@/spaces/utils/dashboardCards'
+import { useLocale, useT } from '@/i18n'
 
 interface BreakdownCardProps {
   card: DashboardCardDef
@@ -40,26 +46,34 @@ export function BreakdownCard({
   actions,
   preview = false,
 }: BreakdownCardProps) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  // Intl locale tag ('en-US', 'fr-FR'…) for country display names.
+  const locale = useLocale()
+
   // Recomputed only when the scoped list or the dimension descriptor changes —
   // i.e. once per range / mode / config change, not on every render.
+  // `t.dashboard` is a dependency too: the "Other" / "No …" row labels are
+  // built inside, so a language switch must recompute them.
   const { rows, total } = useMemo(
-    () => computeBreakdown(scoped, dimension),
-    [scoped, dimension],
+    () => computeBreakdown(scoped, dimension, undefined, t.dashboard),
+    [scoped, dimension, t.dashboard],
   )
 
   // cardTitle() takes the dimension LIST since Phase 7b (a pivot title names
   // both). A 1D card passes a single-element list and is otherwise unchanged.
-  const title = cardTitle(card, [dimension])
+  const title = cardTitle(card, [dimension], t.dashboard)
 
   const body =
     rows.length === 0 ? (
-      <p className="py-4 text-center text-sm text-muted-foreground">No data</p>
+      <p className="py-4 text-center text-sm text-muted-foreground">{t.dashboard.breakdown.noData}</p>
     ) : (
       <div className="flex flex-col gap-2">
         {rows.map((row) => (
           <Row
             key={row.key}
             row={row}
+            displayLabel={displayValueLabel(dimension, row, locale)}
             total={total}
             mainCurrency={mainCurrency}
             onDrillDown={preview ? undefined : onDrillDown}
@@ -95,18 +109,24 @@ export function BreakdownCard({
 
 function Row({
   row,
+  displayLabel,
   total,
   mainCurrency,
   onDrillDown,
 }: {
   row: BreakdownRow
+  /** What to show — row.label, or its translation for a stored country name. */
+  displayLabel: string
   total: number
   mainCurrency: string
   onDrillDown?: (values: string[]) => void
 }) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
   const pct = total > 0 ? Math.round((row.amount / total) * 100) : 0
   // The Other and "No value" rows get a neutral grey rather than a palette
   // colour, so they read as meta-rows rather than as another value.
+  // Hashed on the STORED label so a value keeps its colour in every language.
   const color = row.isOther || row.isMissing ? '#9CA3AF' : categoryColor(row.label)
 
   const content = (
@@ -120,7 +140,7 @@ function Row({
           row.isOther || row.isMissing ? 'italic text-muted-foreground' : 'text-foreground'
         }`}
       >
-        {row.label}
+        {displayLabel}
       </span>
       <span className="shrink-0 text-sm font-medium text-foreground">
         {formatAmount(row.amount, mainCurrency)}
@@ -138,7 +158,7 @@ function Row({
       type="button"
       // Accessible name spells out the drill-down, since the visible label
       // alone ("Other · 3 values") doesn't say what tapping does.
-      aria-label={`Show transactions for ${row.label}`}
+      aria-label={t.dashboard.breakdown.showTransactionsFor({ label: displayLabel })}
       onClick={() => onDrillDown(row.values)}
       className="flex w-full items-center gap-2 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-muted/50"
     >

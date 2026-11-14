@@ -28,18 +28,21 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { getT, useT } from '@/i18n'
 
 // Map Firebase auth error codes to user-friendly messages for registration.
+// getT() is read at call time, so the message is in the current UI language.
 function mapRegisterError(error: FirebaseError): string {
+  const e = getT().auth.register.errors
   switch (error.code) {
     case 'auth/email-already-in-use':
-      return 'An account with this email already exists.'
+      return e.emailInUse
     case 'auth/weak-password':
-      return 'Your password is too weak. Please choose a stronger one.'
+      return e.weakPassword
     case 'auth/invalid-email':
-      return 'The email address is not valid.'
+      return e.invalidEmail
     default:
-      return 'Unable to create your account. Please check your details and try again.'
+      return e.generic
   }
 }
 
@@ -53,6 +56,8 @@ function isInstalledPWA(): boolean {
 }
 
 export function RegisterPage() {
+  // translation hook — re-renders when the language changes
+  const t = useT()
   const navigate = useNavigate()
   const location = useLocation()
   const redirectTo = new URLSearchParams(location.search).get('redirect') || '/spaces'
@@ -80,7 +85,7 @@ export function RegisterPage() {
         // If result.user exists, the useEffect above will handle navigation.
       })
       .catch(() => {
-        setErrorMessage('Unable to sign in with Google. Please try again.')
+        setErrorMessage(t.auth.googleError)
         setIsLoading(false)
       })
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -100,11 +105,12 @@ export function RegisterPage() {
   // Client-side validation before hitting Firebase
   function validate(): boolean {
     const errors: typeof fieldErrors = {}
-    if (!displayName.trim()) errors.displayName = 'Please enter a display name.'
-    if (!email.trim()) errors.email = 'Please enter your email address.'
-    else if (!/^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/.test(email.trim())) errors.email = 'This email address doesn\u2019t look valid.'
-    if (!password) errors.password = 'Please enter a password.'
-    else if (password.length < 6) errors.password = 'Password must be at least 6 characters.'
+    const e = t.auth.register.errors
+    if (!displayName.trim()) errors.displayName = e.displayNameRequired
+    if (!email.trim()) errors.email = e.emailRequired
+    else if (!/^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/.test(email.trim())) errors.email = e.emailInvalid
+    if (!password) errors.password = e.passwordRequired
+    else if (password.length < 6) errors.password = e.passwordTooShort
     setFieldErrors(errors)
     return Object.keys(errors).length === 0
   }
@@ -138,12 +144,12 @@ export function RegisterPage() {
     } catch (error) {
       // Show invalid-email as a field-level error rather than a generic banner
       if (error && typeof error === 'object' && 'code' in error && (error as FirebaseError).code === 'auth/invalid-email') {
-        setFieldErrors((prev) => ({ ...prev, email: 'This email address doesn\u2019t look valid.' }))
+        setFieldErrors((prev) => ({ ...prev, email: t.auth.register.errors.emailInvalid }))
       } else {
         const message =
           (error && typeof error === 'object' && 'code' in error
             ? mapRegisterError(error as FirebaseError)
-            : 'Unable to create your account. Please try again.')
+            : t.auth.register.errors.unknown)
         setErrorMessage(message)
       }
       setIsLoading(false)
@@ -171,7 +177,7 @@ export function RegisterPage() {
       const message =
         (error && typeof error === 'object' && 'code' in error
           ? mapRegisterError(error as FirebaseError)
-          : 'Unable to sign in with Google. Please try again.')
+          : t.auth.googleError)
       setErrorMessage(message)
       setIsLoading(false)
     }
@@ -182,15 +188,15 @@ export function RegisterPage() {
     <div className="flex min-h-screen items-center justify-center px-4">
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-2">
-          <CardTitle>Create your account</CardTitle>
+          <CardTitle>{t.auth.register.title}</CardTitle>
           <CardDescription>
-            Start tracking your space expenses with GlobeExpenses.
+            {t.auth.register.description}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           <form onSubmit={handleRegister} className="space-y-4">
             <div className="space-y-1">
-              <Label htmlFor="displayName">Display name</Label>
+              <Label htmlFor="displayName">{t.auth.register.displayName}</Label>
               <Input
                 id="displayName"
                 type="text"
@@ -201,11 +207,11 @@ export function RegisterPage() {
               />
               {fieldErrors.displayName
                 ? <p className="text-xs text-destructive">{fieldErrors.displayName}</p>
-                : <p className="text-xs text-muted-foreground">How do you want your name to appear on the app? Can be changed later.</p>
+                : <p className="text-xs text-muted-foreground">{t.auth.register.displayNameHint}</p>
               }
             </div>
             <div className="space-y-1">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">{t.auth.email}</Label>
               <Input
                 id="email"
                 type="text"
@@ -218,7 +224,7 @@ export function RegisterPage() {
               {fieldErrors.email && <p className="text-xs text-destructive">{fieldErrors.email}</p>}
             </div>
             <div className="space-y-1">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">{t.auth.password}</Label>
               <div className="relative">
                 <Input
                   id="password"
@@ -230,7 +236,7 @@ export function RegisterPage() {
                 />
                 <button
                   type="button"
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  aria-label={showPassword ? t.auth.hidePassword : t.auth.showPassword}
                   onClick={() => setShowPassword((v) => !v)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                   tabIndex={-1}
@@ -240,7 +246,7 @@ export function RegisterPage() {
               </div>
               {fieldErrors.password
                 ? <p className="text-xs text-destructive">{fieldErrors.password}</p>
-                : <p className="text-xs text-muted-foreground">{'Please use a password that you will remember. Password reset is not yet implemented. If you forget your password, you basically lose your account \u00AF\\_(\u30C4)_/\u00AF'}</p>
+                : <p className="text-xs text-muted-foreground">{t.auth.register.passwordHint}</p>
               }
             </div>
 
@@ -253,13 +259,13 @@ export function RegisterPage() {
               className="w-full"
               disabled={isLoading}
             >
-              {isLoading ? 'Creating account…' : 'Create account'}
+              {isLoading ? t.auth.register.creatingAccount : t.auth.register.createAccount}
             </Button>
           </form>
 
           <div className="flex items-center justify-center">
             <span className="h-px w-16 bg-border" />
-            <span className="px-3 text-xs text-muted-foreground">or</span>
+            <span className="px-3 text-xs text-muted-foreground">{t.auth.or}</span>
             <span className="h-px w-16 bg-border" />
           </div>
 
@@ -271,24 +277,24 @@ export function RegisterPage() {
             onClick={handleGoogleSignIn}
           >
             <GoogleLogo />
-            Continue with Google
+            {t.auth.continueWithGoogle}
           </Button>
 
           <GooglePwaHint visible={showPwaHint} />
 
           <p className="text-center text-sm text-muted-foreground">
-            Already have an account?{' '}
+            {t.auth.register.haveAccount}{' '}
             <Link
               to={redirectTo !== '/spaces' ? `/login?redirect=${encodeURIComponent(redirectTo)}` : '/login'}
               className="font-medium text-primary hover:underline"
             >
-              Sign in
+              {t.auth.register.signIn}
             </Link>
           </p>
 
           <p className="text-center text-sm">
             <Link to="/welcome" className="text-muted-foreground hover:text-foreground hover:underline">
-              &larr; Back to Welcome
+              {t.auth.backToWelcome}
             </Link>
           </p>
         </CardContent>

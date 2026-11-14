@@ -18,6 +18,9 @@ import type {
   Space,
   SpaceConfig,
 } from '@/spaces/types'
+// getT() reads the current UI language at call time — used only for the
+// `reason` sentences of parseMetaSheet(), which the import dialog displays.
+import { getT } from '@/i18n'
 
 /** Sheet name. Leading underscore keeps it visually last in Excel's tab list
  *  on the rare occasion a user unhides it. */
@@ -233,36 +236,39 @@ export function parseMetaSheet(wb: XLSXTypes.WorkBook): MetaParseResult {
   const ws = wb.Sheets?.[SHEET_META]
   if (!ws) return { status: 'absent' }
 
+  // `reason` is shown in the import dialog, so it is in the UI language.
+  const t = getT().importExport.meta
+
   const raw = (ws as Record<string, { v?: unknown } | undefined>)[PAYLOAD_CELL]?.v
   if (typeof raw !== 'string' || raw.trim() === '') {
-    return { status: 'unsupported', reason: 'The metadata sheet is empty.' }
+    return { status: 'unsupported', reason: t.empty }
   }
 
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)
   } catch {
-    return { status: 'unsupported', reason: 'The metadata sheet could not be read.' }
+    return { status: 'unsupported', reason: t.unreadable }
   }
 
   if (!isRecord(parsed)) {
-    return { status: 'unsupported', reason: 'The metadata sheet has an unexpected shape.' }
+    return { status: 'unsupported', reason: t.unexpectedShape }
   }
 
   const version = parsed.version
   if (typeof version !== 'number' || !Number.isFinite(version)) {
-    return { status: 'unsupported', reason: 'The metadata sheet has no format version.' }
+    return { status: 'unsupported', reason: t.noVersion }
   }
   if (version > META_FORMAT_VERSION) {
     return {
       status: 'unsupported',
-      reason: `This file was exported by a newer version of GlobeExpenses (format ${version}).`,
+      reason: t.newerVersion(version),
     }
   }
 
   const config = parsed.config
   if (!isRecord(config) || !isRecord(config.builtInFields) || !Array.isArray(config.customFields)) {
-    return { status: 'unsupported', reason: 'The metadata sheet is missing its field configuration.' }
+    return { status: 'unsupported', reason: t.missingConfig }
   }
 
   return { status: 'ok', payload: parsed as unknown as MetaPayload }

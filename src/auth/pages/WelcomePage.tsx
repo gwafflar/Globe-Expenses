@@ -18,6 +18,7 @@ import { GooglePwaHint, markPwaGoogleAttempted, isPwaGoogleAttempted, clearPwaGo
 import { WifiOff, Users, Wallet, Plane, BarChart3, Github, ChevronDown, ChevronUp, Smartphone } from 'lucide-react'
 import { BetaBanner } from '@/feedback/components/BetaBanner'
 import { FeedbackForm } from '@/feedback/components/FeedbackForm'
+import { useT } from '@/i18n'
 
 // Returns true when the app is running as an installed PWA (standalone window).
 function isInstalledPWA(): boolean {
@@ -28,6 +29,9 @@ function isInstalledPWA(): boolean {
 }
 
 export function WelcomePage() {
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  const w = t.auth.welcome // shorthand: this page reads mostly from auth.welcome
   const navigate = useNavigate()
   const location = useLocation()
   const redirectTo = new URLSearchParams(location.search).get('redirect') || '/spaces'
@@ -80,15 +84,20 @@ export function WelcomePage() {
     ? `?redirect=${encodeURIComponent(redirectTo)}`
     : ''
 
-  // Feature highlights shown below the hero
+  // Feature highlights shown below the hero.
+  // Built inside the component (not at module level) so the labels follow the
+  // current language. `id` is a stable React key that does not change with it.
+  const f = w.features
   const features = [
-    { icon: Plane, title: 'Multi-currency spaces', description: 'Track expenses in any currency with automatic conversion' },
-    { icon: Users, title: 'Split with friends', description: 'Share costs and settle balances effortlessly' },
-    { icon: Wallet, title: 'Cash tracker', description: 'Monitor withdrawals and wallet balances on the go' },
-    { icon: WifiOff, title: 'Works offline', description: 'Use it anywhere in the world, even without network. Transactions sync with your friends when back online.' },
-    { icon: BarChart3, title: 'In-depth statistics', description: 'Monitor your spendings and track exactly where your money goes' },
-    { icon: Github, title: 'Open-source & free', description: 'Free to use  & Public code.', link: 'https://github.com/g10m/globe-expenses' },
+    { id: 'currency', icon: Plane, title: f.multiCurrencyTitle, description: f.multiCurrencyDesc },
+    { id: 'split', icon: Users, title: f.splitTitle, description: f.splitDesc },
+    { id: 'cash', icon: Wallet, title: f.cashTitle, description: f.cashDesc },
+    { id: 'offline', icon: WifiOff, title: f.offlineTitle, description: f.offlineDesc },
+    { id: 'stats', icon: BarChart3, title: f.statsTitle, description: f.statsDesc },
+    { id: 'oss', icon: Github, title: f.openSourceTitle, description: f.openSourceDesc, link: 'https://github.com/g10m/globe-expenses' },
   ]
+
+  const tut = w.tutorial
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
@@ -100,7 +109,7 @@ export function WelcomePage() {
         {/* App icon / branding */}
         <img
           src="/images/icon-512.png"
-          alt="GlobeExpenses"
+          alt={w.appIconAlt}
           className="mb-6 h-24 w-24 rounded-2xl"
         />
 
@@ -108,13 +117,13 @@ export function WelcomePage() {
           GlobeExpenses
         </h1>
         <p className="mb-10 max-w-xs text-center text-muted-foreground">
-          The simplest way to track and split space expenses with friends.
+          {w.tagline}
         </p>
 
         {/* Getting started steps */}
         <div className="mb-10 w-full max-w-sm space-y-4">
           <p className="text-center text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-            Empower your space in just 5 steps
+            {w.stepsTitle}
           </p>
 
           {/* Step cards */}
@@ -123,8 +132,8 @@ export function WelcomePage() {
             <div className="flex items-center gap-4 rounded-xl bg-gradient-to-r from-blue-50 to-blue-50/50 p-4 border border-blue-200/30">
               <span className="text-2xl">👤</span>
               <div>
-                <p className="text-xs font-semibold text-blue-600">Step 1</p>
-                <p className="text-sm font-medium text-foreground">Create an account</p>
+                <p className="text-xs font-semibold text-blue-600">{w.step(1)}</p>
+                <p className="text-sm font-medium text-foreground">{w.step1}</p>
               </div>
             </div>
 
@@ -132,8 +141,8 @@ export function WelcomePage() {
             <div className="flex items-center gap-4 rounded-xl bg-gradient-to-r from-purple-50 to-purple-50/50 p-4 border border-purple-200/30">
               <span className="text-2xl">🚀</span>
               <div>
-                <p className="text-xs font-semibold text-purple-600">Step 2</p>
-                <p className="text-sm font-medium text-foreground">Create your first space</p>
+                <p className="text-xs font-semibold text-purple-600">{w.step(2)}</p>
+                <p className="text-sm font-medium text-foreground">{w.step2}</p>
               </div>
             </div>
 
@@ -141,8 +150,8 @@ export function WelcomePage() {
             <div className="flex items-center gap-4 rounded-xl bg-gradient-to-r from-green-50 to-green-50/50 p-4 border border-green-200/30">
               <span className="text-2xl">💸</span>
               <div>
-                <p className="text-xs font-semibold text-green-600">Step 3</p>
-                <p className="text-sm font-medium text-foreground">Encode your first transactions</p>
+                <p className="text-xs font-semibold text-green-600">{w.step(3)}</p>
+                <p className="text-sm font-medium text-foreground">{w.step3}</p>
               </div>
             </div>
 
@@ -150,8 +159,8 @@ export function WelcomePage() {
             <div className="flex items-center gap-4 rounded-xl bg-gradient-to-r from-amber-50 to-amber-50/50 p-4 border border-amber-200/30">
               <span className="text-2xl">👥</span>
               <div className="flex-1">
-                <p className="text-xs font-semibold text-amber-600">Step 4 • Optional</p>
-                <p className="text-sm font-medium text-foreground">Add your friends</p>
+                <p className="text-xs font-semibold text-amber-600">{w.stepOptional(4)}</p>
+                <p className="text-sm font-medium text-foreground">{w.step4}</p>
               </div>
             </div>
 
@@ -159,11 +168,11 @@ export function WelcomePage() {
             <div className="grid grid-cols-2 gap-3 pt-2">
               <div className="rounded-xl bg-gradient-to-br from-emerald-50 to-emerald-50/50 p-3 border border-emerald-200/30 text-center">
                 <span className="text-xl">📊</span>
-                <p className="mt-1 text-xs font-semibold text-emerald-700">Track spending</p>
+                <p className="mt-1 text-xs font-semibold text-emerald-700">{w.outcomeTrack}</p>
               </div>
               <div className="rounded-xl bg-gradient-to-br from-cyan-50 to-cyan-50/50 p-3 border border-cyan-200/30 text-center">
                 <span className="text-xl">💰</span>
-                <p className="mt-1 text-xs font-semibold text-cyan-700">See friends' debt</p>
+                <p className="mt-1 text-xs font-semibold text-cyan-700">{w.outcomeDebt}</p>
               </div>
             </div>
           </div>
@@ -175,11 +184,11 @@ export function WelcomePage() {
         {/* Action buttons — tall touch targets for mobile */}
         <div className="flex w-full max-w-sm flex-col gap-3">
           <Link to={`/login${redirectQuery}`} className={cn(buttonVariants(), 'w-full h-12 text-base')}>
-            Sign in
+            {w.signIn}
           </Link>
 
           <Link to={`/register${redirectQuery}`} className={cn(buttonVariants({ variant: 'outline' }), 'w-full h-12 text-base bg-muted/50')}>
-            Create an account
+            {w.createAccount}
           </Link>
 
           <Button
@@ -189,7 +198,7 @@ export function WelcomePage() {
             onClick={handleGoogleSignIn}
           >
             <GoogleLogo />
-            Continue with Google
+            {t.auth.continueWithGoogle}
           </Button>
 
           <GooglePwaHint visible={showPwaHint} />
@@ -204,23 +213,23 @@ export function WelcomePage() {
           <div className="flex items-start gap-3">
             <Smartphone className="mt-1 h-5 w-5 flex-shrink-0 text-blue-600" />
             <div className="flex-1">
-              <h3 className="font-semibold text-foreground mb-1">Install as App</h3>
+              <h3 className="font-semibold text-foreground mb-1">{w.installTitle}</h3>
               <p className="text-xs text-muted-foreground mb-4">
-                Works on Android, iOS, Windows, macOS & Linux. No app store needed.
+                {w.installSubtitle}
               </p>
 
               <div className="space-y-2 text-xs mb-4">
                 <div className="flex items-center gap-2">
-                  <span className="font-medium">📱 Android:</span>
-                  <span className="text-muted-foreground">Browser menu ⋮ → Install app</span>
+                  <span className="font-medium">{w.androidLabel}</span>
+                  <span className="text-muted-foreground">{w.androidShort}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="font-medium">🍎 iOS:</span>
-                  <span className="text-muted-foreground">Share → Add to Home Screen</span>
+                  <span className="font-medium">{w.iosLabel}</span>
+                  <span className="text-muted-foreground">{w.iosShort}</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="font-medium">💻 Desktop:</span>
-                  <span className="text-muted-foreground">Address bar install icon</span>
+                  <span className="font-medium">{w.desktopLabel}</span>
+                  <span className="text-muted-foreground">{w.desktopShort}</span>
                 </div>
               </div>
 
@@ -229,7 +238,7 @@ export function WelcomePage() {
                 onClick={() => setShowPwaTutorial(!showPwaTutorial)}
                 className="flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700"
               >
-                Know More
+                {w.knowMore}
                 {showPwaTutorial ? (
                   <ChevronUp className="h-4 w-4" />
                 ) : (
@@ -237,56 +246,57 @@ export function WelcomePage() {
                 )}
               </button>
 
-              {/* Tutorial content */}
+              {/* Tutorial content — the lines with bold parts are message
+                  functions returning JSX (see messages/en/auth.tsx). */}
               {showPwaTutorial && (
                 <div className="mt-4 space-y-4 border-t border-blue-200/50 pt-4 text-xs leading-relaxed text-muted-foreground">
                   <div>
-                    <p className="font-semibold text-foreground mb-2">📱 Android</p>
+                    <p className="font-semibold text-foreground mb-2">{tut.androidTitle}</p>
                     <ol className="list-decimal list-inside space-y-1 ml-1">
-                      <li>Open the app in Chrome, Firefox or any browser.</li>
-                      <li>Tap the <strong>⋮ (three dots)</strong> menu in the top-right.</li>
-                      <li>Tap <strong>"Install app"</strong> or <strong>"Add to Home screen"</strong>.</li>
-                      <li>Confirm by tapping <strong>Install</strong>.</li>
+                      <li>{tut.android1}</li>
+                      <li>{tut.android2()}</li>
+                      <li>{tut.android3()}</li>
+                      <li>{tut.android4()}</li>
                     </ol>
                   </div>
 
                   <div>
-                    <p className="font-semibold text-foreground mb-2">🍎 iPhone / iPad</p>
-                    <p className="mb-1 text-xs italic">Safari recommended</p>
+                    <p className="font-semibold text-foreground mb-2">{tut.iosTitle}</p>
+                    <p className="mb-1 text-xs italic">{tut.iosRecommended}</p>
                     <ol className="list-decimal list-inside space-y-1 ml-1">
-                      <li>Open the app in Safari.</li>
-                      <li>Tap the <strong>Share button</strong> (square with arrow).</li>
-                      <li>Scroll down and tap <strong>"Add to Home Screen"</strong>.</li>
-                      <li>Tap <strong>Add</strong> (top-right corner).</li>
+                      <li>{tut.ios1}</li>
+                      <li>{tut.ios2()}</li>
+                      <li>{tut.ios3()}</li>
+                      <li>{tut.ios4()}</li>
                     </ol>
                   </div>
 
                   <div>
-                    <p className="font-semibold text-foreground mb-2">💻 Desktop</p>
+                    <p className="font-semibold text-foreground mb-2">{tut.desktopTitle}</p>
                     <ol className="list-decimal list-inside space-y-1 ml-1">
-                      <li>Open in Chrome, Firefox or Chromium browser.</li>
-                      <li>Look at the address bar.</li>
-                      <li>Click the <strong>Install icon</strong> (monitor with down arrow).</li>
-                      <li>Click <strong>Install</strong> in the confirmation popup.</li>
+                      <li>{tut.desktop1}</li>
+                      <li>{tut.desktop2}</li>
+                      <li>{tut.desktop3()}</li>
+                      <li>{tut.desktop4()}</li>
                     </ol>
-                    <p className="mt-2">Or: Click ⋮ menu → <strong>"Install [App Name]"</strong></p>
+                    <p className="mt-2">{tut.desktopAlt()}</p>
                   </div>
 
                   <div>
-                    <p className="font-semibold text-foreground mb-2">🔄 Updating</p>
-                    <p>The app updates automatically. Close and reopen if you don't see the latest version.</p>
+                    <p className="font-semibold text-foreground mb-2">{tut.updatingTitle}</p>
+                    <p>{tut.updating}</p>
                   </div>
 
                   <div>
-                    <p className="font-semibold text-foreground mb-2">🗑 Removing</p>
+                    <p className="font-semibold text-foreground mb-2">{tut.removingTitle}</p>
                     <ul className="list-disc list-inside space-y-1 ml-1">
-                      <li>Android: Long-press icon → Uninstall</li>
-                      <li>iOS: Long-press icon → Remove App</li>
-                      <li>Desktop: Right-click icon → Uninstall</li>
+                      <li>{tut.removeAndroid}</li>
+                      <li>{tut.removeIos}</li>
+                      <li>{tut.removeDesktop}</li>
                     </ul>
                   </div>
 
-                  <p className="mt-2 pt-2 border-t border-blue-200/50 italic">Have issues? Send feedback via the banner on top.</p>
+                  <p className="mt-2 pt-2 border-t border-blue-200/50 italic">{tut.issues}</p>
                 </div>
               )}
             </div>
@@ -297,8 +307,8 @@ export function WelcomePage() {
       {/* Feature highlights */}
       <div className="border-t bg-muted/30 px-6 py-8">
         <div className="mx-auto grid max-w-lg grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-5">
-          {features.map(({ icon: Icon, title, description, link }) => (
-            <div key={title} className="flex flex-col items-center text-center">
+          {features.map(({ id, icon: Icon, title, description, link }) => (
+            <div key={id} className="flex flex-col items-center text-center">
               <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
                 <Icon className="h-5 w-5 text-primary" />
               </div>
@@ -309,7 +319,7 @@ export function WelcomePage() {
                   <>
                     {' '}
                     <a href={link} target="_blank" rel="noopener noreferrer" className="text-primary underline">
-                      View on GitHub
+                      {f.viewOnGithub}
                     </a>
                   </>
                 )}
@@ -323,7 +333,7 @@ export function WelcomePage() {
       <div className="border-t px-6 py-8">
         <div className="mx-auto max-w-lg">
           <h2 className="mb-3 text-center text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-            Feedback
+            {w.feedbackTitle}
           </h2>
           <FeedbackForm source="WelcomePage" />
         </div>

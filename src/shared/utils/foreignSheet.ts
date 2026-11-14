@@ -11,6 +11,9 @@ import * as XLSX from 'xlsx'
 import type { CustomFieldDef, LabeledItem, Space, SpaceConfig } from '@/spaces/types'
 import { OPTIONAL_BUILT_INS, parseBooleanCell, type OptionalBuiltIn } from '@/shared/utils/sheetColumns'
 import { parseDate } from '@/shared/utils/sheetImport'
+// getT() reads the current UI language at CALL time (never at module level),
+// so the messages below follow a language change. Tests run in English.
+import { getT } from '@/i18n'
 
 // ---------------------------------------------------------------------------
 // Column model
@@ -115,7 +118,9 @@ function findHeaderRow(grid: unknown[][]): number {
 export function readForeignSheet(wb: XLSX.WorkBook, sheetName?: string): ForeignSheet {
   const sheetNames = wb.SheetNames.filter((n) => !n.startsWith('_'))
   const chosen = sheetName && wb.Sheets[sheetName] ? sheetName : sheetNames[0]
-  if (!chosen) throw new Error('The workbook has no readable sheets.')
+  // Shown to the user by the upload step, hence translated.
+  const t = getT().importExport.columns
+  if (!chosen) throw new Error(t.noReadableSheets)
 
   const ws = wb.Sheets[chosen]
   // header:1 → array-of-arrays; raw → keep serials and numbers untouched, so
@@ -129,6 +134,10 @@ export function readForeignSheet(wb: XLSX.WorkBook, sheetName?: string): Foreign
   const width = Math.max(headerCells.length, ...dataRows.map((r) => r?.length ?? 0), 0)
 
   const columns: ForeignColumn[] = []
+  // Columns whose header cell was empty and got a placeholder name. Tracked
+  // here rather than recognised by their text, because the placeholder is
+  // translated ("Column 3" / "Colonne 3").
+  const placeholderNamed = new Set<number>()
   for (let c = 0; c < width; c++) {
     const seen = new Set<string>()
     const distinctValues: string[] = []
@@ -148,9 +157,13 @@ export function readForeignSheet(wb: XLSX.WorkBook, sheetName?: string): Foreign
       distinctValues.push(text)
     }
 
+    const headerText = cellText(headerCells[c])
+    if (headerText === '') placeholderNamed.add(c + 1)
     columns.push({
       index: c + 1,
-      header: cellText(headerCells[c]) || `Column ${c + 1}`,
+      // The placeholder can become a new custom field's default label, so it
+      // is written to Firestore in the language current at import time.
+      header: headerText || t.columnFallback(c + 1),
       nonEmptyCount,
       distinctValues,
       distinctTruncated,
@@ -161,7 +174,7 @@ export function readForeignSheet(wb: XLSX.WorkBook, sheetName?: string): Foreign
   // routinely carry a few of these and they only clutter the mapping table.
   while (columns.length > 0) {
     const last = columns[columns.length - 1]
-    if (last.nonEmptyCount === 0 && /^Column \d+$/.test(last.header)) columns.pop()
+    if (last.nonEmptyCount === 0 && placeholderNamed.has(last.index)) columns.pop()
     else break
   }
 
@@ -181,20 +194,28 @@ export function readForeignSheet(wb: XLSX.WorkBook, sheetName?: string): Foreign
 /** Header spellings we recognise, case-insensitively, for each target.
  *  Deliberately generous: the user corrects anything wrong, and a good guess
  *  on a 20-column sheet saves far more time than a wrong one costs. */
+//  Each list is English first, then French synonyms (with and without
+//  accents, since hand-made sheets often drop them). These are header TEXT to
+//  recognise, not UI labels, so they stay constant whatever the app language.
 const CORE_ALIASES: Record<CoreField, string[]> = {
-  date: ['date', 'day', 'when', 'transaction date'],
-  name: ['description', 'name', 'label', 'item', 'details', 'memo', 'title', 'what'],
-  totalAmount: ['amount', 'amount (local)', 'total', 'cost', 'price', 'value', 'sum'],
-  currency: ['currency', 'ccy', 'curr'],
-  exchangeRate: ['exch. rate', 'exchange rate', 'rate', 'fx', 'fx rate'],
+  date: ['date', 'day', 'when', 'transaction date',
+    'jour', 'date de transaction', 'date opération', 'date operation'],
+  name: ['description', 'name', 'label', 'item', 'details', 'memo', 'title', 'what',
+    'libellé', 'libelle', 'nom', 'intitulé', 'intitule', 'désignation', 'designation', 'objet', 'détails'],
+  totalAmount: ['amount', 'amount (local)', 'total', 'cost', 'price', 'value', 'sum',
+    'montant', 'coût', 'cout', 'prix', 'valeur', 'somme'],
+  currency: ['currency', 'ccy', 'curr', 'devise', 'monnaie'],
+  exchangeRate: ['exch. rate', 'exchange rate', 'rate', 'fx', 'fx rate', 'taux', 'taux de change'],
 }
 
 const BUILT_IN_ALIASES: Record<OptionalBuiltIn, string[]> = {
-  country: ['country', 'nation'],
-  city: ['city', 'town', 'location', 'place'],
-  category: ['category', 'type', 'kind', 'tag'],
-  paymentMethod: ['payment method', 'payment', 'method', 'paid with', 'account'],
-  notes: ['notes', 'note', 'comment', 'comments', 'remarks'],
+  country: ['country', 'nation', 'pays'],
+  city: ['city', 'town', 'location', 'place', 'ville', 'lieu'],
+  category: ['category', 'type', 'kind', 'tag', 'catégorie', 'categorie'],
+  paymentMethod: ['payment method', 'payment', 'method', 'paid with', 'account',
+    'moyen de paiement', 'mode de paiement', 'paiement', 'payé avec', 'paye avec', 'compte'],
+  notes: ['notes', 'note', 'comment', 'comments', 'remarks',
+    'commentaire', 'commentaires', 'remarque', 'remarques'],
 }
 
 function normalise(s: string): string {
@@ -290,16 +311,19 @@ export interface TypeInference {
 export function inferColumnType(col: ForeignColumn): TypeInference {
   const distinct = col.distinctValues.length
   const rows = col.nonEmptyCount
+  // Evidence sentences in the current UI language. Called during render
+  // (NewFieldsStep), so a language change re-runs this and re-translates.
+  const t = getT().importExport.newFields.evidence
 
   if (rows === 0) {
-    return { type: 'text', evidence: 'No values to infer from', suggestedOptions: [] }
+    return { type: 'text', evidence: t.noValues, suggestedOptions: [] }
   }
 
   if (!col.distinctTruncated && distinct > 0 &&
       col.distinctValues.every((v) => BOOLEAN_VOCAB.has(v.toLowerCase()))) {
     return {
       type: 'boolean',
-      evidence: `Every value is one of ${col.distinctValues.slice(0, 4).join(', ')}`,
+      evidence: t.everyValueIsOneOf(col.distinctValues.slice(0, 4).join(', ')),
       suggestedOptions: [],
     }
   }
@@ -307,15 +331,15 @@ export function inferColumnType(col: ForeignColumn): TypeInference {
   if (!col.distinctTruncated && distinct <= 20 && distinct <= rows * 0.5) {
     return {
       type: 'select',
-      evidence: `${distinct} distinct value${distinct === 1 ? '' : 's'} in ${rows} row${rows === 1 ? '' : 's'}`,
+      evidence: t.distinctInRows({ distinct, rows }),
       suggestedOptions: [...col.distinctValues],
     }
   }
 
   const reason = col.distinctTruncated
-    ? `over ${MAX_TRACKED_DISTINCT} distinct values`
-    : `${distinct} distinct value${distinct === 1 ? '' : 's'} in ${rows} row${rows === 1 ? '' : 's'}`
-  return { type: 'text', evidence: `Mostly unique — ${reason}`, suggestedOptions: [] }
+    ? t.overDistinct(MAX_TRACKED_DISTINCT)
+    : t.distinctInRows({ distinct, rows })
+  return { type: 'text', evidence: t.mostlyUnique(reason), suggestedOptions: [] }
 }
 
 // ---------------------------------------------------------------------------
@@ -509,7 +533,8 @@ export function buildForeignRows(options: BuildForeignRowsOptions): ForeignRowRe
     // Drop rows with neither a description nor an amount — blank spacer rows
     // are extremely common in hand-maintained spreadsheets.
     if (row.name === '' && row.totalAmount === 0) { skipped++; continue }
-    if (row.name === '') row.name = '(unnamed)'
+    // Written to Firestore as the transaction name, in the current language.
+    if (row.name === '') row.name = getT().importExport.unnamedTransaction
     if (row.date === '') row.date = todayFsDate()
 
     // No per-member columns → attribute the whole amount to one member. This is
@@ -703,11 +728,13 @@ export function resolveNewFields(
 export function validateMapping(mapping: ColumnMapping): string[] {
   const errors: string[] = []
   const targets = Object.values(mapping)
+  // Shown in the column-mapping step; the dialog re-runs this on a language change.
+  const msg = getT().importExport.columns
 
   const has = (kind: ColumnTarget['kind'], field?: string) =>
     targets.some((t) => t.kind === kind && (field === undefined || (t as { field?: string }).field === field))
 
-  if (!has('core', 'totalAmount')) errors.push('One column must be mapped to Amount.')
+  if (!has('core', 'totalAmount')) errors.push(msg.amountRequired)
 
   // Duplicate single-valued targets: two Amount columns is a mistake, and
   // silently letting the last one win would be worse than saying so.
@@ -723,7 +750,7 @@ export function validateMapping(mapping: ColumnMapping): string[] {
     seen.set(key, (seen.get(key) ?? 0) + 1)
   }
   for (const [key, count] of seen) {
-    if (count > 1) errors.push(`${count} columns are mapped to the same field (${key.split(':')[1]}).`)
+    if (count > 1) errors.push(msg.duplicateTarget({ count, field: key.split(':')[1] }))
   }
 
   return errors

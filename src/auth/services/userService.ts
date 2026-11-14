@@ -9,6 +9,7 @@
 import { doc, getDoc, updateDoc, writeBatch } from 'firebase/firestore'
 import type { Timestamp } from 'firebase/firestore'
 import { db } from '@/services/firebase'
+import type { LanguagePreference } from '@/i18n'
 
 // The shape of a user document as stored in Firestore at `users/{uid}`.
 // This mirrors the User data model defined in ARCHITECTURE.md.
@@ -21,7 +22,24 @@ export interface UserProfile {
   mainCurrency: string     // ISO 4217 code, e.g. 'EUR'
   categories: string[]     // user-defined expense categories, global across all spaces
   paymentMethods: string[] // user-defined payment methods, global across all spaces
+  // UI language chosen in Profile: 'en' | 'fr' | 'auto' (follow the browser).
+  // ABSENT = never chosen → each device keeps its own preference (localStorage,
+  // else the browser language). Read it through parsePreference(), never raw.
+  language?: LanguagePreference
   createdAt: Timestamp     // Firestore server timestamp set at account creation
+}
+
+/**
+ * Saves the UI language choice on the profile so it follows the user to every
+ * device. Fire-and-forget (project convention): the local store is updated by
+ * the caller first, the write syncs in the background and works offline.
+ * 'auto' is stored as-is rather than deleted, so "I chose automatic" is
+ * distinguishable from "never chose" on the user's other devices.
+ */
+export function updateUserLanguage(uid: string, language: LanguagePreference): void {
+  updateDoc(doc(db, 'users', uid), { language }).catch((err: unknown) =>
+    console.error('[userService] saving the language failed:', err),
+  )
 }
 
 /**

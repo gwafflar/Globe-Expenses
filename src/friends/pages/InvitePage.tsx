@@ -31,6 +31,7 @@ import { requestPushPrompt } from '@/notifications/store/usePushPromptStore'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { ChevronLeft } from 'lucide-react'
+import { useT } from '@/i18n'
 
 // ---------------------------------------------------------------------------
 // Avatar helper (same hash-based color as the rest of the app)
@@ -74,6 +75,9 @@ type PageState =
   | { status: 'accepted'; invite: Invite; spaceId?: string }
 
 export function InvitePage() {
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  const ti = t.social.invite // shorthand
   // React Router gives us the :inviteId segment from the URL
   const { inviteId } = useParams<{ inviteId: string }>()
   const navigate = useNavigate()
@@ -243,23 +247,23 @@ export function InvitePage() {
         )
 
       case 'notFound':
-        return <ErrorCard title="Invite not found" description="This invite link is invalid or has been deleted." />
+        return <ErrorCard title={ti.notFoundTitle} description={ti.notFoundDesc} />
 
       case 'revoked':
-        return <ErrorCard title="Link no longer valid" description="The person who shared this link has revoked it." />
+        return <ErrorCard title={ti.revokedTitle} description={ti.revokedDesc} />
 
       case 'expired':
-        return <ErrorCard title="Link expired" description="This invite link has expired. Ask the sender to share a new one." />
+        return <ErrorCard title={ti.expiredTitle} description={ti.expiredDesc} />
 
       case 'alreadyUsed':
         return (
           <Card className="text-center">
             <CardHeader>
-              <CardTitle>Already connected</CardTitle>
-              <CardDescription>You're already friends with this person.</CardDescription>
+              <CardTitle>{ti.alreadyTitle}</CardTitle>
+              <CardDescription>{ti.alreadyDesc}</CardDescription>
             </CardHeader>
             <CardContent>
-              <Button onClick={() => navigate('/spaces')}>Go to my spaces</Button>
+              <Button onClick={() => navigate('/spaces')}>{ti.goToSpaces}</Button>
             </CardContent>
           </Card>
         )
@@ -269,20 +273,18 @@ export function InvitePage() {
         return (
           <Card className="text-center">
             <CardHeader>
-              <CardTitle>Something went wrong</CardTitle>
+              <CardTitle>{ti.errorTitle}</CardTitle>
               <CardDescription>
-                {isSpaceInvite
-                  ? 'Unable to join this space. Please try again or ask the sender to share a new link.'
-                  : 'Unable to accept this invitation. Please try again.'}
+                {isSpaceInvite ? ti.errorSpace : ti.errorFriend}
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
               {/* Let the user retry without reloading the page */}
               <Button className="w-full" onClick={() => setPageState({ status: 'ready', invite: pageState.invite })}>
-                Try again
+                {ti.tryAgain}
               </Button>
               <Button variant="outline" className="w-full" onClick={() => navigate('/spaces')}>
-                Go to my spaces
+                {ti.goToSpaces}
               </Button>
             </CardContent>
           </Card>
@@ -305,8 +307,8 @@ export function InvitePage() {
               </div>
               <CardDescription className="text-base">
                 {invite.type === 'friend'
-                  ? `${invite.fromDisplayName} wants to add you as a friend on GlobeExpenses.`
-                  : `${invite.fromDisplayName} is inviting you to join "${invite.travelName}" on GlobeExpenses.`}
+                  ? ti.friendPitch({ name: invite.fromDisplayName })
+                  : ti.spacePitch({ name: invite.fromDisplayName, space: invite.travelName })}
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
@@ -315,10 +317,10 @@ export function InvitePage() {
                 onClick={handleAccept}
                 disabled={isAccepting}
               >
-                {isAccepting ? 'Accepting…' : 'Accept invitation'}
+                {isAccepting ? ti.accepting : ti.accept}
               </Button>
               <Button variant="outline" className="w-full" onClick={() => navigate('/spaces')}>
-                Decline
+                {ti.decline}
               </Button>
             </CardContent>
           </Card>
@@ -331,10 +333,9 @@ export function InvitePage() {
         return (
           <div className="flex flex-col gap-4">
             <div className="text-center">
-              <h2 className="text-lg font-semibold">Who are you in this trip?</h2>
+              <h2 className="text-lg font-semibold">{ti.pickTitle}</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                Some members were added before you joined. If one of them is you, select it — your
-                account will be linked to that member's expenses.
+                {ti.pickDesc}
               </p>
             </div>
 
@@ -353,13 +354,13 @@ export function InvitePage() {
                     </div>
                     <span className="font-medium">{member.displayName}</span>
                   </div>
-                  <span className="text-xs text-primary font-medium">Claim — this is me</span>
+                  <span className="text-xs text-primary font-medium">{ti.claimThisIsMe}</span>
                 </button>
               ))}
 
               {/* Create new member + auto-claim */}
               <div className="mt-1 flex flex-col gap-2 rounded-lg border border-dashed border-input px-4 py-3">
-                <p className="text-sm text-muted-foreground">I'm someone new — add me with a name:</p>
+                <p className="text-sm text-muted-foreground">{ti.someoneNew}</p>
                 <div className="flex gap-2">
                   <input
                     type="text"
@@ -368,7 +369,7 @@ export function InvitePage() {
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && !creatingSlot) handleCreateAndClaim(spaceId, invite, allMembers)
                     }}
-                    placeholder="Your name…"
+                    placeholder={ti.namePlaceholder}
                     disabled={creatingSlot}
                     className="min-w-0 flex-1 rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
                   />
@@ -377,7 +378,7 @@ export function InvitePage() {
                     onClick={() => handleCreateAndClaim(spaceId, invite, allMembers)}
                     disabled={!newSlotName.trim() || creatingSlot}
                   >
-                    {creatingSlot ? '…' : 'Join'}
+                    {creatingSlot ? '…' : ti.join}
                   </Button>
                 </div>
               </div>
@@ -388,7 +389,7 @@ export function InvitePage() {
                 className="text-center w-full py-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
                 onClick={() => handleSkipClaim(spaceId, invite)}
               >
-                Skip for now
+                {ti.skip}
               </button>
             </div>
           </div>
@@ -399,7 +400,7 @@ export function InvitePage() {
         return (
           <div className="flex flex-col items-center gap-3 py-12">
             <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-            <p className="text-sm text-muted-foreground">Linking your account…</p>
+            <p className="text-sm text-muted-foreground">{ti.linking}</p>
           </div>
         )
       }
@@ -412,12 +413,12 @@ export function InvitePage() {
             <CardHeader className="gap-4">
               <InviteAvatar uid={invite.fromUid} name={invite.fromDisplayName} />
               <CardTitle>
-                {isSpaceInvite ? `You've joined ${invite.travelName}!` : "You're now friends!"}
+                {isSpaceInvite ? ti.joinedTitle({ space: invite.travelName }) : ti.friendsTitle}
               </CardTitle>
               <CardDescription>
                 {isSpaceInvite
-                  ? `You are now a member of "${invite.travelName}" and connected with ${invite.fromDisplayName}.`
-                  : `You and ${invite.fromDisplayName} are now connected. You can invite each other to shared spaces.`}
+                  ? ti.joinedDesc({ space: invite.travelName, name: invite.fromDisplayName })
+                  : ti.friendsDesc({ name: invite.fromDisplayName })}
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -429,7 +430,7 @@ export function InvitePage() {
                     : '/spaces')
                 }
               >
-                {isSpaceInvite ? `Open ${invite.travelName}` : 'Go to my spaces'}
+                {isSpaceInvite ? ti.openSpace({ space: invite.travelName }) : ti.goToSpaces}
               </Button>
             </CardContent>
           </Card>
@@ -447,7 +448,7 @@ export function InvitePage() {
           className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
           <ChevronLeft className="h-4 w-4" />
-          All spaces
+          {ti.allSpaces}
         </button>
       </header>
       <main className="mx-auto w-full max-w-md flex-1 px-4 py-8">
@@ -462,6 +463,8 @@ export function InvitePage() {
 // ---------------------------------------------------------------------------
 
 function ErrorCard({ title, description }: { title: string; description: string }) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
   const navigate = useNavigate()
   return (
     <Card className="text-center">
@@ -470,7 +473,7 @@ function ErrorCard({ title, description }: { title: string; description: string 
         <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent>
-        <Button variant="outline" onClick={() => navigate('/spaces')}>Go to my spaces</Button>
+        <Button variant="outline" onClick={() => navigate('/spaces')}>{t.social.invite.goToSpaces}</Button>
       </CardContent>
     </Card>
   )

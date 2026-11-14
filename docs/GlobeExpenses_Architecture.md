@@ -2,7 +2,7 @@
 
 General Architecture Document
 
-_Version 0.6 - November 2026_
+_Version 0.7 - November 2026_
 
 # 1. System Overview
 
@@ -85,6 +85,20 @@ Conflict policy for v1: last-write-wins (Firestore default). Concurrent edit det
 
 **Split normalization at read time**: pre-Session-009 transactions stored splits as `{ uid: string, amount: number }`. Post-refactor splits use `{ travelMemberId: string, amount: number }`. `useTransactions` casts Firestore data as `Split[]` without field transformation, so old splits arrive with `split.travelMemberId === undefined`. `normalizeTransactionSplits()` in `dashboardHelpers.ts` remaps `split.uid` → `split.travelMemberId` using the already-normalised `SpaceMember` list as a lookup table. It returns the same array reference when no normalization is needed (avoiding unnecessary `useMemo` invalidation). This normalization is applied once at the top of `DashboardTab` before any downstream computation.
 
+## 3.3 Internationalization (i18n)
+
+English and French, in `src/i18n/` (no library — decision #99).
+
+- **Messages**: one file per app area under `messages/en/` and `messages/fr/`. English is the source of truth: `Messages = typeof en`, and every French file is annotated `Messages['<area>']`, so a missing key, an extra key or a different parameter signature does not compile. Messages with parameters are functions (`owes: (p: { from: string; to: string }) => …`); plurals go through `plural(lang, n, { one, other })` (`Intl.PluralRules`: French treats 0 as singular). `languages.test.ts` additionally fails on an empty French string or a multi-word one left in English.
+- **API** (`@/i18n`): `useT()` in components (subscribes to the language), `getT()` in plain TS called at run time — never at module level, which would freeze the language at import. `useLocale()` / `getLocale()` give the Intl tag for dates and numbers (keeps the browser's region when it matches, e.g. `fr-BE`).
+- **Store**: `useLanguageStore` (Zustand) holds `preference` (`'en' | 'fr' | 'auto'`), the resolved `language` and `locale`. Resolution: profile value applied at sign-in (`useAuthStore` → `applyProfilePreference`) > localStorage cache of this device > browser languages > English. Sets `<html lang>`.
+- **Persistence**: `users/{uid}.language`, written fire-and-forget by `LanguageSelect` (Profile → Preferences). Absent = never chose, so each device keeps its own default.
+- **Stored data is not translated** (decision #101): countries are stored as English names and shown through `displayCountryName()` / `localizedCountryName()` (`Intl.DisplayNames`); typed names are mapped back with `findCountry()`. Currency names come from `localizedCurrencyName()`. User-entered lists (categories, payment methods) are data.
+- **XLSX** workbook content stays English (decision #102); only the dialogs are translated. `buildSpaceWorkbook()` runs inside `withLanguage('en', …)`, which makes every `getT()` / `getLocale()` in shared label helpers (dimension labels, card titles) answer in English for that synchronous call. The foreign-file column matcher also accepts French headers (montant, libellé, devise…).
+- **Language-dependent stored defaults**: a few auto-generated names are written in the creator's language (settlement transfer "Remboursement", withdrawal/adjustment/reconciliation default names, "(sans nom)" for unnamed imported rows, "Inconnu" member name). They are user data from then on.
+- **Push**: each device writes its language on `users/{uid}/fcmTokens/{token}.language`; `deliverPush()` groups tokens by language and builds the text with `functions/src/push/text.ts` (`PUSH_STRINGS`, a separate table because Functions cannot import `src/`).
+- **Adding a language**: add the code in `languages.ts`, copy `messages/en/` to `messages/<code>/` and translate (the compiler lists what is missing), register it in `messages/index.ts`, add a `PUSH_STRINGS` entry in `functions/src/push/text.ts`.
+
 # 4. Data Architecture
 
 ## 4.1 Firestore Collection Structure
@@ -104,7 +118,7 @@ Conflict policy for v1: last-write-wins (Firestore default). Concurrent edit det
 | travels/{travelId}/settlements/{sId} | Computed settlement suggestions (v2) |
 | travels/{travelId}/importBatches/{importBatchId} | "Import finished" marker `{ createdBy, rowCount, createdAt }`, written by the XLSX importer after its last batch. Triggers one summary notification per import (`NOTIFICATIONS_SPEC.md` §7). Create-only. |
 | users/{userId}/activity/{eventId} | Activity feed entries, written only by Cloud Functions (`NOTIFICATIONS_SPEC.md` §3.1) |
-| users/{userId}/fcmTokens/{token} | One document per device registered for push |
+| users/{userId}/fcmTokens/{token} | One document per device registered for push; carries that device's UI `language` (§3.3) |
 | users/{userId}/pushThrottle/{spaceId} | Push limiter counter per space (`_social` for invitations) |
 | users/{userId}/private/notifications | Owner-only notification settings: `mutedSpaceIds` and the feed watermarks |
 
@@ -122,6 +136,7 @@ Conflict policy for v1: last-write-wins (Firestore default). Concurrent edit det
 | mainCurrency | string | ISO 4217 code, e.g. 'EUR' |
 | categories | string[] | User-defined global fallback category list (across all spaces) |
 | paymentMethods | string[] | User-defined global fallback payment method list |
+| language | `'en' \| 'fr' \| 'auto'`? | UI language chosen in Profile. Absent = never chosen (device default). See §3.3 |
 | createdAt | Timestamp | Account creation date |
 
 ### UserProfile (client-side type)

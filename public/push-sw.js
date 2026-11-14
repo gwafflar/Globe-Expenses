@@ -44,7 +44,12 @@ self.addEventListener('push', (event) => {
 
   const title = data.title || notification.title || 'GlobeExpenses'
   const options = {
-    body: data.body || notification.body || 'You have new activity.',
+    // Last-resort text (unreadable payload). The worker cannot see the app's
+    // language store, so it follows the browser language.
+    body:
+      data.body ||
+      notification.body ||
+      (/^fr\b/i.test(self.navigator.language || '') ? 'Vous avez de nouvelles activités.' : 'You have new activity.'),
     icon: '/images/icon-192.png',
     // Read back in `notificationclick` below.
     data: { url: data.url || '/' },

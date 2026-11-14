@@ -16,6 +16,7 @@
 import { useRef } from 'react'
 import { Input } from '@/components/ui/input'
 import { evaluateFormula } from '@/shared/utils/formulaUtils'
+import { useT } from '@/i18n'
 
 // The operator symbols the user can tap to insert into the formula.
 // Grouped as: grouping, then multiplicative, then additive.
@@ -28,6 +29,9 @@ interface FormulaBarProps {
 }
 
 export function FormulaBar({ value, onChange, onEvaluated }: FormulaBarProps) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
+
   // Ref to the text input so we can manage cursor position after chip insertion.
   // (A ref gives us direct access to the underlying DOM element — needed here
   // because React's controlled input doesn't expose cursor position natively.)
@@ -84,7 +88,7 @@ export function FormulaBar({ value, onChange, onEvaluated }: FormulaBarProps) {
             onClick={() => insertAtCursor(op)}
             // Chip styling: small, monospace, pill-shaped, tappable on mobile (min 36px height)
             className="min-w-[36px] min-h-[36px] rounded-md border border-border bg-background px-2 py-1 font-mono text-sm font-medium hover:bg-accent hover:text-accent-foreground transition-colors"
-            aria-label={`Insert ${op}`}
+            aria-label={t.transactions.formula.insert({ op })}
           >
             {op}
           </button>
@@ -101,13 +105,13 @@ export function FormulaBar({ value, onChange, onEvaluated }: FormulaBarProps) {
           ref={inputRef}
           type="text"
           inputMode="decimal" // shows numeric keyboard on mobile, but allows all chars
-          placeholder="e.g. 2*2.5 + 1.5"
+          placeholder={t.transactions.formula.placeholder}
           value={value}
           onChange={handleInputChange}
           // Red border when the user has typed something invalid
           className={isInvalid ? 'border-destructive focus-visible:ring-destructive' : ''}
           autoFocus // focus the input as soon as the bar appears
-          aria-label="Formula input"
+          aria-label={t.transactions.formula.inputLabel}
           aria-describedby="formula-preview"
         />
       </div>
@@ -116,7 +120,7 @@ export function FormulaBar({ value, onChange, onEvaluated }: FormulaBarProps) {
       <div id="formula-preview" className="min-h-[1.25rem] px-1">
         {value.trim().length === 0 ? null : isInvalid ? (
           // Show a red error hint when the formula can't be parsed
-          <p className="text-xs text-destructive">Invalid formula</p>
+          <p className="text-xs text-destructive">{t.transactions.formula.invalid}</p>
         ) : (
           // Show the evaluated result in muted text as a preview
           <p className="text-xs text-muted-foreground">

@@ -4,53 +4,37 @@
 
 import type { PresetId, SpaceConfig } from '@/spaces/types'
 
+// i18n: presets hold DATA only. Their display texts (title, description,
+// chips, name placeholder) live in the translations, keyed by preset id:
+// t.spaces.presets[id] (src/i18n/messages/<lang>/spaces.ts).
+
 export const PRESETS: Record<PresetId, {
   id: PresetId
   emoji: string
-  titleKey: string
-  description: string
-  chips: string[]
-  namePlaceholder: string
   builtInFields: SpaceConfig['builtInFields']
   features: SpaceConfig['features']
 }> = {
   travel: {
     id: 'travel',
     emoji: '🌍',
-    titleKey: 'Travel',
-    description: 'Trip abroad, solo or with friends',
-    chips: ['Countries', 'Cities', 'Multi-currency', 'Cash wallet'],
-    namePlaceholder: 'Japan 2026',
     builtInFields: { country: true, city: true, category: true, paymentMethod: true, notes: true },
     features: { wallets: true, multiCurrency: true },
   },
   solo: {
     id: 'solo',
     emoji: '👤',
-    titleKey: 'Solo budget',
-    description: 'Track your own spending',
-    chips: ['Categories', 'Payment methods'],
-    namePlaceholder: 'My budget',
     builtInFields: { country: false, city: false, category: true, paymentMethod: true, notes: true },
     features: { wallets: false, multiCurrency: false },
   },
   group: {
     id: 'group',
     emoji: '👥',
-    titleKey: 'Group',
-    description: 'Flatmates, colleagues, couple',
-    chips: ['Categories', 'Split & balance'],
-    namePlaceholder: 'Colocation',
     builtInFields: { country: false, city: false, category: true, paymentMethod: false, notes: true },
     features: { wallets: false, multiCurrency: false },
   },
   custom: {
     id: 'custom',
     emoji: '⚙️',
-    titleKey: 'Custom',
-    description: 'Start from scratch',
-    chips: ['Pick your own fields'],
-    namePlaceholder: 'My space',
     builtInFields: { country: false, city: false, category: true, paymentMethod: false, notes: true },
     features: { wallets: false, multiCurrency: false },
   },

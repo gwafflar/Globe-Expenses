@@ -16,6 +16,15 @@ import {
   type FilterDimension,
 } from '@/transactions/utils/filterDimensions'
 import type { ScopedTransaction } from '@/spaces/utils/dashboardScope'
+import { getT, type Messages } from '@/i18n'
+import { MESSAGES } from '@/i18n/messages'
+import { displayCountryName } from '@/shared/data/pickerData'
+
+/** The dashboard's message namespace, in whichever language the caller wants.
+ *  Components pass `useT().dashboard` (and list it in their useMemo deps, so a
+ *  language change recomputes the rows); plain callers get the current
+ *  language by default. */
+type DashboardMessages = Messages['dashboard']
 
 // ---------------------------------------------------------------------------
 // Row model
@@ -77,6 +86,7 @@ export function computeBreakdown(
   scoped: ScopedTransaction[],
   dim: FilterDimension,
   topN: number = TOP_N,
+  t: DashboardMessages = getT().dashboard,
 ): Breakdown {
   // value id → accumulated amount + transaction count
   const buckets = new Map<string, { amount: number; count: number }>()
@@ -117,7 +127,7 @@ export function computeBreakdown(
   if (tail.length > 0) {
     rows.push({
       key: OTHER_ROW,
-      label: `Other · ${tail.length} value${tail.length === 1 ? '' : 's'}`,
+      label: t.breakdown.other(tail.length),
       amount: tail.reduce((s, r) => s + r.amount, 0),
       count: tail.reduce((s, r) => s + r.count, 0),
       // Tapping Other drills into ALL the collapsed values at once.
@@ -130,7 +140,7 @@ export function computeBreakdown(
   if (missing) {
     rows.push({
       key: UNDEFINED_FILTER,
-      label: `No ${dim.label.toLowerCase()}`,
+      label: t.breakdown.missing({ dimension: dim.label }),
       amount: missing.amount,
       count: missing.count,
       // The filter panel's "Undefined" sentinel — drill-down filters on it too.
@@ -152,6 +162,24 @@ export function computeBreakdown(
  *  value — never a blank row. */
 function optionLabel(dim: FilterDimension, value: string): string {
   return dim.options.find((o) => o.id === value)?.label ?? value
+}
+
+/**
+ * The label to SHOW for a breakdown/pivot row or section.
+ *
+ * Country values are stored as English names (and grouped on that stored
+ * value), so only the displayed text is translated here, at render time. The
+ * row's `label` itself stays the stored value: it is also the colour-hash key
+ * (categoryColor) and the sort tie-breaker, which must not change with the
+ * language. Other/"No …" rows are already in the UI language.
+ */
+export function displayValueLabel(
+  dim: FilterDimension,
+  entry: { label: string; isOther: boolean; isMissing: boolean },
+  locale: string,
+): string {
+  if (entry.isOther || entry.isMissing) return entry.label
+  return dim.key === 'country' ? displayCountryName(entry.label, locale) : entry.label
 }
 
 // ---------------------------------------------------------------------------
@@ -234,6 +262,7 @@ export function computePivot(
   secondary: FilterDimension,
   rowTopN: number = TOP_N,
   sectionTopN: number = SECTION_TOP_N,
+  t: DashboardMessages = getT().dashboard,
 ): Pivot {
   // primary key → { amount, count, cells: secondary key → { amount, count } }
   interface Group {
@@ -274,7 +303,7 @@ export function computePivot(
     label,
     total: group.amount,
     count: group.count,
-    rows: buildPivotRows(group.cells, secondary, rowTopN),
+    rows: buildPivotRows(group.cells, secondary, rowTopN, t),
     isOther: false,
     isMissing: false,
   }))
@@ -283,7 +312,7 @@ export function computePivot(
   if (tail.length > 0) {
     sections.push({
       key: OTHER_ROW,
-      label: `Other · ${tail.length} value${tail.length === 1 ? '' : 's'}`,
+      label: t.breakdown.other(tail.length),
       total: tail.reduce((s, r) => s + r.group.amount, 0),
       count: tail.reduce((s, r) => s + r.group.count, 0),
       // Not expandable: tapping it drills straight through to every collapsed
@@ -298,12 +327,12 @@ export function computePivot(
   if (missingGroup) {
     sections.push({
       key: UNDEFINED_FILTER,
-      label: `No ${primary.label.toLowerCase()}`,
+      label: t.breakdown.missing({ dimension: primary.label }),
       total: missingGroup.amount,
       count: missingGroup.count,
       // A data-completeness bucket still breaks down normally — knowing WHAT
       // is missing a country is the whole reason to open it.
-      rows: buildPivotRows(missingGroup.cells, secondary, rowTopN),
+      rows: buildPivotRows(missingGroup.cells, secondary, rowTopN, t),
       isOther: false,
       isMissing: true,
     })
@@ -318,6 +347,7 @@ function buildPivotRows(
   cells: Map<string, { amount: number; count: number }>,
   secondary: FilterDimension,
   topN: number,
+  t: DashboardMessages,
 ): PivotRow[] {
   const missing = cells.get(UNDEFINED_FILTER)
 
@@ -339,7 +369,7 @@ function buildPivotRows(
   if (tail.length > 0) {
     rows.push({
       key: OTHER_ROW,
-      label: `Other · ${tail.length} value${tail.length === 1 ? '' : 's'}`,
+      label: t.breakdown.other(tail.length),
       total: tail.reduce((s, r) => s + r.total, 0),
       count: tail.reduce((s, r) => s + r.count, 0),
       collapsedKeys: tail.map((r) => r.key),
@@ -351,7 +381,7 @@ function buildPivotRows(
   if (missing) {
     rows.push({
       key: UNDEFINED_FILTER,
-      label: `No ${secondary.label.toLowerCase()}`,
+      label: t.breakdown.missing({ dimension: secondary.label }),
       total: missing.amount,
       count: missing.count,
       isOther: false,
@@ -455,10 +485,22 @@ export function usedCardKeys(cards: DashboardCardDef[], exceptId?: string): Set<
  *
  *  1D → "By category". 2D → "Category × country", which reads as the question
  *  the card answers and makes the ORDER visible — swapping the pair produces a
- *  visibly different title even though the total is unchanged. */
-export function cardTitle(card: DashboardCardDef, dims: FilterDimension[]): string {
+ *  visibly different title even though the total is unchanged.
+ *
+ *  The user's override is stored data and is never translated. The derived
+ *  title is UI text, in the language of `t`.
+ *
+ *  ⚠️ `t` defaults to ENGLISH, not to the current language: sheetExport.ts
+ *  calls this to title the blocks of the exported Analysis sheet, and the
+ *  workbook content must stay English (the importer relies on it). Dashboard
+ *  components pass `useT().dashboard` explicitly. */
+export function cardTitle(
+  card: DashboardCardDef,
+  dims: FilterDimension[],
+  t: DashboardMessages = MESSAGES.en.dashboard,
+): string {
   const override = card.title?.trim()
   if (override) return override
-  if (dims.length < 2) return `By ${dims[0]?.label.toLowerCase() ?? ''}`
-  return `${dims[0].label} × ${dims[1].label.toLowerCase()}`
+  if (dims.length < 2) return t.breakdown.byDimension({ dimension: dims[0]?.label ?? '' })
+  return t.breakdown.pivotTitle({ primary: dims[0].label, secondary: dims[1].label })
 }

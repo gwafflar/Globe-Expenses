@@ -18,6 +18,7 @@ import { getSpaceConfig } from '@/spaces/config'
 import { useAuthStore } from '@/auth/store/useAuthStore'
 import { usePendingInvites } from '@/friends/hooks/usePendingInvites'
 import { ChevronLeft, WifiOff } from 'lucide-react'
+import { useT } from '@/i18n'
 
 // why the f*ck did claude put this here ?? to clean later
 function avatarHue(uid: string): number {
@@ -55,13 +56,18 @@ type BannerState = 'pending' | 'saved' | null
 
 // Why the space document is unavailable, so the render can pick different
 // wording for "genuinely missing" vs "we're offline and can't confirm either way".
-type SpaceUnavailable = { reason: 'not-found' | 'offline' | 'error'; message: string } | null
+// `message` is an id, not the text: the effect that sets it runs once per
+// spaceId, so the text is looked up at render time to follow the language.
+type SpaceUnavailableMessage = 'missingId' | 'offlineMessage' | 'notFoundMessage' | 'loadErrorMessage'
+type SpaceUnavailable = { reason: 'not-found' | 'offline' | 'error'; message: SpaceUnavailableMessage } | null
 
 function SaveBanner({ state, onDismiss }: { state: BannerState; onDismiss: () => void }) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
   useEffect(() => {
     if (state === null) return
-    const t = setTimeout(onDismiss, 3000)
-    return () => clearTimeout(t)
+    const timer = setTimeout(onDismiss, 3000)
+    return () => clearTimeout(timer)
   }, [state, onDismiss])
 
   if (state === null) return null
@@ -69,7 +75,7 @@ function SaveBanner({ state, onDismiss }: { state: BannerState; onDismiss: () =>
     <div className={`fixed left-0 right-0 top-0 z-50 px-4 py-3 text-center text-sm font-medium text-white shadow-md ${
       state === 'pending' ? 'bg-orange-500' : 'bg-green-600'
     }`}>
-      {state === 'pending' ? '⏳ Saved locally — will sync with the server' : '✅ Transaction saved'}
+      {state === 'pending' ? t.spaces.detail.savedLocally : t.spaces.detail.transactionSaved}
     </div>
   )
 }
@@ -88,6 +94,8 @@ function ArchiveBanner({
   currentUserUid: string
   onSpaceChange: (updated: Partial<Space>) => void
 }) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
   const isArchived = (space.archivedByUids ?? []).includes(currentUserUid)
   const [unarchiving, setUnarchiving] = useState(false)
   const [done, setDone] = useState(false)
@@ -95,8 +103,8 @@ function ArchiveBanner({
   // Auto-dismiss the green confirmation after 10 seconds
   useEffect(() => {
     if (!done) return
-    const t = setTimeout(() => setDone(false), 10000)
-    return () => clearTimeout(t)
+    const timer = setTimeout(() => setDone(false), 10000)
+    return () => clearTimeout(timer)
   }, [done])
 
   if (!isArchived && !done) return null
@@ -115,7 +123,7 @@ function ArchiveBanner({
   if (done) {
     return (
       <div className="mx-4 mt-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm font-medium text-green-800 dark:border-green-800 dark:bg-green-950 dark:text-green-200">
-        This space has been unarchived and is back in your active list.
+        {t.spaces.detail.unarchivedDone}
       </div>
     )
   }
@@ -123,14 +131,14 @@ function ArchiveBanner({
   // Amber banner with unarchive action
   return (
     <div className="mx-4 mt-2 flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm dark:border-amber-800 dark:bg-amber-950">
-      <span className="text-amber-800 dark:text-amber-200">This space is archived.</span>
+      <span className="text-amber-800 dark:text-amber-200">{t.spaces.detail.archived}</span>
       <button
         type="button"
         onClick={handleUnarchive}
         disabled={unarchiving}
         className="text-sm font-medium text-amber-700 underline hover:text-amber-900 disabled:opacity-50 disabled:no-underline dark:text-amber-300 dark:hover:text-amber-100"
       >
-        {unarchiving ? 'Unarchiving…' : 'Unarchive'}
+        {unarchiving ? t.spaces.detail.unarchiving : t.spaces.detail.unarchive}
       </button>
     </div>
   )
@@ -142,21 +150,23 @@ function ArchiveBanner({
 // ---------------------------------------------------------------------------
 
 function RateRepairBanner({ codes, onDismiss }: { codes: string[]; onDismiss: () => void }) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
   useEffect(() => {
-    const t = setTimeout(onDismiss, 12000)
-    return () => clearTimeout(t)
+    const timer = setTimeout(onDismiss, 12000)
+    return () => clearTimeout(timer)
   }, [onDismiss])
 
   return (
     <div className="mx-4 mt-2 flex items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm dark:border-amber-800 dark:bg-amber-950">
       <span className="text-amber-800 dark:text-amber-200">
-        ⚠️ Corrected {codes.length} exchange rate{codes.length > 1 ? 's' : ''} ({codes.join(', ')}) that were stored backwards due to a since-fixed bug. Past transactions are unaffected.
+        {t.spaces.detail.rateRepair({ count: codes.length, codes: codes.join(', ') })}
       </span>
       <button
         type="button"
         onClick={onDismiss}
         className="shrink-0 text-amber-700 hover:text-amber-900 dark:text-amber-300 dark:hover:text-amber-100"
-        aria-label="Dismiss"
+        aria-label={t.spaces.detail.dismiss}
       >
         ✕
       </button>
@@ -169,6 +179,8 @@ function RateRepairBanner({ codes, onDismiss }: { codes: string[]; onDismiss: ()
 // ---------------------------------------------------------------------------
 
 export function SpaceDetailPage() {
+  // translation hook — re-renders when the language changes
+  const t = useT()
   const { spaceId } = useParams()
   const navigate = useNavigate()
   const { currentUser, userProfile } = useAuthStore()
@@ -257,7 +269,7 @@ export function SpaceDetailPage() {
     if (!spaceId) {
       setSpace(null)
       setLoadingSpace(false)
-      setUnavailable({ reason: 'error', message: 'Missing space identifier.' })
+      setUnavailable({ reason: 'error', message: 'missingId' })
       return
     }
     const id = spaceId
@@ -280,7 +292,7 @@ export function SpaceDetailPage() {
       setLoadingSpace(false)
       setUnavailable({
         reason: 'offline',
-        message: 'Check your connection and try again — we can\'t tell whether this space exists until we hear back from the server.',
+        message: 'offlineMessage',
       })
     }, 5000)
 
@@ -301,7 +313,7 @@ export function SpaceDetailPage() {
           setSpace(null)
           setUnavailable({
             reason: 'not-found',
-            message: 'It may have been deleted, or you might not have permission to view it.',
+            message: 'notFoundMessage',
           })
           setLoadingSpace(false)
         }
@@ -313,7 +325,7 @@ export function SpaceDetailPage() {
         resolved = true
         clearTimeout(offlineTimer)
         setSpace(null)
-        setUnavailable({ reason: 'error', message: 'Unable to load this space. Please try again later.' })
+        setUnavailable({ reason: 'error', message: 'loadErrorMessage' })
         setLoadingSpace(false)
       },
     )
@@ -471,11 +483,13 @@ export function SpaceDetailPage() {
     if (!tx || tx.createdBy.type !== 'user') return
     e1Requested.current = true
     const authorUid = tx.createdBy.uid
-    const author = space.members.find((m) => m.userId === authorUid)?.displayName || 'Someone'
+    const author = space.members.find((m) => m.userId === authorUid)?.displayName || t.spaces.detail.someone
     const myShare = tx.beneficiaries.find((s) => s.travelMemberId === myMemberId)?.amount
     const amount = formatAmount(myShare && myShare > 0 ? myShare : tx.totalAmount, tx.currency)
-    requestPushPrompt('e1', `${author} added ${tx.name} (${amount}) involving you. Get notified next time?`)
-  }, [transactions, space, currentUserUid])
+    requestPushPrompt('e1', t.spaces.detail.pushPrompt({ author, name: tx.name, amount }))
+    // `t` is a dependency so the effect sees the current language; the
+    // e1Requested ref above still guarantees the prompt is requested only once.
+  }, [transactions, space, currentUserUid, t])
 
   // Dashboard drill-down (Phase 7a §5): the filter selection to hand to the
   // Transactions tab. The nonce is minted here so the same row can be tapped
@@ -543,9 +557,9 @@ export function SpaceDetailPage() {
       <div className="flex min-h-screen flex-col bg-background">
         <header className="flex items-center gap-3 border-b px-4 py-3">
           <button type="button" onClick={handleBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors">
-            <ChevronLeft className="h-4 w-4" />All spaces
+            <ChevronLeft className="h-4 w-4" />{t.spaces.detail.allSpaces}
           </button>
-          <h1 className="text-base font-semibold">Loading space…</h1>
+          <h1 className="text-base font-semibold">{t.spaces.detail.loadingSpace}</h1>
         </header>
         <main className="flex flex-1 flex-col items-center justify-center gap-4 px-6">
           <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary border-t-transparent" />
@@ -553,8 +567,7 @@ export function SpaceDetailPage() {
             <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
               <WifiOff className="mt-0.5 h-4 w-4 shrink-0" />
               <p>
-                You seem to have connection issues. If the space doesn&apos;t load,
-                try turning off Wi-Fi and mobile data to use the app offline.
+                {t.spaces.detail.slowHint}
               </p>
             </div>
           )}
@@ -569,19 +582,20 @@ export function SpaceDetailPage() {
       <div className="flex min-h-screen flex-col bg-background">
         <header className="flex items-center gap-3 border-b px-4 py-3">
           <button type="button" onClick={handleBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors">
-            <ChevronLeft className="h-4 w-4" />All spaces
+            <ChevronLeft className="h-4 w-4" />{t.spaces.detail.allSpaces}
           </button>
-          <h1 className="text-base font-semibold">{isOffline ? "Can't confirm this space" : 'Space not found'}</h1>
+          <h1 className="text-base font-semibold">{isOffline ? t.spaces.detail.cantConfirm : t.spaces.detail.notFoundTitle}</h1>
         </header>
         <main className="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-center">
           {isOffline && <WifiOff className="h-8 w-8 text-amber-600" />}
           <p className="text-lg font-medium">
-            {isOffline ? "You're offline, and this space isn't in your local cache." : "We couldn't find this space."}
+            {isOffline ? t.spaces.detail.offlineLead : t.spaces.detail.notFoundLead}
           </p>
           <p className="max-w-sm text-sm text-muted-foreground">
-            {unavailable?.message ?? 'It may have been deleted, or you might not have permission to view it.'}
+            {/* unavailable.message is a message id — resolved here so it follows the language */}
+            {t.spaces.detail[unavailable?.message ?? 'notFoundMessage']}
           </p>
-          <Button type="button" onClick={handleBack}>Back to spaces</Button>
+          <Button type="button" onClick={handleBack}>{t.spaces.detail.backToSpaces}</Button>
         </main>
       </div>
     )
@@ -604,7 +618,7 @@ export function SpaceDetailPage() {
           className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
           <ChevronLeft className="h-4 w-4" />
-          All spaces
+          {t.spaces.detail.allSpaces}
         </button>
 
         {/* Centre: space emoji + name — tap to go to Parameters tab */}
@@ -623,7 +637,7 @@ export function SpaceDetailPage() {
         <button
           type="button"
           onClick={() => navigate('/profile')}
-          title="Profile"
+          title={t.spaces.profile}
           className="relative flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold text-white shadow-sm transition hover:opacity-90"
           style={{ backgroundColor: `hsl(${hue}, 55%, 50%)` }}
         >
@@ -654,12 +668,12 @@ export function SpaceDetailPage() {
           role="status"
           className="mx-4 mt-2 flex items-start justify-between gap-3 rounded-lg border border-border bg-muted px-3 py-2 text-sm"
         >
-          <span>This transaction no longer exists.</span>
+          <span>{t.spaces.detail.transactionGone}</span>
           <button
             type="button"
             onClick={() => setLinkedTxMissing(false)}
             className="shrink-0 text-muted-foreground hover:text-foreground"
-            aria-label="Dismiss"
+            aria-label={t.spaces.detail.dismiss}
           >
             ✕
           </button>
@@ -715,7 +729,7 @@ export function SpaceDetailPage() {
             role="tooltip"
             className="pointer-events-none absolute bottom-full right-0 mb-1.5 w-44 rounded-md bg-popover px-3 py-2 text-xs text-popover-foreground shadow-md border border-border opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-10"
           >
-            Coming in v2 — snap a receipt and let AI fill in the transaction.
+            {t.spaces.detail.cameraTooltip}
           </div>
         </div>
         {/* Add transaction FAB */}
@@ -732,20 +746,20 @@ export function SpaceDetailPage() {
       <AlertDialog open={showNoSlotDialog} onOpenChange={(open) => { if (!open) setShowNoSlotDialog(false) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Claim your member slot first</AlertDialogTitle>
+            <AlertDialogTitle>{t.spaces.detail.noSlotTitle}</AlertDialogTitle>
             <AlertDialogDescription>
-              You haven't claimed a member slot yet. Choose who you are in this space so we know who paid for transactions you record.
+              {t.spaces.detail.noSlotDescription}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t.common.cancel}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => {
                 setShowNoSlotDialog(false)
                 setRequestTab('parameters')
               }}
             >
-              Go to Members
+              {t.spaces.detail.goToMembers}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -755,15 +769,15 @@ export function SpaceDetailPage() {
       <AlertDialog open={deletingTxId !== null} onOpenChange={(open) => { if (!open) setDeletingTxId(null) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete this expense?</AlertDialogTitle>
+            <AlertDialogTitle>{t.spaces.detail.deleteTitle}</AlertDialogTitle>
             <AlertDialogDescription>
-              This action cannot be undone. The expense will be permanently removed for all members.
+              {t.spaces.detail.deleteDescription}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t.common.cancel}</AlertDialogCancel>
             <AlertDialogAction onClick={confirmDelete} className="bg-destructive text-white hover:bg-destructive/90">
-              Delete
+              {t.common.delete}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -10,7 +10,7 @@ import type { Messaging } from 'firebase-admin/messaging'
 import { logger } from 'firebase-functions'
 import type { ActivityBody, PushPlan } from '../model'
 import { decidePush, type PushDecision } from './limiter'
-import { buildFinalPushMessage, buildPushMessage } from './text'
+import { buildFinalPushMessage, buildPushMessage, toPushLanguage, type PushLanguage } from './text'
 
 /** FCM error codes that mean "this token will never work again". */
 const DEAD_TOKEN_CODES = new Set([
@@ -65,6 +65,8 @@ export async function deliverPush(
     const tokenSnap = await db.collection(`users/${recipientUid}/fcmTokens`).get()
     if (tokenSnap.empty) return skip('no registered device')
     const tokens = tokenSnap.docs.map((d) => d.id) // the token IS the document id
+    // Each device stores its own UI language (absent on older tokens → 'en').
+    const languageOf = new Map(tokenSnap.docs.map((d) => [d.id, toPushLanguage(d.get('language'))]))
 
     // 2. Per-space mute, stored in the recipient's private document (§3.5).
     if (plan.muteSpaceId) {
@@ -76,30 +78,42 @@ export async function deliverPush(
     // 3. Limiter.
     const decision = await takePushSlot(db, recipientUid, plan.throttleKey)
     if (decision === 'none') return skip('limiter: burst in progress')
-    const message = decision === 'final' ? buildFinalPushMessage(body, plan.throttleKey) : buildPushMessage(body)
-
-    // 4. Send. DATA-only message: FCM shows nothing by itself; our service
-    //    worker (public/push-sw.js) receives it and calls showNotification().
+    // 4. Send, one multicast per language: the same user can have a phone in
+    //    French and a laptop in English. Usually there is a single group.
+    //    DATA-only message: FCM shows nothing by itself; our service worker
+    //    (public/push-sw.js) receives it and calls showNotification().
     //    FCM data values must all be strings.
-    const result = await messaging.sendEachForMulticast({
-      tokens,
-      data: { title: message.title, body: message.body, url: message.url, kind: body.kind },
-      webpush: {
-        // Urgency high: deliver now even if the phone is dozing.
-        // TTL: if the device is offline, keep trying for a day, then give up.
-        headers: { Urgency: 'high', TTL: '86400' },
-      },
-    })
+    const groups = new Map<PushLanguage, string[]>()
+    for (const t of tokens) {
+      const lang = languageOf.get(t) ?? 'en'
+      groups.set(lang, [...(groups.get(lang) ?? []), t])
+    }
 
-    // 5. Drop tokens FCM says are dead (app uninstalled, permission revoked,
-    //    signed out while offline…), so they are not retried forever (§2.1).
     const dead: string[] = []
-    result.responses.forEach((r, i) => {
-      if (r.success) return
-      const code = r.error?.code ?? ''
-      if (DEAD_TOKEN_CODES.has(code)) dead.push(tokens[i])
-      else logger.warn('push: send failed', { recipientUid, code, message: r.error?.message })
-    })
+    let delivered = 0
+    for (const [lang, groupTokens] of groups) {
+      const message =
+        decision === 'final' ? buildFinalPushMessage(body, plan.throttleKey, lang) : buildPushMessage(body, lang)
+      const result = await messaging.sendEachForMulticast({
+        tokens: groupTokens,
+        data: { title: message.title, body: message.body, url: message.url, kind: body.kind },
+        webpush: {
+          // Urgency high: deliver now even if the phone is dozing.
+          // TTL: if the device is offline, keep trying for a day, then give up.
+          headers: { Urgency: 'high', TTL: '86400' },
+        },
+      })
+      delivered += result.successCount
+
+      // 5. Collect tokens FCM says are dead (app uninstalled, permission
+      //    revoked, signed out while offline…), so they are not retried forever (§2.1).
+      result.responses.forEach((r, i) => {
+        if (r.success) return
+        const code = r.error?.code ?? ''
+        if (DEAD_TOKEN_CODES.has(code)) dead.push(groupTokens[i])
+        else logger.warn('push: send failed', { recipientUid, code, message: r.error?.message })
+      })
+    }
     await Promise.all(dead.map((t) => db.doc(`users/${recipientUid}/fcmTokens/${t}`).delete()))
 
     logger.info('push: sent', {
@@ -107,7 +121,8 @@ export async function deliverPush(
       kind: body.kind,
       decision,
       devices: tokens.length,
-      delivered: result.successCount,
+      languages: [...groups.keys()],
+      delivered,
       removedTokens: dead.length,
     })
   } catch (err) {

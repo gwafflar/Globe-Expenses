@@ -4,7 +4,24 @@
 // Also used by SpaceCreatePage's "Set trip dates" currency picker.
 
 import { useState, useEffect, useRef } from 'react'
-import { ALL_CURRENCIES } from '@/shared/data/pickerData'
+import { ALL_CURRENCIES, localizedCurrencyName } from '@/shared/data/pickerData'
+import { useLocale, useT } from '@/i18n'
+
+/**
+ * Currencies matching a search query, as [code, symbol, display name] with the
+ * name in the UI language. The query matches the code, the localised name or
+ * the English name (so "dollar" and "yen" work in both languages).
+ */
+function searchCurrencies(search: string, locale: string): [string, string, string][] {
+  const q = search.toLowerCase()
+  return ALL_CURRENCIES.map(([code, symbol, english]): [string, string, string, string] =>
+    [code, symbol, localizedCurrencyName(code, locale), english],
+  )
+    .filter(([code, , name, english]) =>
+      code.toLowerCase().includes(q) || name.toLowerCase().includes(q) || english.toLowerCase().includes(q),
+    )
+    .map(([code, symbol, name]) => [code, symbol, name])
+}
 
 interface SmartCurrencySelectProps {
   value: string
@@ -15,6 +32,9 @@ interface SmartCurrencySelectProps {
 }
 
 export function SmartCurrencySelect({ value, onChange, onCurrencyAdded }: SmartCurrencySelectProps) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  const locale = useLocale() // for the currency names shown in the list
   const [pickerOpen, setPickerOpen] = useState(false)
   const [search, setSearch] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
@@ -23,10 +43,7 @@ export function SmartCurrencySelect({ value, onChange, onCurrencyAdded }: SmartC
     if (pickerOpen && searchRef.current) searchRef.current.focus()
   }, [pickerOpen])
 
-  const filtered = ALL_CURRENCIES.filter(([code, , name]) => {
-    const q = search.toLowerCase()
-    return code.toLowerCase().includes(q) || name.toLowerCase().includes(q)
-  })
+  const filtered = searchCurrencies(search, locale)
 
   // Resolve the currency symbol for the current value
   const currencySymbol = ALL_CURRENCIES.find(([code]) => code === value)?.[1] ?? value
@@ -40,7 +57,7 @@ export function SmartCurrencySelect({ value, onChange, onCurrencyAdded }: SmartC
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search…"
+            placeholder={t.parameters.pickers.search}
             className="rounded border px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
           />
           <div className="max-h-40 overflow-y-auto">
@@ -64,7 +81,7 @@ export function SmartCurrencySelect({ value, onChange, onCurrencyAdded }: SmartC
           </div>
           <button type="button" onClick={() => { setPickerOpen(false); setSearch('') }}
             className="text-xs text-muted-foreground hover:text-foreground text-right">
-            Cancel
+            {t.common.cancel}
           </button>
         </div>
       </div>
@@ -100,6 +117,9 @@ interface InlineCurrencyControlProps {
 }
 
 export function InlineCurrencyControl({ mainCurrency, onChange }: InlineCurrencyControlProps) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  const locale = useLocale() // for the currency names shown in the list
   const [pickerOpen, setPickerOpen] = useState(false)
   const [search, setSearch] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
@@ -108,10 +128,7 @@ export function InlineCurrencyControl({ mainCurrency, onChange }: InlineCurrency
     if (pickerOpen && searchRef.current) searchRef.current.focus()
   }, [pickerOpen])
 
-  const filtered = ALL_CURRENCIES.filter(([code, , name]) => {
-    const q = search.toLowerCase()
-    return code.toLowerCase().includes(q) || name.toLowerCase().includes(q)
-  })
+  const filtered = searchCurrencies(search, locale)
 
   if (pickerOpen) {
     return (
@@ -121,7 +138,7 @@ export function InlineCurrencyControl({ mainCurrency, onChange }: InlineCurrency
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search…"
+          placeholder={t.parameters.pickers.search}
           className="rounded border px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
         />
         <div className="max-h-40 overflow-y-auto">
@@ -144,7 +161,7 @@ export function InlineCurrencyControl({ mainCurrency, onChange }: InlineCurrency
         </div>
         <button type="button" onClick={() => { setPickerOpen(false); setSearch('') }}
           className="text-xs text-muted-foreground hover:text-foreground text-right">
-          Cancel
+          {t.common.cancel}
         </button>
       </div>
     )
@@ -152,10 +169,16 @@ export function InlineCurrencyControl({ mainCurrency, onChange }: InlineCurrency
 
   return (
     <span className="text-xs text-muted-foreground">
-      in {mainCurrency} ·{' '}
-      <button type="button" onClick={() => setPickerOpen(true)} className="text-primary hover:underline">
-        + other currency
-      </button>
+      {/* One message for the whole "in EUR · + other currency" line; the
+          tappable link is passed in as a JSX parameter. */}
+      {t.parameters.pickers.inCurrency({
+        currency: mainCurrency,
+        other: (
+          <button type="button" onClick={() => setPickerOpen(true)} className="text-primary hover:underline">
+            {t.parameters.pickers.otherCurrency}
+          </button>
+        ),
+      })}
     </span>
   )
 }

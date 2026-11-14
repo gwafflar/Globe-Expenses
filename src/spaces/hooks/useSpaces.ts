@@ -17,6 +17,7 @@ import {
 import { db } from '@/services/firebase'
 import type { Space } from '@/spaces/types'
 import { mapSpaceDoc } from '@/spaces/services/spaceService'
+import { getT } from '@/i18n'
 
 interface UseSpacesResult {
   activeSpaces: Space[]
@@ -77,7 +78,9 @@ export function useSpaces(userId: string | undefined): UseSpacesResult {
         setActiveSpaces([])
         setArchivedSpaces([])
         setIsLoading(false)
-        setError(err.message || 'Unable to load spaces.')
+        // getT() (not the useT hook): this runs inside a Firestore callback,
+        // so it reads the language current at the time of the error.
+        setError(err.message || getT().spaces.list.loadErrorFallback)
       },
     )
 

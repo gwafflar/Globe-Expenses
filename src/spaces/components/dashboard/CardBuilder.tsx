@@ -29,6 +29,7 @@ import type { ScopedTransaction } from '@/spaces/utils/dashboardScope'
 import { cardTitle } from '@/spaces/utils/dashboardCards'
 import { BreakdownCard } from './BreakdownCard'
 import { PivotCard } from './PivotCard'
+import { useT } from '@/i18n'
 
 interface CardBuilderProps {
   open: boolean
@@ -49,8 +50,9 @@ interface CardBuilderProps {
   onSave: (card: DashboardCardDef) => void
 }
 
-/** Shown on every disabled picker option and on a disabled swap. */
-const DUPLICATE_HINT = 'Already on your dashboard'
+// The duplicate hint shown on every disabled picker option and on a disabled
+// swap is t.dashboard.builder.duplicateHint (it used to be a module-level
+// constant, which would have frozen the language at import time).
 
 export function CardBuilder({
   open,
@@ -62,6 +64,10 @@ export function CardBuilder({
   usedKeys,
   onSave,
 }: CardBuilderProps) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  const tb = t.dashboard.builder
+
   // Local draft state. Keyed remount by the caller (see DashboardTab) means
   // these initialisers re-run for each open, so no syncing effect is needed.
   // A NEW card opens on the first dimension that is not already a 1D card, so
@@ -130,16 +136,15 @@ export function CardBuilder({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{editing ? 'Edit card' : 'Add a card'}</DialogTitle>
+          <DialogTitle>{editing ? tb.editTitle : tb.addTitle}</DialogTitle>
           <DialogDescription>
-            Break your spending down by any field this space tracks.
+            {tb.description}
           </DialogDescription>
         </DialogHeader>
 
         {dimensions.length === 0 ? (
           <p className="py-4 text-sm text-muted-foreground">
-            This space has no fields to break down by yet. Enable a built-in field or add a
-            custom one in Parameters first.
+            {tb.noFields}
           </p>
         ) : (
           <div className="flex flex-col gap-4">
@@ -149,7 +154,7 @@ export function CardBuilder({
                 1D card stays pickable as the START of a pivot, and one used
                 inside a pair does not block the 1D card. */}
             <DimensionPicker
-              label="First dimension"
+              label={tb.firstDimension}
               dimensions={dimensions}
               selectedKey={primaryKey}
               isDisabled={(dim) =>
@@ -168,10 +173,10 @@ export function CardBuilder({
                 pair; pairing a dimension with itself is never legal; and None
                 is disabled when the 1D card already exists. */}
             <DimensionPicker
-              label="Second dimension (optional)"
+              label={tb.secondDimension}
               dimensions={dimensions}
               selectedKey={secondaryKey}
-              noneLabel="None"
+              noneLabel={t.common.none}
               isDisabled={(dim) =>
                 dim.key === primaryKey || usedKeys.has(`${primaryKey}|${dim.key}`)
               }
@@ -187,18 +192,18 @@ export function CardBuilder({
                     type="button"
                     onClick={handleSwap}
                     disabled={swapWouldDuplicate}
-                    title={swapWouldDuplicate ? DUPLICATE_HINT : undefined}
+                    title={swapWouldDuplicate ? tb.duplicateHint : undefined}
                     className="rounded-full border px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:opacity-40"
                   >
-                    ⇄ Swap order
+                    {tb.swapOrder}
                   </button>
                   <span className="min-w-0 truncate text-xs text-muted-foreground">
-                    {cardTitle({ id: '', dimensions: draftDimensions }, selectedDims)}
+                    {cardTitle({ id: '', dimensions: draftDimensions }, selectedDims, t.dashboard)}
                   </span>
                 </div>
                 {swapWouldDuplicate && (
                   <p className="text-xs text-muted-foreground">
-                    Swapping is unavailable: {DUPLICATE_HINT.toLowerCase()}.
+                    {tb.swapUnavailable}
                   </p>
                 )}
               </div>
@@ -206,12 +211,14 @@ export function CardBuilder({
 
             {/* ── Title — auto-derived from the dimensions, overridable ─── */}
             <label className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-muted-foreground">Title</span>
+              <span className="text-xs font-medium text-muted-foreground">{tb.title}</span>
               <Input
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder={
-                  primary ? cardTitle({ id: '', dimensions: draftDimensions }, selectedDims) : ''
+                  primary
+                    ? cardTitle({ id: '', dimensions: draftDimensions }, selectedDims, t.dashboard)
+                    : ''
                 }
                 className="h-8 text-sm"
               />
@@ -219,15 +226,14 @@ export function CardBuilder({
 
             {isDuplicate && (
               <p className="text-xs text-destructive">
-                {DUPLICATE_HINT}. Pick a different combination — or swap the order, which is a
-                different card.
+                {tb.duplicateExplain}
               </p>
             )}
 
             {/* ── Live preview with the space's real data ───────────────── */}
             {primary && (
               <div className="flex flex-col gap-1.5">
-                <span className="text-xs font-medium text-muted-foreground">Preview</span>
+                <span className="text-xs font-medium text-muted-foreground">{tb.preview}</span>
                 {secondary ? (
                   <PivotCard
                     // Remount on a dimension change so the collapsed state is
@@ -256,10 +262,10 @@ export function CardBuilder({
 
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t.common.cancel}
           </Button>
           <Button type="button" onClick={handleSave} disabled={!primary || isDuplicate}>
-            {editing ? 'Save' : 'Add card'}
+            {editing ? t.common.save : tb.addCard}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -341,6 +347,8 @@ function Chip({
   disabled: boolean
   onClick: () => void
 }) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
   return (
     <button
       type="button"
@@ -348,7 +356,7 @@ function Chip({
       aria-label={label}
       aria-pressed={isActive}
       disabled={disabled}
-      title={disabled ? DUPLICATE_HINT : undefined}
+      title={disabled ? t.dashboard.builder.duplicateHint : undefined}
       onClick={onClick}
       className={`flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
         isActive

@@ -21,6 +21,7 @@ import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore'
 import { auth, db } from '@/services/firebase'
 import type { UserProfile } from '@/auth/services/userService'
 import { refreshPushToken, removePushTokenOnSignOut } from '@/notifications/services/pushService'
+import { useLanguageStore } from '@/i18n'
 
 // Shape of the auth store
 interface AuthState {
@@ -100,6 +101,11 @@ onAuthStateChanged(auth, async (user) => {
       // Document already exists — use it directly.
       profile = snapshot.data() as UserProfile
     }
+
+    // UI language: a choice saved on the profile (from another device, say)
+    // wins over this device's cached one. Applied BEFORE the store update
+    // below so the first authenticated render is already in that language.
+    useLanguageStore.getState().applyProfilePreference(profile.language)
 
     // Update the store with both the Firebase user and the Firestore profile.
     // Components can now read userProfile synchronously without any extra fetches.

@@ -15,22 +15,11 @@ import {
   type CoreField,
   type ForeignColumn,
 } from '@/shared/utils/foreignSheet'
+import { useT } from '@/i18n'
 
-const CORE_LABELS: Record<CoreField, string> = {
-  date: 'Date',
-  name: 'Description',
-  totalAmount: 'Amount',
-  currency: 'Currency',
-  exchangeRate: 'Exchange rate',
-}
-
-const BUILT_IN_LABELS: Record<OptionalBuiltIn, string> = {
-  country: 'Country',
-  city: 'City',
-  category: 'Category',
-  paymentMethod: 'Payment method',
-  notes: 'Notes',
-}
+// Core fields in dropdown order. Labels come from the translations
+// (t.importExport.coreFields / builtInFields) at render time.
+const CORE_FIELDS: CoreField[] = ['date', 'name', 'totalAmount', 'currency', 'exchangeRate']
 
 /** Encode a target as a <select> value, and back. A single string keeps the
  *  dropdown a plain controlled input instead of a parallel state machine. */
@@ -83,6 +72,9 @@ export function ColumnMappingStep({
   errors,
   canCreateFields,
 }: ColumnMappingStepProps) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  const tc = t.importExport.columns
   const enabledBuiltIns = OPTIONAL_BUILT_INS.filter((f) => config.builtInFields[f])
   const enabledCustom = config.customFields.filter((f) => f.enabled)
   const isSolo = space.members.length < 2
@@ -94,9 +86,7 @@ export function ColumnMappingStep({
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-muted-foreground">
-        Found <strong>{rowCount}</strong> row{rowCount !== 1 ? 's' : ''} and{' '}
-        <strong>{columns.length}</strong> column{columns.length !== 1 ? 's' : ''}. Matching
-        columns have been filled in — check them and correct anything wrong.
+        {tc.intro({ rows: rowCount, columns: columns.length })}
       </p>
 
       {errors.length > 0 && (
@@ -120,8 +110,10 @@ export function ColumnMappingStep({
                   {col.header}
                 </p>
                 <p className="truncate text-xs text-muted-foreground">
-                  {col.nonEmptyCount} value{col.nonEmptyCount !== 1 ? 's' : ''}
-                  {col.distinctValues.length > 0 && ` · e.g. ${col.distinctValues.slice(0, 3).join(', ')}`}
+                  {tc.stats({
+                    count: col.nonEmptyCount,
+                    examples: col.distinctValues.slice(0, 3).join(', '),
+                  })}
                 </p>
               </div>
 
@@ -130,24 +122,24 @@ export function ColumnMappingStep({
                 value={targetToValue(target)}
                 onChange={(e) => setTarget(col, e.target.value)}
               >
-                <option value="ignore">— Don't import —</option>
+                <option value="ignore">{tc.dontImport}</option>
 
-                <optgroup label="Transaction">
-                  {(Object.keys(CORE_LABELS) as CoreField[]).map((f) => (
-                    <option key={f} value={`core:${f}`}>{CORE_LABELS[f]}</option>
+                <optgroup label={tc.groupTransaction}>
+                  {CORE_FIELDS.map((f) => (
+                    <option key={f} value={`core:${f}`}>{t.importExport.coreFields[f]}</option>
                   ))}
                 </optgroup>
 
                 {enabledBuiltIns.length > 0 && (
-                  <optgroup label="Fields">
+                  <optgroup label={tc.groupFields}>
                     {enabledBuiltIns.map((f) => (
-                      <option key={f} value={`builtIn:${f}`}>{BUILT_IN_LABELS[f]}</option>
+                      <option key={f} value={`builtIn:${f}`}>{t.importExport.builtInFields[f]}</option>
                     ))}
                   </optgroup>
                 )}
 
                 {enabledCustom.length > 0 && (
-                  <optgroup label="Custom fields">
+                  <optgroup label={tc.groupCustomFields}>
                     {enabledCustom.map((f) => (
                       <option key={f.id} value={`custom:${f.id}`}>
                         {f.emoji ? `${f.emoji} ${f.label}` : f.label}
@@ -159,23 +151,23 @@ export function ColumnMappingStep({
                 {/* Splits are meaningless in a solo space — every amount is the
                     one member's, which the importer already does by default. */}
                 {!isSolo && (
-                  <optgroup label="Who">
+                  <optgroup label={tc.groupWho}>
                     {space.members.map((m) => (
                       <option key={`cost-${m.travelMemberId}`} value={`cost:${m.travelMemberId}`}>
-                        Cost — {m.displayName}
+                        {tc.cost(m.displayName)}
                       </option>
                     ))}
                     {space.members.map((m) => (
                       <option key={`paid-${m.travelMemberId}`} value={`paid:${m.travelMemberId}`}>
-                        Paid — {m.displayName}
+                        {tc.paid(m.displayName)}
                       </option>
                     ))}
                   </optgroup>
                 )}
 
                 {canCreateFields && (
-                  <optgroup label="New">
-                    <option value="newField">+ Create a new field…</option>
+                  <optgroup label={tc.groupNew}>
+                    <option value="newField">{tc.createField}</option>
                   </optgroup>
                 )}
               </select>

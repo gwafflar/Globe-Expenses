@@ -18,6 +18,7 @@ import { deleteDoc, doc, serverTimestamp, setDoc } from 'firebase/firestore'
 import { deleteToken, getMessaging, getToken, isSupported } from 'firebase/messaging'
 import { app, db } from '@/services/firebase'
 import { derivePushState, type PushState } from '@/notifications/utils/pushState'
+import { getLanguage } from '@/i18n'
 
 /** Where this installation remembers the token it registered, and for whom. */
 const TOKEN_KEY = 'notifToken'
@@ -173,6 +174,11 @@ async function registerToken(uid: string): Promise<void> {
       lastSeenAt: serverTimestamp(),
       userAgent: navigator.userAgent,
       standalone: isStandalone(),
+      // UI language of this device: the Cloud Function writes each device's
+      // push text in it. Stored per device rather than read from the profile
+      // because 'auto' resolves differently on each browser. ProfilePage calls
+      // refreshPushToken() after a language change to rewrite it.
+      language: getLanguage(),
     },
     { merge: true },
   ).catch((err: unknown) => console.error('[pushService] saving the token failed:', err))

@@ -15,8 +15,12 @@ import { Button } from '@/components/ui/button'
 import { usePushState } from '@/notifications/hooks/usePushState'
 import { enablePush } from '@/notifications/services/pushService'
 import { setSpaceMuted, subscribeToMutedSpaces } from '@/notifications/services/notificationPrefs'
+import { useT } from '@/i18n'
 
 export function SpaceNotificationToggle({ uid, spaceId }: { uid: string; spaceId: string }) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  const s = t.social.push.space // shorthand
   const { state } = usePushState(uid)
   // null until the first snapshot arrives, so the switch never flashes "On"
   // for a space that is actually muted.
@@ -55,10 +59,14 @@ export function SpaceNotificationToggle({ uid, spaceId }: { uid: string; spaceId
 
   const profileLink = (
     <p className="text-xs text-muted-foreground">
-      Want to turn off all notifications?{' '}
-      <Link to="/profile" className="underline underline-offset-2 hover:text-foreground">
-        Profile settings →
-      </Link>
+      {/* The link is passed into the sentence so French can place it freely */}
+      {s.turnOffAll({
+        link: (
+          <Link to="/profile" className="underline underline-offset-2 hover:text-foreground">
+            {s.profileSettings}
+          </Link>
+        ),
+      })}
     </p>
   )
 
@@ -66,12 +74,12 @@ export function SpaceNotificationToggle({ uid, spaceId }: { uid: string; spaceId
     return (
       <div className="flex flex-col gap-1">
         <div className="flex items-center justify-between gap-3">
-          <p className="text-sm font-medium">🔔 Notifications for this space</p>
+          <p className="text-sm font-medium">{s.forThisSpace}</p>
           <Switch
             checked={!muted}
             onChange={handleMuteChange}
             disabled={mutedSpaceIds === null}
-            label="Notifications for this space"
+            label={s.switchLabel}
           />
         </div>
         {profileLink}
@@ -89,7 +97,7 @@ export function SpaceNotificationToggle({ uid, spaceId }: { uid: string; spaceId
           onClick={() => void handleEnableDevice()}
           disabled={busy}
         >
-          {busy ? 'Enabling…' : '🔔 Enable notifications on this device'}
+          {busy ? t.social.push.enabling : s.enableDevice}
         </Button>
         {profileLink}
       </div>
@@ -98,11 +106,9 @@ export function SpaceNotificationToggle({ uid, spaceId }: { uid: string; spaceId
 
   return (
     <p className="text-xs text-muted-foreground">
-      {state === 'ios-needs-install' &&
-        '🔔 To get notifications on iPhone, add GlobeExpenses to your Home Screen first (Share → "Add to Home Screen").'}
-      {state === 'blocked' &&
-        "🔔 Notifications are blocked on this device. Re-enable them in your phone's settings → GlobeExpenses."}
-      {state === 'unsupported' && "🔔 This browser doesn't support push notifications."}
+      {state === 'ios-needs-install' && s.iosInstall}
+      {state === 'blocked' && s.blocked}
+      {state === 'unsupported' && s.unsupported}
     </p>
   )
 }

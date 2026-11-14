@@ -1,0 +1,36 @@
+// common.ts — words reused across many screens (buttons, generic states).
+// English is the SOURCE OF TRUTH: the French file is type-checked against this
+// one, so a key added here must be added there too or the build fails.
+
+export const common = {
+  cancel: 'Cancel',
+  save: 'Save',
+  saving: 'Saving…',
+  saved: 'Saved',
+  delete: 'Delete',
+  edit: 'Edit',
+  close: 'Close',
+  confirm: 'Confirm',
+  back: 'Back',
+  next: 'Next',
+  done: 'Done',
+  add: 'Add',
+  remove: 'Remove',
+  rename: 'Rename',
+  create: 'Create',
+  continue: 'Continue',
+  retry: 'Retry',
+  copy: 'Copy',
+  copied: 'Copied!',
+  share: 'Share',
+  search: 'Search',
+  loading: 'Loading…',
+  yes: 'Yes',
+  no: 'No',
+  ok: 'OK',
+  none: 'None',
+  all: 'All',
+  optional: 'Optional',
+  unknownError: 'Something went wrong. Please try again.',
+  notFound: '404 — Not found',
+}

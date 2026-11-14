@@ -23,6 +23,7 @@ import {
   DrawerTitle,
 } from '@/components/ui/drawer'
 import type { AdjustmentMode } from '@/transactions/types'
+import { useT, useLocale } from '@/i18n'
 
 // ---------------------------------------------------------------------------
 // Props
@@ -53,8 +54,9 @@ function getTodayDDMMYYYY(): string {
   return `${dd}-${mm}-${yyyy}`
 }
 
-function formatAmount(n: number): string {
-  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+/** `locale` is the app's UI locale (from useLocale()), not the browser's. */
+function formatAmount(n: number, locale: string): string {
+  return n.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 // ---------------------------------------------------------------------------
@@ -72,6 +74,11 @@ export function ReconciliationDialog({
   onSuccess,
 }: ReconciliationDialogProps) {
   const { currentUser, userProfile } = useAuthStore()
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  const tr = t.transactions.reconcile
+  // Intl locale tag for number formatting (e.g. 'fr-BE' → "1 234,50")
+  const locale = useLocale()
 
   const [actualStr, setActualStr] = useState('')
   const [saving, setSaving] = useState(false)
@@ -114,8 +121,10 @@ export function ReconciliationDialog({
     const absDiff = Math.abs(diff)
     const totalAmountMain = Math.round(absDiff * exchangeRate * 100) / 100
 
-    const directionLabel = diff > 0 ? 'surplus' : 'shortfall'
-    const txName = `Reconciliation ${directionLabel} — ${balance.paymentMethodLabel}`
+    // Transaction name is stored in Firestore in the language in use right now.
+    const txName = diff > 0
+      ? tr.surplusName({ method: balance.paymentMethodLabel })
+      : tr.shortfallName({ method: balance.paymentMethodLabel })
 
     const txId = createTransaction(spaceId, {
       date: getTodayDDMMYYYY(),
@@ -144,21 +153,21 @@ export function ReconciliationDialog({
     <Drawer open={open} onOpenChange={onOpenChange} direction="bottom">
       <DrawerContent>
         <DrawerHeader>
-          <DrawerTitle>Reconcile — {balance.paymentMethodLabel} ({balance.currency})</DrawerTitle>
+          <DrawerTitle>{tr.title({ method: balance.paymentMethodLabel, currency: balance.currency })}</DrawerTitle>
         </DrawerHeader>
 
         <div className="flex flex-col gap-4 px-4 pb-6">
           {/* Computed balance */}
           <div className="rounded-lg border bg-muted/30 px-3 py-2">
-            <p className="text-sm text-muted-foreground">Computed remaining</p>
+            <p className="text-sm text-muted-foreground">{tr.computedRemaining}</p>
             <p className="text-lg font-semibold">
-              {formatAmount(balance.remaining)} {balance.currency}
+              {formatAmount(balance.remaining, locale)} {balance.currency}
             </p>
           </div>
 
           {/* Actual remaining input */}
           <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium">How much do you actually have?</label>
+            <label className="text-sm font-medium">{tr.actualQuestion}</label>
             <Input
               type="number"
               inputMode="decimal"
@@ -174,21 +183,21 @@ export function ReconciliationDialog({
           {/* Difference display */}
           {hasValidInput && (
             <div className="rounded-lg border px-3 py-2">
-              <p className="text-sm text-muted-foreground">Difference</p>
+              <p className="text-sm text-muted-foreground">{tr.difference}</p>
               {hasDiff ? (
                 <p className={`text-lg font-semibold ${
                   diff > 0
                     ? 'text-green-600 dark:text-green-400'
                     : 'text-red-600 dark:text-red-400'
                 }`}>
-                  {diff > 0 ? '+' : ''}{formatAmount(diff)} {balance.currency}
+                  {diff > 0 ? '+' : ''}{formatAmount(diff, locale)} {balance.currency}
                   <span className="ml-2 text-sm font-normal text-muted-foreground">
-                    {diff > 0 ? '(you have more than expected)' : '(you have less than expected)'}
+                    {diff > 0 ? tr.more : tr.less}
                   </span>
                 </p>
               ) : (
                 <p className="text-lg font-semibold text-green-600 dark:text-green-400">
-                  Balanced — no adjustment needed
+                  {tr.balanced}
                 </p>
               )}
             </div>
@@ -197,7 +206,7 @@ export function ReconciliationDialog({
           {/* Action buttons — only shown when there's a difference */}
           {hasValidInput && hasDiff && (
             <div className="flex flex-col gap-2">
-              <p className="text-sm font-medium">How should the difference be recorded?</p>
+              <p className="text-sm font-medium">{tr.howToRecord}</p>
 
               <Button
                 variant="outline"
@@ -206,9 +215,9 @@ export function ReconciliationDialog({
                 disabled={saving}
               >
                 <div className="flex flex-col">
-                  <span className="font-medium">Create expense</span>
+                  <span className="font-medium">{tr.createExpense}</span>
                   <span className="text-xs text-muted-foreground">
-                    Counts toward spending stats (category breakdown, totals)
+                    {tr.createExpenseHint}
                   </span>
                 </div>
               </Button>
@@ -220,9 +229,9 @@ export function ReconciliationDialog({
                 disabled={saving}
               >
                 <div className="flex flex-col">
-                  <span className="font-medium">Adjust balance only</span>
+                  <span className="font-medium">{tr.balanceOnly}</span>
                   <span className="text-xs text-muted-foreground">
-                    Corrects the wallet balance without affecting spending analytics
+                    {tr.balanceOnlyHint}
                   </span>
                 </div>
               </Button>
@@ -234,7 +243,7 @@ export function ReconciliationDialog({
             variant="ghost"
             onClick={() => { setActualStr(''); onOpenChange(false) }}
           >
-            Cancel
+            {t.common.cancel}
           </Button>
         </div>
       </DrawerContent>

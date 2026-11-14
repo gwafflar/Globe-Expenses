@@ -17,12 +17,14 @@ import {
 } from '@/components/ui/drawer'
 import {
   RANGE_PRESETS,
+  rangePresetLabel,
   resolveRange,
   type DateRange,
   type RangePresetId,
 } from '@/shared/utils/dateRange'
 import { ALL_MEMBERS, type ScopeMode } from '@/spaces/utils/dashboardScope'
 import type { SpaceMember } from '@/spaces/types'
+import { useLocale, useT } from '@/i18n'
 
 interface DashboardControlsProps {
   range: DateRange
@@ -76,6 +78,11 @@ export function DashboardControls({
   currentMemberId,
   isSolo,
 }: DashboardControlsProps) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  // Intl locale tag ('en-US', 'fr-FR'…) for the short dates on the Custom pill.
+  const locale = useLocale()
+
   // Raw "YYYY-MM-DD" strings from the two native date inputs, held separately
   // from `range` so the user can edit both ends before pressing Apply.
   const [customFrom, setCustomFrom] = useState('')
@@ -91,9 +98,9 @@ export function DashboardControls({
 
   // Button label: "All" / "You" / the member's name.
   const modeLabel = selectedMember === null
-    ? '👤 All'
+    ? t.dashboard.controls.allPill
     : isYou
-      ? '👤 You'
+      ? t.dashboard.controls.youPill
       : selectedMember.displayName
 
   /** The other members, in the space's own member order. The current user is
@@ -122,8 +129,8 @@ export function DashboardControls({
   // Label for the Custom pill: shows the chosen window once one is active.
   const customLabel =
     range.preset === 'custom' && range.from && range.to
-      ? `${shortDate(range.from)}–${shortDate(range.to)}`
-      : 'Custom'
+      ? `${shortDate(range.from, locale)}–${shortDate(range.to, locale)}`
+      : t.dashboard.range.custom
 
   return (
     <div className="rounded-xl border bg-card px-4 py-3 shadow-sm">
@@ -133,7 +140,7 @@ export function DashboardControls({
           {RANGE_PRESETS.map((preset) => (
             <Pill
               key={preset.id}
-              label={preset.label}
+              label={rangePresetLabel(preset.id, t.dashboard)}
               active={range.preset === preset.id}
               onClick={() => selectPreset(preset.id)}
             />
@@ -149,7 +156,7 @@ export function DashboardControls({
         {!isSolo && (
           <button
             type="button"
-            aria-label="Whose spending"
+            aria-label={t.dashboard.controls.whoseSpending}
             onClick={() => setMemberSheetOpen(true)}
             className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
               selectedMember !== null
@@ -166,7 +173,7 @@ export function DashboardControls({
       {customOpen && (
         <div className="mt-3 flex flex-wrap items-end gap-3 border-t pt-3">
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-            From
+            {t.dashboard.controls.from}
             <input
               type="date"
               value={customFrom}
@@ -175,7 +182,7 @@ export function DashboardControls({
             />
           </label>
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-            To
+            {t.dashboard.controls.to}
             <input
               type="date"
               value={customTo}
@@ -189,7 +196,7 @@ export function DashboardControls({
             onClick={applyCustom}
             className="rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground disabled:opacity-40"
           >
-            Apply
+            {t.dashboard.controls.apply}
           </button>
         </div>
       )}
@@ -201,12 +208,12 @@ export function DashboardControls({
         <Drawer open={memberSheetOpen} onOpenChange={setMemberSheetOpen} direction="bottom">
           <DrawerContent>
             <DrawerHeader>
-              <DrawerTitle>Show spending for</DrawerTitle>
+              <DrawerTitle>{t.dashboard.controls.showSpendingFor}</DrawerTitle>
             </DrawerHeader>
 
             <div className="flex max-h-[60vh] flex-col overflow-y-auto px-4 pb-6">
               <MemberRow
-                label="All members"
+                label={t.dashboard.controls.allMembers}
                 emoji="👤"
                 selected={mode === ALL_MEMBERS}
                 onSelect={() => select(ALL_MEMBERS)}
@@ -216,7 +223,7 @@ export function DashboardControls({
                   the string 'you'. Absent when the user holds no member slot. */}
               {currentMemberId !== '' && (
                 <MemberRow
-                  label="You"
+                  label={t.dashboard.controls.you}
                   emoji="🙋"
                   selected={mode === currentMemberId}
                   onSelect={() => select(currentMemberId)}
@@ -228,7 +235,7 @@ export function DashboardControls({
                   key={member.travelMemberId}
                   label={member.displayName}
                   emoji={member.userId === null ? '👻' : '🧑'}
-                  hint={member.userId === null ? 'unclaimed' : undefined}
+                  hint={member.userId === null ? t.dashboard.controls.unclaimed : undefined}
                   selected={mode === member.travelMemberId}
                   onSelect={() => select(member.travelMemberId)}
                 />
@@ -282,6 +289,7 @@ function parseIsoDate(iso: string): Date {
   return new Date(y, m - 1, d)
 }
 
-function shortDate(d: Date): string {
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+/** "Mar 12" / "12 mars" — `locale` is the app's (useLocale()), not the browser's. */
+function shortDate(d: Date, locale: string): string {
+  return d.toLocaleDateString(locale, { month: 'short', day: 'numeric' })
 }

@@ -36,6 +36,7 @@ import {
   visibleDashboardCards,
 } from '@/spaces/utils/dashboardCards'
 import { SHEET_META, buildMetaSheet, hideSheet } from '@/shared/utils/sheetMeta'
+import { withLanguage } from '@/i18n'
 
 // ---------------------------------------------------------------------------
 // Sheet name constants (re-exported for sheetImport.ts)
@@ -1022,6 +1023,18 @@ export function buildSpaceWorkbook(
   space: Space,
   transactions: Transaction[],
   options: ExportOptions = {},
+): XLSXTypes.WorkBook {
+  // The workbook CONTENT is always English (Spec decision #102): the importer
+  // matches on it. Helpers shared with the UI (dimension labels, card titles,
+  // "Undefined"/"Yes"/"No"…) read the UI language through getT(); withLanguage
+  // makes every such call answer in English for the duration of this build.
+  return withLanguage('en', () => buildWorkbookContent(space, transactions, options))
+}
+
+function buildWorkbookContent(
+  space: Space,
+  transactions: Transaction[],
+  options: ExportOptions,
 ): XLSXTypes.WorkBook {
   const N            = Math.max(1, space.members.length)
   const mainCurrency = getSpaceMainCurrency(space)

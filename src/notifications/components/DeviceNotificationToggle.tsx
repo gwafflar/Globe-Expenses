@@ -13,8 +13,12 @@ import { Switch } from '@/shared/components/Switch'
 import { Button } from '@/components/ui/button'
 import { usePushState } from '@/notifications/hooks/usePushState'
 import { disablePush, enablePush } from '@/notifications/services/pushService'
+import { useT } from '@/i18n'
 
 export function DeviceNotificationToggle({ uid }: { uid: string }) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  const d = t.social.push.device // shorthand
   const { state } = usePushState(uid)
   // `busy` disables the control while the token is being created / removed.
   const [busy, setBusy] = useState(false)
@@ -29,7 +33,7 @@ export function DeviceNotificationToggle({ uid }: { uid: string }) {
       await (on ? enablePush(uid) : disablePush(uid))
     } catch (err) {
       console.error('[DeviceNotificationToggle] failed:', err)
-      setError("Couldn't update notifications. Check your connection and try again.")
+      setError(d.updateFailed)
     } finally {
       setBusy(false)
     }
@@ -42,27 +46,25 @@ export function DeviceNotificationToggle({ uid }: { uid: string }) {
     <div className="flex flex-col gap-1">
       {state === 'ios-needs-install' && (
         <div>
-          <p className="text-sm font-medium">🔔 Notifications</p>
+          <p className="text-sm font-medium">{d.title}</p>
           <p className="text-xs text-muted-foreground">
-            To get notifications on iPhone, add GlobeExpenses to your Home Screen: tap{' '}
-            <strong>Share</strong> <span aria-hidden>&#11023;</span>, then{' '}
-            <strong>"Add to Home Screen"</strong>.
+            {d.iosInstall({ icon: <span aria-hidden>&#11023;</span> })}
           </p>
         </div>
       )}
 
       {state === 'unsupported' && (
         <div>
-          <p className="text-sm font-medium">🔔 Notifications</p>
-          <p className="text-xs text-muted-foreground">This browser doesn't support push notifications.</p>
+          <p className="text-sm font-medium">{d.title}</p>
+          <p className="text-xs text-muted-foreground">{d.unsupported}</p>
         </div>
       )}
 
       {state === 'blocked' && (
         <div>
-          <p className="text-sm font-medium">🔔 Notifications are blocked on this device.</p>
+          <p className="text-sm font-medium">{d.blockedTitle}</p>
           <p className="text-xs text-muted-foreground">
-            Re-enable them in your phone's settings → GlobeExpenses (or in the browser's site settings).
+            {d.blockedHint}
           </p>
         </div>
       )}
@@ -70,13 +72,13 @@ export function DeviceNotificationToggle({ uid }: { uid: string }) {
       {state === 'prompt' && (
         <div className="flex items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-medium">🔔 Notifications on this device</p>
+            <p className="text-sm font-medium">{d.onThisDevice}</p>
             <p className="text-xs text-muted-foreground">
-              Get notified when someone adds or changes a transaction involving you.
+              {d.promptHint}
             </p>
           </div>
           <Button type="button" onClick={() => void handleChange(true)} disabled={busy}>
-            {busy ? 'Enabling…' : 'Enable'}
+            {busy ? t.social.push.enabling : t.social.push.enable}
           </Button>
         </div>
       )}
@@ -84,18 +86,16 @@ export function DeviceNotificationToggle({ uid }: { uid: string }) {
       {(state === 'on' || state === 'off') && (
         <div className="flex items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-medium">🔔 Notifications on this device</p>
+            <p className="text-sm font-medium">{d.onThisDevice}</p>
             <p className="text-xs text-muted-foreground">
-              {state === 'on'
-                ? 'On. Each space can be muted from its Parameters tab.'
-                : 'Off. No notification reaches this device.'}
+              {state === 'on' ? d.onHint : d.offHint}
             </p>
           </div>
           <Switch
             checked={state === 'on'}
             onChange={(on) => void handleChange(on)}
             disabled={busy}
-            label="Notifications on this device"
+            label={d.switchLabel}
           />
         </div>
       )}

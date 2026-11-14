@@ -12,6 +12,7 @@ import { submitFeedback } from '@/feedback/services/feedbackService'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Send, CheckCircle2, Loader2, ChevronDown } from 'lucide-react'
+import { useT } from '@/i18n'
 
 interface FeedbackFormProps {
   source: string
@@ -20,6 +21,9 @@ interface FeedbackFormProps {
 }
 
 export function FeedbackForm({ source, onSuccess }: FeedbackFormProps) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  const f = t.social.feedback // shorthand
   const { currentUser, userProfile } = useAuthStore()
 
   const [text, setText] = useState('')
@@ -55,7 +59,7 @@ export function FeedbackForm({ source, onSuccess }: FeedbackFormProps) {
       }, 3000)
     } catch (err) {
       setStatus('error')
-      setErrorMsg(err instanceof Error ? err.message : 'Failed to send feedback')
+      setErrorMsg(err instanceof Error ? err.message : f.sendFailed)
     }
   }
 
@@ -64,10 +68,10 @@ export function FeedbackForm({ source, onSuccess }: FeedbackFormProps) {
     return (
       <div className="flex flex-col items-center gap-2 py-6 text-center animate-in fade-in zoom-in-95 duration-300">
         <CheckCircle2 className="h-10 w-10 text-green-500" />
+        {/* One language only (this used to show the English and French text together) */}
         <p className="font-medium text-green-700 dark:text-green-400">
-          Thank you for your feedback!
+          {f.thanks}
         </p>
-        <p className="text-xs text-muted-foreground">Merci pour votre retour !</p>
       </div>
     )
   }
@@ -75,17 +79,14 @@ export function FeedbackForm({ source, onSuccess }: FeedbackFormProps) {
   // ── Form ─────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col gap-3">
-      {/* Label */}
+      {/* Label — current language only */}
       <p className="text-sm text-muted-foreground">
-        Your feedback is important! Instantaneously share a bug, a suggestion, or anything you'd like to improve. Add you contact info if you want to be contacted.
-      </p>
-      <p className="text-xs text-muted-foreground italic">
-        Votre avis compte ! Signalez instantanément un bug, une suggestion, ou toute piste d'am&eacute;lioration. Ajoute tes informations de contact si tu souhaites &ecirc;tre recontact&eacute;.
+        {f.intro}
       </p>
 
       {/* Text area */}
       <Textarea
-        placeholder="Type your feedback here..."
+        placeholder={f.placeholder}
         value={text}
         onChange={(e) => setText(e.target.value)}
         rows={4}
@@ -150,12 +151,12 @@ export function FeedbackForm({ source, onSuccess }: FeedbackFormProps) {
           {status === 'sending' ? (
             <>
               <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-              Sending...
+              {f.sending}
             </>
           ) : (
             <>
               <Send className="mr-1.5 h-4 w-4" />
-              Send
+              {f.send}
             </>
           )}
         </Button>
@@ -168,7 +169,7 @@ export function FeedbackForm({ source, onSuccess }: FeedbackFormProps) {
           onClick={() => setContactOpen(!contactOpen)}
           className="flex w-full items-center justify-between px-3 py-2 text-sm font-medium"
         >
-          Contact developer
+          {f.contactDeveloper}
           <ChevronDown className={`h-4 w-4 transition-transform ${contactOpen ? 'rotate-180' : ''}`} />
         </button>
 
@@ -201,9 +202,13 @@ export function FeedbackForm({ source, onSuccess }: FeedbackFormProps) {
               </svg>
               GitHub: globe-expenses 
             </a>
-            <p>Made with 💜 by{' '}
-              <a href="https://github.com/gwafflar" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">@gwafflar</a>
-              {' '}in South-East Asia 🌏
+            {/* The author link is passed into the sentence (word order differs per language) */}
+            <p>
+              {f.madeBy({
+                author: (
+                  <a href="https://github.com/gwafflar" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">@gwafflar</a>
+                ),
+              })}
             </p>
           </div>
         )}

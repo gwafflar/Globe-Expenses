@@ -10,8 +10,12 @@ import { SpaceCreatePage } from '@/spaces/pages/SpaceCreatePage'
 import { SpaceDetailPage } from '@/spaces/pages/SpaceDetailPage'
 import { ProfilePage } from '@/auth/pages/ProfilePage'
 import { InvitePage } from '@/friends/pages/InvitePage'
+import { useT } from '@/i18n'
 
-function NotFoundPage() { return <div>404 — Not found</div> }
+function NotFoundPage() {
+  const t = useT() // translation hook — re-renders on language change
+  return <div>{t.common.notFound}</div>
+}
 
 // Legacy route redirect — remove once no old bookmarks remain (target: end of 2026).
 // The invite flow is unaffected: /invite/:inviteId resolves the space internally.

@@ -43,6 +43,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { SpaceMember } from '@/spaces/types'
 import type { Split } from '@/transactions/types'
+import { useT } from '@/i18n'
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -92,6 +93,10 @@ export function SplitEditor({
   onModeChange,
   label,
 }: SplitEditorProps) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  const ts = t.transactions.split
+
   // mode is controlled by the parent — no local useState needed.
   // This means the selected tab (Equal/Custom) persists across drawer open/close.
 
@@ -220,8 +225,8 @@ export function SplitEditor({
         {!isValid && (
           <span className="text-xs font-medium text-destructive">
             {remaining > 0
-              ? `${round(remaining, 2).toFixed(2)} unassigned`
-              : `${round(Math.abs(remaining), 2).toFixed(2)} over total`}
+              ? ts.unassigned({ amount: round(remaining, 2).toFixed(2) })
+              : ts.overTotal({ amount: round(Math.abs(remaining), 2).toFixed(2) })}
           </span>
         )}
       </div>
@@ -233,13 +238,15 @@ export function SplitEditor({
             key={m}
             type="button"
             onClick={m === 'equal' ? handleSwitchToEqual : handleSwitchToCustom}
-            className={`flex-1 rounded-md py-1.5 text-sm font-medium capitalize transition-colors ${
+            className={`flex-1 rounded-md py-1.5 text-sm font-medium transition-colors ${
               mode === m
                 ? 'bg-background text-foreground shadow-sm'
                 : 'text-muted-foreground hover:text-foreground'
             }`}
           >
-            {m}
+            {/* Translated label ("Equal" / "Custom"). It used to render the raw
+                id with a CSS `capitalize`, which only works for English. */}
+            {ts.modes[m]}
           </button>
         ))}
       </div>
@@ -247,7 +254,7 @@ export function SplitEditor({
       {/* Warning banner */}
       {totalChangedWarning && (
         <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-          Total changed. Please review and adjust amounts manually.
+          {ts.totalChanged}
         </div>
       )}
 
@@ -300,7 +307,7 @@ export function SplitEditor({
                         emitCustom(nextInputs, selectedIds)
                         setTotalChangedWarning(false)
                       }}
-                      aria-label={`Absorb ${round(remaining, 2).toFixed(2)} into ${displayName}`}
+                      aria-label={ts.absorb({ amount: round(remaining, 2).toFixed(2), name: displayName })}
                       className={`rounded-md px-1.5 py-1 text-xs font-semibold tabular-nums transition-colors ${
                         isValid
                           ? 'cursor-default text-muted-foreground/40'
@@ -318,7 +325,7 @@ export function SplitEditor({
                   <button
                     type="button"
                     onClick={() => handleRemoveMember(id)}
-                    aria-label={`Remove ${displayName}`}
+                    aria-label={ts.removeMember({ name: displayName })}
                     className="flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"
                   >
                     ✕
@@ -333,7 +340,7 @@ export function SplitEditor({
       {/* Add member — shown in BOTH modes */}
       {unselectedMembers.length > 0 && (
         <div className="flex flex-col gap-1">
-          <p className="text-xs font-medium text-muted-foreground">Add member</p>
+          <p className="text-xs font-medium text-muted-foreground">{ts.addMember}</p>
           {unselectedMembers.map((m) => (
             <button
               key={m.travelMemberId}
@@ -357,7 +364,7 @@ export function SplitEditor({
               : 'bg-destructive/10 text-destructive'
           }`}
         >
-          <span>Remaining</span>
+          <span>{ts.remaining}</span>
           <span className="tabular-nums">
             {remaining > 0 ? '+' : ''}
             {round(remaining, 2).toFixed(2)}

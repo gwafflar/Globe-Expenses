@@ -6,7 +6,10 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { TransactionWithStatus } from '@/transactions/hooks/useTransactions'
+import { useT } from '@/i18n'
 
+// Stored value (Firestore data) — stays English in every language; only the
+// option text shown for it is translated (t.parameters.pickers.other).
 export const OTHER_VALUE = 'Other'
 
 /** Distinct previous values for a free-text field, most recent first. */
@@ -35,6 +38,9 @@ interface LocationSelectProps {
 }
 
 export function LocationSelect({ label, value, onChange, previousValues, placeholder }: LocationSelectProps) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  const tp = t.parameters.pickers
   const [addingNew, setAddingNew] = useState(false)
   const [newInput, setNewInput] = useState('')
 
@@ -70,12 +76,12 @@ export function LocationSelect({ label, value, onChange, previousValues, placeho
           <Input
             autoFocus
             type="text"
-            placeholder={`Enter ${label.toLowerCase()}…`}
+            placeholder={tp.enterValue(label)}
             value={newInput}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewInput(e.target.value)}
             onKeyDown={handleNewInputKeyDown}
           />
-          <Button type="button" size="sm" onClick={handleNewInputConfirm}>OK</Button>
+          <Button type="button" size="sm" onClick={handleNewInputConfirm}>{t.common.ok}</Button>
           <Button type="button" size="sm" variant="outline" onClick={() => setAddingNew(false)}>✕</Button>
         </div>
       ) : (
@@ -89,12 +95,12 @@ export function LocationSelect({ label, value, onChange, previousValues, placeho
           {previousValues.map((v) => (
             <option key={v} value={v}>{v}</option>
           ))}
-          <option value={OTHER_VALUE}>Other</option>
-          <option value="__add_new__">+ Add new…</option>
+          <option value={OTHER_VALUE}>{tp.other}</option>
+          <option value="__add_new__">{tp.addNew}</option>
         </select>
       )}
       {value === OTHER_VALUE && !addingNew && (
-        <p className="text-xs text-muted-foreground">Saved as "Other". Use "Add new…" to enter a specific name.</p>
+        <p className="text-xs text-muted-foreground">{tp.savedAsOther}</p>
       )}
     </div>
   )

@@ -34,7 +34,8 @@ import { ValueDecisionStep, type SelectColumnInfo } from '@/shared/components/im
 import type { CustomFieldType } from '@/spaces/types'
 import type { ParsedSheetRow } from '@/shared/utils/sheetImport'
 import { CollapsibleCard } from '@/spaces/components/CollapsibleCard'
-import { getFlagForCountry } from '@/shared/data/pickerData'
+import { displayCountryName, getFlagForCountry } from '@/shared/data/pickerData'
+import { getT, useLanguage, useLocale, useT } from '@/i18n'
 import {
   Dialog,
   DialogContent,
@@ -77,6 +78,9 @@ function UploadStep({
   /** The file has no GlobeExpenses structure at all — column mapping instead. */
   onForeign: (sheet: ForeignSheet) => void
 }) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  const tu = t.importExport.upload
   const [isDragging, setIsDragging] = useState(false)
   const [isParsing, setIsParsing]   = useState(false)
   const [error, setError]           = useState<string | null>(null)
@@ -84,7 +88,7 @@ function UploadStep({
 
   async function handleFile(file: File) {
     if (!file.name.endsWith('.xlsx')) {
-      setError('Please upload a .xlsx file.')
+      setError(tu.wrongExtension)
       return
     }
     setError(null)
@@ -103,7 +107,7 @@ function UploadStep({
         const wb = XLSX.read(await file.arrayBuffer(), { cellDates: false })
         onForeign(readForeignSheet(wb))
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to read the file.')
+        setError(err instanceof Error ? err.message : tu.readFailed)
       }
     } finally {
       setIsParsing(false)
@@ -128,8 +132,7 @@ function UploadStep({
     <div className="flex flex-col gap-4">
       {/* Format notice */}
       <div className="rounded-md bg-blue-50 px-3 py-2 text-xs text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
-        A GlobeExpenses export imports in one tap. Any other spreadsheet works too — you'll
-        be asked to match its columns to fields.
+        {tu.formatNotice}
       </div>
 
       {/* Drop zone */}
@@ -144,8 +147,8 @@ function UploadStep({
       >
         <span className="text-3xl">📂</span>
         <div className="text-center">
-          <p className="text-sm font-medium">Click to browse or drag and drop</p>
-          <p className="text-xs text-muted-foreground">GlobeExpenses .xlsx file</p>
+          <p className="text-sm font-medium">{tu.dropzone}</p>
+          <p className="text-xs text-muted-foreground">{tu.dropzoneHint}</p>
         </div>
         <input
           ref={inputRef}
@@ -159,7 +162,7 @@ function UploadStep({
       {isParsing && (
         <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
           <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-          Parsing file…
+          {tu.parsing}
         </div>
       )}
 
@@ -187,6 +190,9 @@ function MappingStep({
   slotToTravelMemberId: Record<number, string | undefined>
   onChange: (updated: Record<number, string | undefined>) => void
 }) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  const tm = t.importExport.mapping
   const { slots, nMembersInSheet } = parseResult
   const members = space.members
 
@@ -204,31 +210,27 @@ function MappingStep({
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-muted-foreground">
-        Found <strong>{parseResult.rows.length}</strong> transactions across{' '}
-        <strong>{slots.length}</strong> active member slot{slots.length !== 1 ? 's' : ''}.
-        Match each sheet member to a space member below.
+        {tm.intro({ rows: parseResult.rows.length, slots: slots.length })}
       </p>
 
       {/* Member count mismatch warning */}
       {nMembersInSheet !== members.length && (
         <div className="rounded-md bg-yellow-50 px-3 py-2 text-sm text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300">
-          The sheet has {nMembersInSheet} member slot{nMembersInSheet !== 1 ? 's' : ''} but this
-          space has {members.length} member{members.length !== 1 ? 's' : ''}. Check your mapping
-          carefully.
+          {tm.countMismatch({ sheet: nMembersInSheet, space: members.length })}
         </div>
       )}
 
       {/* Duplicate mapping error */}
       {hasDuplicates && (
         <div className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          Two sheet members are mapped to the same person. Please fix before continuing.
+          {tm.duplicates}
         </div>
       )}
 
       {/* Skipped member warning */}
       {skippedCount > 0 && !hasDuplicates && (
         <div className="rounded-md bg-yellow-50 px-3 py-2 text-sm text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300">
-          Transactions involving skipped members will not be imported.
+          {tm.skippedWarning}
         </div>
       )}
 
@@ -238,9 +240,9 @@ function MappingStep({
           <div key={slot.slotIndex} className="flex items-center justify-between gap-3 px-4 py-3">
             {/* Left: slot info */}
             <div className="min-w-0">
-              <p className="text-sm font-medium">{slot.nameInSheet || `Slot ${slot.slotIndex + 1}`}</p>
+              <p className="text-sm font-medium">{slot.nameInSheet || tm.slotFallback(slot.slotIndex + 1)}</p>
               <p className="text-xs text-muted-foreground">
-                {slot.rowCount} transaction{slot.rowCount !== 1 ? 's' : ''}
+                {t.importExport.transactionCount(slot.rowCount)}
               </p>
             </div>
 
@@ -252,7 +254,7 @@ function MappingStep({
                 setMapping(slot.slotIndex, e.target.value === '__skip__' ? undefined : e.target.value)
               }
             >
-              <option value="__skip__">— Skip this member's transactions —</option>
+              <option value="__skip__">{tm.skipOption}</option>
               {members.map((m) => (
                 <option key={m.travelMemberId} value={m.travelMemberId}>
                   {m.displayName}
@@ -265,7 +267,7 @@ function MappingStep({
 
       {hasDuplicates && (
         <p className="text-xs text-destructive">
-          Fix duplicate mappings before proceeding.
+          {tm.fixDuplicates}
         </p>
       )}
     </div>
@@ -285,6 +287,9 @@ function ResultStep({
   isImporting: boolean
   progress: { committed: number; total: number }
 }) {
+  // translation hook — re-renders when the language changes (before any early return)
+  const t = useT()
+  const tr = t.importExport.result
   const [errorsExpanded, setErrorsExpanded] = useState(false)
 
   if (isImporting) {
@@ -303,7 +308,7 @@ function ResultStep({
           </div>
         </div>
         <p className="text-sm text-muted-foreground">
-          {progress.committed} / {progress.total} transactions committed
+          {tr.committed(progress)}
         </p>
       </div>
     )
@@ -314,19 +319,13 @@ function ResultStep({
   return (
     <div className="flex flex-col gap-3">
       <p className="text-base font-semibold text-green-600">
-        {importResult.imported > 0 && (
-          <>{importResult.imported} new transaction{importResult.imported !== 1 ? 's' : ''} imported</>
-        )}
-        {importResult.imported > 0 && importResult.updated > 0 && ', '}
-        {importResult.updated > 0 && (
-          <>{importResult.updated} transaction{importResult.updated !== 1 ? 's' : ''} updated</>
-        )}
-        {importResult.imported === 0 && importResult.updated === 0 && 'No transactions imported'}
+        {/* One message covers "N imported", "N updated", both, or neither. */}
+        {tr.summary({ imported: importResult.imported, updated: importResult.updated })}
       </p>
 
       {importResult.skipped > 0 && (
         <p className="text-sm text-muted-foreground">
-          {importResult.skipped} row{importResult.skipped !== 1 ? 's' : ''} skipped (empty)
+          {tr.skippedRows(importResult.skipped)}
         </p>
       )}
 
@@ -337,7 +336,7 @@ function ResultStep({
             className="flex w-full items-center justify-between text-sm font-medium text-yellow-800 dark:text-yellow-300"
             onClick={() => setErrorsExpanded((v) => !v)}
           >
-            <span>{importResult.errors.length} row{importResult.errors.length !== 1 ? 's' : ''} had errors</span>
+            <span>{tr.rowsWithErrors(importResult.errors.length)}</span>
             <span>{errorsExpanded ? '▲' : '▼'}</span>
           </button>
           {errorsExpanded && (
@@ -353,7 +352,7 @@ function ResultStep({
       )}
 
       <p className="text-xs text-muted-foreground">
-        The transaction list updates automatically.
+        {tr.autoUpdate}
       </p>
     </div>
   )
@@ -373,6 +372,11 @@ function LosslessConfirmStep({
   parseResult: ParseResult
   space: Space
 }) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  const tc = t.importExport.confirm
+  // App locale (e.g. 'fr-BE') for the export date, not the browser's.
+  const locale = useLocale()
   const meta = parseResult.meta!
   const fieldCount = meta.config.customFields.filter((f) => f.enabled).length
   const sameName = meta.space.name === space.name
@@ -380,35 +384,34 @@ function LosslessConfirmStep({
   return (
     <div className="flex flex-col gap-4">
       <div className="rounded-md bg-green-50 px-3 py-2 text-sm text-green-800 dark:bg-green-900/30 dark:text-green-300">
-        This is a GlobeExpenses export of this space. Everything maps
-        automatically — no matching needed.
+        {tc.sameSpace}
       </div>
 
       <dl className="flex flex-col divide-y rounded-lg border text-sm">
         <div className="flex items-center justify-between gap-3 px-3 py-2">
-          <dt className="text-muted-foreground">Space</dt>
+          <dt className="text-muted-foreground">{tc.space}</dt>
           <dd className="min-w-0 truncate font-medium">
             {meta.space.emoji ? `${meta.space.emoji} ` : ''}{meta.space.name}
           </dd>
         </div>
         <div className="flex items-center justify-between gap-3 px-3 py-2">
-          <dt className="text-muted-foreground">Transactions</dt>
+          <dt className="text-muted-foreground">{tc.transactions}</dt>
           <dd className="font-medium">{parseResult.rows.length}</dd>
         </div>
         <div className="flex items-center justify-between gap-3 px-3 py-2">
-          <dt className="text-muted-foreground">Members</dt>
+          <dt className="text-muted-foreground">{tc.members}</dt>
           <dd className="font-medium">{parseResult.slots.length}</dd>
         </div>
         {fieldCount > 0 && (
           <div className="flex items-center justify-between gap-3 px-3 py-2">
-            <dt className="text-muted-foreground">Custom fields</dt>
+            <dt className="text-muted-foreground">{tc.customFields}</dt>
             <dd className="font-medium">{fieldCount}</dd>
           </div>
         )}
         <div className="flex items-center justify-between gap-3 px-3 py-2">
-          <dt className="text-muted-foreground">Exported</dt>
+          <dt className="text-muted-foreground">{tc.exported}</dt>
           <dd className="font-medium">
-            {new Date(meta.exportedAt).toLocaleDateString()}
+            {new Date(meta.exportedAt).toLocaleDateString(locale)}
           </dd>
         </div>
       </dl>
@@ -417,14 +420,12 @@ function LosslessConfirmStep({
           is still lossless — but say so rather than letting it look wrong. */}
       {!sameName && (
         <p className="rounded-md bg-blue-50 px-3 py-2 text-xs text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
-          The space was called “{meta.space.name}” when this file was exported.
-          It is the same space, so the import is unaffected.
+          {tc.renamed({ name: meta.space.name })}
         </p>
       )}
 
       <p className="text-xs text-muted-foreground">
-        Rows that came from this space are updated in place rather than
-        duplicated.
+        {tc.inPlace}
       </p>
     </div>
   )
@@ -432,11 +433,11 @@ function LosslessConfirmStep({
 
 /** Shown when the file is one of ours but belongs to a different space. */
 function ForeignSpaceNotice({ parseResult }: { parseResult: ParseResult }) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
   return (
     <div className="rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
-      This file was exported from <strong>{parseResult.meta?.space.name}</strong>, a
-      different space. Its members and field values don’t have matching ids here,
-      so you’ll be asked to match them below.
+      {t.importExport.mapping.foreignSpace({ name: parseResult.meta?.space.name })}
     </div>
   )
 }
@@ -467,19 +468,28 @@ function uniqueValues(rows: ParsedSheetRow[], key: 'country' | 'city' | 'categor
 }
 
 interface PreviewSection {
+  /** Stable id — React key, and tells the country section apart. */
+  key: 'country' | 'city' | 'category' | 'paymentMethod'
   label: string
   values: string[]
   spaceList: LabeledItem[]
 }
 
 function PreviewStep({ rows, space }: { rows: ParsedSheetRow[]; space: Space }) {
-  // Build the four sections with their corresponding space lists
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  const tp = t.importExport.preview
+  // App locale, to show stored (English) country names in the UI language.
+  const locale = useLocale()
+
+  // Build the four sections with their corresponding space lists.
+  // `tp` is a dependency so the labels follow a language change.
   const sections: PreviewSection[] = useMemo(() => [
-    { label: 'Countries',       values: uniqueValues(rows, 'country'),       spaceList: space.countries      ?? [] },
-    { label: 'Cities',          values: uniqueValues(rows, 'city'),          spaceList: space.cities         ?? [] },
-    { label: 'Categories',      values: uniqueValues(rows, 'category'),      spaceList: space.categories     ?? [] },
-    { label: 'Payment methods', values: uniqueValues(rows, 'paymentMethod'), spaceList: space.paymentMethods ?? [] },
-  ], [rows, space])
+    { key: 'country',       label: tp.countries,      values: uniqueValues(rows, 'country'),       spaceList: space.countries      ?? [] },
+    { key: 'city',          label: tp.cities,         values: uniqueValues(rows, 'city'),          spaceList: space.cities         ?? [] },
+    { key: 'category',      label: tp.categories,     values: uniqueValues(rows, 'category'),      spaceList: space.categories     ?? [] },
+    { key: 'paymentMethod', label: tp.paymentMethods, values: uniqueValues(rows, 'paymentMethod'), spaceList: space.paymentMethods ?? [] },
+  ], [rows, space, tp])
 
   const totalUnmatched = sections.reduce(
     (sum, s) => sum + s.values.filter((v) => !matchesLabeledList(v, s.spaceList)).length,
@@ -490,30 +500,36 @@ function PreviewStep({ rows, space }: { rows: ParsedSheetRow[]; space: Space }) 
     <div className="flex flex-col gap-3">
       {/* Summary line */}
       <p className="text-sm text-muted-foreground">
-        {rows.length} transactions · {sections[0].values.length} countries · {sections[1].values.length} cities · {sections[2].values.length} categories · {sections[3].values.length} payment methods
+        {tp.summary({
+          rows: rows.length,
+          countries: sections[0].values.length,
+          cities: sections[1].values.length,
+          categories: sections[2].values.length,
+          paymentMethods: sections[3].values.length,
+        })}
       </p>
 
       {/* Match status banner */}
       {totalUnmatched === 0 ? (
         <div className="rounded-md bg-green-50 px-3 py-2 text-sm text-green-800 dark:bg-green-900/30 dark:text-green-300">
-          All values match the space configuration.
+          {tp.allMatch}
         </div>
       ) : (
         <div className="rounded-md bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
-          Some values don't match the space configuration. They will be imported as-is.
+          {tp.someUnmatched}
         </div>
       )}
 
       {/* Collapsible sections — each collapsed by default */}
       {sections.map((section) => (
         <CollapsibleCard
-          key={section.label}
+          key={section.key}
           title={section.label}
           summary={`${section.values.length}`}
           defaultOpen={false}
         >
           {section.values.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No values found.</p>
+            <p className="text-xs text-muted-foreground">{tp.noValues}</p>
           ) : (
             <div className="flex flex-wrap gap-1.5">
               {section.values.map((value) => {
@@ -527,7 +543,9 @@ function PreviewStep({ rows, space }: { rows: ParsedSheetRow[]; space: Space }) 
                         : 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300'
                     }`}
                   >
-                    {value}
+                    {/* Countries are stored in English; show them in the UI
+                        language. The stored value itself is unchanged. */}
+                    {section.key === 'country' ? displayCountryName(value, locale) : value}
                   </span>
                 )
               })}
@@ -592,6 +610,11 @@ export function ImportXlsxDialog({
   //   foreignSpace  upload → mapping → preview → result   (member slots)
   //   foreignFile   upload → columns → values  → result   (arbitrary grid)
   type Step = 'upload' | 'confirm' | 'mapping' | 'preview' | 'columns' | 'fields' | 'values' | 'result'
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  // The current language code, used as a useMemo dependency below so
+  // messages built by plain helpers (validateMapping) are rebuilt on a switch.
+  const language = useLanguage()
   const [step, setStep]                 = useState<Step>('upload')
   const [parseResult, setParseResult]   = useState<ParseResult | null>(null)
   const [importPath, setImportPath]     = useState<ImportPath | null>(null)
@@ -731,9 +754,11 @@ export function ImportXlsxDialog({
 
   // ── Foreign-file derived state ───────────────────────────────────────────
 
+  // `language` is not read inside, but validateMapping() returns translated
+  // messages (via getT()), so a language change must recompute them.
   const mappingErrors = useMemo(
     () => (foreignSheet ? validateMapping(columnMapping) : []),
-    [foreignSheet, columnMapping],
+    [foreignSheet, columnMapping, language], // eslint-disable-line react-hooks/exhaustive-deps -- see comment above
   )
 
   /** Columns the user chose to turn into new fields. */
@@ -777,7 +802,9 @@ export function ImportXlsxDialog({
         fieldLabel = def.label
       } else if (target.kind === 'builtIn' && target.field !== 'notes') {
         options = builtInOptions[target.field as keyof typeof builtInOptions] ?? []
-        fieldLabel = target.field
+        // Heading shown in the values step: the translated field name rather
+        // than the internal key ('paymentMethod').
+        fieldLabel = t.importExport.builtInFields[target.field]
       }
 
       if (options === null) continue
@@ -786,7 +813,7 @@ export function ImportXlsxDialog({
       out.push({ ...summary, fieldLabel, existingOptions: options })
     }
     return out
-  }, [foreignSheet, columnMapping, config, builtInOptions])
+  }, [foreignSheet, columnMapping, config, builtInOptions, t])
 
   /** Foreign import: create any opted-in options, then write the rows. */
   async function handleForeignImport() {
@@ -857,7 +884,8 @@ export function ImportXlsxDialog({
       console.error('[ImportXlsxDialog] foreign import failed:', err)
       setImportResult({
         imported: 0, updated: 0, skipped: 0,
-        errors: [err instanceof Error ? err.message : 'The import failed.'],
+        // getT(), not `t`: this runs after an await, so read the language now.
+        errors: [err instanceof Error ? err.message : getT().importExport.dialog.importFailed],
       })
     } finally {
       setIsImporting(false)
@@ -870,22 +898,14 @@ export function ImportXlsxDialog({
 
   // The lossless path is two steps, not four — labelling it "Step 2 of 4" would
   // promise work that never comes.
-  const stepLabel: Record<Step, string> = {
-    upload:  'Step 1 — Upload',
-    confirm: 'Step 2 of 2 — Confirm',
-    mapping: 'Step 2 of 4 — Member mapping',
-    preview: 'Step 3 of 4 — Data preview',
-    columns: 'Step 2 — Match columns',
-    fields:  'Step 3 — New fields',
-    values:  'Last step — New values',
-    result:  'Done',
-  }
+  // (The step labels live in t.importExport.dialog.steps, keyed by Step.)
+  const stepLabel: Record<Step, string> = t.importExport.dialog.steps
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Import from xlsx</DialogTitle>
+          <DialogTitle>{t.importExport.dialog.title}</DialogTitle>
           <p className="text-xs text-muted-foreground">{stepLabel[step]}</p>
         </DialogHeader>
 
@@ -936,7 +956,7 @@ export function ImportXlsxDialog({
             )}
             {importPath?.kind === 'foreignFile' && importPath.reason && (
               <div className="rounded-md bg-yellow-50 px-3 py-2 text-sm text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300">
-                {importPath.reason} Values will be matched by name instead.
+                {t.importExport.dialog.metaFallback(importPath.reason)}
               </div>
             )}
             <MappingStep
@@ -960,36 +980,36 @@ export function ImportXlsxDialog({
         <DialogFooter>
           {step === 'upload' && (
             <Button variant="outline" onClick={() => handleOpenChange(false)}>
-              Cancel
+              {t.common.cancel}
             </Button>
           )}
           {step === 'confirm' && (
             <>
               <Button variant="outline" onClick={() => setStep('upload')}>
-                Back
+                {t.common.back}
               </Button>
-              <Button onClick={handleImport}>Import</Button>
+              <Button onClick={handleImport}>{t.importExport.import}</Button>
             </>
           )}
           {step === 'columns' && (
             <>
               <Button variant="outline" onClick={() => setStep('upload')}>
-                Back
+                {t.common.back}
               </Button>
               <Button
                 onClick={() => setStep(fieldDrafts.length > 0 ? 'fields' : 'values')}
                 disabled={mappingErrors.length > 0}
               >
-                Next
+                {t.common.next}
               </Button>
             </>
           )}
           {step === 'fields' && (
             <>
               <Button variant="outline" onClick={() => setStep('columns')}>
-                Back
+                {t.common.back}
               </Button>
-              <Button onClick={() => setStep('values')}>Next</Button>
+              <Button onClick={() => setStep('values')}>{t.common.next}</Button>
             </>
           )}
           {step === 'values' && (
@@ -998,33 +1018,33 @@ export function ImportXlsxDialog({
                 variant="outline"
                 onClick={() => setStep(fieldDrafts.length > 0 ? 'fields' : 'columns')}
               >
-                Back
+                {t.common.back}
               </Button>
-              <Button onClick={handleForeignImport}>Import</Button>
+              <Button onClick={handleForeignImport}>{t.importExport.import}</Button>
             </>
           )}
           {step === 'mapping' && (
             <>
               <Button variant="outline" onClick={() => setStep('upload')}>
-                Back
+                {t.common.back}
               </Button>
               <Button onClick={handlePreview} disabled={hasDuplicates}>
-                Next
+                {t.common.next}
               </Button>
             </>
           )}
           {step === 'preview' && (
             <>
               <Button variant="outline" onClick={() => setStep('mapping')}>
-                Back
+                {t.common.back}
               </Button>
               <Button onClick={handleImport}>
-                Import
+                {t.importExport.import}
               </Button>
             </>
           )}
           {step === 'result' && !isImporting && (
-            <Button onClick={() => handleOpenChange(false)}>Done</Button>
+            <Button onClick={() => handleOpenChange(false)}>{t.common.done}</Button>
           )}
         </DialogFooter>
       </DialogContent>

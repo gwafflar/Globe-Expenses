@@ -18,16 +18,19 @@ import { TransactionsTab } from '@/spaces/components/tabs/TransactionsTab'
 import { BalanceTab } from '@/spaces/components/tabs/BalanceTab'
 import { DashboardTab } from '@/spaces/components/tabs/DashboardTab'
 import { ParametersTab } from '@/spaces/components/tabs/ParametersTab'
+import { useT } from '@/i18n'
 
 // ---------------------------------------------------------------------------
 // Tab definitions
 // ---------------------------------------------------------------------------
 
+// Only the ids live at module level: the labels are looked up at render time
+// via t.spaces.tabs[id], so they follow the current language.
 const TABS = [
-  { id: 'transactions', label: 'Transactions' },
-  { id: 'balance',      label: 'Balance' },
-  { id: 'dashboard',    label: 'Dashboard' },
-  { id: 'parameters',   label: 'Parameters' },
+  { id: 'transactions' },
+  { id: 'balance' },
+  { id: 'dashboard' },
+  { id: 'parameters' },
 ] as const
 
 type TabId = typeof TABS[number]['id']
@@ -99,6 +102,8 @@ export function SpaceTabs({
   onDrillDown,
   focusTxId,
 }: SpaceTabsProps) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
   const [activeTab, setActiveTab] = useState<TabId>('transactions')
 
   // External tab navigation request — switch to the requested tab and notify caller
@@ -110,7 +115,7 @@ export function SpaceTabs({
       onRequestTabHandled?.()
     }
   }, [requestTab]) // eslint-disable-line react-hooks/exhaustive-deps
-  const activeIndex = TABS.findIndex((t) => t.id === activeTab)
+  const activeIndex = TABS.findIndex((tab) => tab.id === activeTab)
 
   // Touch tracking refs — no state needed, avoids re-renders
   const touchStartX = useRef<number | null>(null)
@@ -157,7 +162,7 @@ export function SpaceTabs({
                   : 'text-muted-foreground hover:text-foreground'
               }`}
             >
-              {tab.label}
+              {t.spaces.tabs[tab.id]}
             </button>
           )
         })}

@@ -11,8 +11,9 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { ALL_CURRENCIES } from '@/shared/data/pickerData'
+import { ALL_CURRENCIES, localizedCurrencyName } from '@/shared/data/pickerData'
 import { getExchangeRate } from '@/shared/utils/exchangeRates'
+import { useLocale, useT } from '@/i18n'
 
 // Trump banner gif — place the file at public/images/trump-usd.gif
 const TRUMP_GIF = '/images/trump-usd.gif'
@@ -37,6 +38,10 @@ export function SettlementCurrencyDrawer({
   onApply,
   defaultRates,
 }: SettlementCurrencyDrawerProps) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  // Intl locale tag (e.g. 'fr-BE') used to show currency names in the UI language
+  const locale = useLocale()
   const [selectedCurrency, setSelectedCurrency] = useState(currentCurrency)
   const [rateInput, setRateInput] = useState(currentRate.toString())
   const [search, setSearch] = useState('')
@@ -84,36 +89,44 @@ export function SettlementCurrencyDrawer({
     onOpenChange(false)
   }
 
-  // Filter currencies by search term
+  // Currency list with names in the UI language: [code, localised name, English name]
+  const currencies = ALL_CURRENCIES.map(
+    ([code, , englishName]) => [code, localizedCurrencyName(code, locale), englishName] as const,
+  )
+
+  // Filter currencies by search term — matches the code, the localised name
+  // or the English name (so "dollar" still works in a French UI).
+  const query = search.toLowerCase()
   const filtered = search
-    ? ALL_CURRENCIES.filter(
-        ([code, , name]) =>
-          code.toLowerCase().includes(search.toLowerCase()) ||
-          name.toLowerCase().includes(search.toLowerCase()),
+    ? currencies.filter(
+        ([code, name, englishName]) =>
+          code.toLowerCase().includes(query) ||
+          name.toLowerCase().includes(query) ||
+          englishName.toLowerCase().includes(query),
       )
-    : ALL_CURRENCIES
+    : currencies
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Settlement currency</DialogTitle>
+          <DialogTitle>{t.balance.drawer.title}</DialogTitle>
         </DialogHeader>
 
         <div className="flex flex-col gap-4">
           {/* ── Currency picker ── */}
           <div>
             <label className="mb-1 block text-xs font-medium text-muted-foreground">
-              Currency
+              {t.balance.drawer.currency}
             </label>
             <Input
-              placeholder="Search currencies…"
+              placeholder={t.balance.drawer.searchPlaceholder}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="mb-2"
             />
             <div className="max-h-40 overflow-y-auto rounded-md border">
-              {filtered.map(([code, , name]) => (
+              {filtered.map(([code, name]) => (
                 <button
                   key={code}
                   type="button"
@@ -128,7 +141,7 @@ export function SettlementCurrencyDrawer({
                 </button>
               ))}
               {filtered.length === 0 && (
-                <p className="px-3 py-2 text-sm text-muted-foreground">No currencies found</p>
+                <p className="px-3 py-2 text-sm text-muted-foreground">{t.balance.drawer.noResults}</p>
               )}
             </div>
           </div>
@@ -136,7 +149,7 @@ export function SettlementCurrencyDrawer({
           {/* ── Rate field ── */}
           <div>
             <label className="mb-1 block text-xs font-medium text-muted-foreground">
-              Exchange rate
+              {t.balance.drawer.exchangeRate}
             </label>
             <p className="mb-1 text-xs text-muted-foreground">
               1 {mainCurrency} = ? {selectedCurrency}
@@ -145,7 +158,7 @@ export function SettlementCurrencyDrawer({
               inputMode="decimal"
               value={rateInput}
               onChange={(e) => setRateInput(e.target.value)}
-              placeholder="e.g. 7.82"
+              placeholder={t.balance.drawer.ratePlaceholder}
             />
           </div>
 
@@ -153,17 +166,14 @@ export function SettlementCurrencyDrawer({
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950">
             <img
               src={TRUMP_GIF}
-              alt="Trump USD"
+              alt={t.balance.drawer.trumpAlt}
               className="mb-2 h-20 rounded"
             />
             <p className="text-sm font-bold">
-              Donald Trump wants you to settle in US dollars.
+              {t.balance.drawer.trumpTitle}
             </p>
             <p className="mt-1 text-sm">
-              Using USD in international settlements gives US authorities jurisdiction
-              over the transaction — regardless of where you are. Banks can be
-              sanctioned, assets frozen, and individuals prosecuted under US law,
-              even for transactions that never touch US soil.
+              {t.balance.drawer.trumpBody}
             </p>
             <a
               href="https://en.wikipedia.org/wiki/Extraterritorial_jurisdiction_of_the_United_States"
@@ -171,26 +181,25 @@ export function SettlementCurrencyDrawer({
               rel="noopener noreferrer"
               className="mt-2 block text-sm underline"
             >
-              Learn more about US sanctions extraterritoriality →
+              {t.balance.drawer.learnMore}
             </a>
           </div>
 
           {/* ── Strait of Hormuz tip — ALWAYS VISIBLE ── */}
           <div className="pt-4 text-sm text-muted-foreground">
-            🛢️ If you're crossing the Strait of Hormuz, we strongly recommend
-            settling in Chinese Yuan (CNY). Just saying.
+            {t.balance.drawer.hormuz}
             <p className="mt-1 text-xs text-muted-foreground">
-              But as you're in a free country, use whichever currency and rate you like.
+              {t.balance.drawer.freeCountry}
             </p>
           </div>
 
           {/* ── Apply / Reset buttons ── */}
           <div className="flex justify-between pt-4">
             <Button variant="ghost" size="sm" onClick={handleReset}>
-              Reset
+              {t.balance.drawer.reset}
             </Button>
             <Button size="sm" disabled={!canApply} onClick={handleApply}>
-              Apply
+              {t.balance.drawer.apply}
             </Button>
           </div>
         </div>

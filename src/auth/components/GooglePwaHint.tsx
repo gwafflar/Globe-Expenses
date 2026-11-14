@@ -11,6 +11,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { FeedbackForm } from '@/feedback/components/FeedbackForm'
 import { Copy, Check, MessageSquare } from 'lucide-react'
+import { useT } from '@/i18n'
 
 /** The deployed web app URL the user should open in their system browser */
 const WEB_APP_URL = 'https://globe-expenses.web.app'
@@ -38,6 +39,8 @@ interface GooglePwaHintProps {
 }
 
 export function GooglePwaHint({ visible }: GooglePwaHintProps) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
   // Controls whether the inline feedback form is expanded
   const [showFeedback, setShowFeedback] = useState(false)
   // Tracks the "copied!" confirmation state for the copy-link button
@@ -58,7 +61,7 @@ export function GooglePwaHint({ visible }: GooglePwaHintProps) {
   return (
     <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm dark:border-amber-900 dark:bg-amber-950/30">
       <p className="text-amber-800 dark:text-amber-200">
-        Issues connecting with Google? Try signing in from your browser:
+        {t.auth.pwaHint.message}
       </p>
 
       <Button
@@ -69,7 +72,7 @@ export function GooglePwaHint({ visible }: GooglePwaHintProps) {
         onClick={handleCopy}
       >
         {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-        {copied ? 'Copied!' : WEB_APP_URL}
+        {copied ? t.common.copied : WEB_APP_URL}
       </Button>
 
       {!showFeedback ? (
@@ -81,7 +84,7 @@ export function GooglePwaHint({ visible }: GooglePwaHintProps) {
           onClick={() => setShowFeedback(true)}
         >
           <MessageSquare className="h-3.5 w-3.5" />
-          Send feedback
+          {t.auth.pwaHint.sendFeedback}
         </Button>
       ) : (
         <div className="mt-3">

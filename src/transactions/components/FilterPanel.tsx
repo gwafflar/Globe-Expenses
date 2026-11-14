@@ -20,6 +20,7 @@ import {
 } from '@/transactions/hooks/useTransactionFilters'
 import type { FilterDimension, FilterState } from '@/transactions/utils/filterDimensions'
 import { rangeLabel, type DateRange } from '@/shared/utils/dateRange'
+import { useT } from '@/i18n'
 
 // ---------------------------------------------------------------------------
 // Props
@@ -74,6 +75,10 @@ export function FilterPanel({
   resultCount,
   totalCount,
 }: FilterPanelProps) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  const tf = t.transactions.filters
+
   // Which dimension is currently expanded (showing its options). null = none.
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
 
@@ -106,7 +111,7 @@ export function FilterPanel({
       <div className="relative">
         <Input
           type="text"
-          placeholder="Search name, notes or amount…"
+          placeholder={tf.searchPlaceholder}
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
           className="h-8 pl-8 text-sm"
@@ -166,7 +171,7 @@ export function FilterPanel({
                 onClick={() => onClearDimension(expanded.key)}
                 className="text-[11px] text-muted-foreground underline hover:text-foreground"
               >
-                Clear
+                {tf.clear}
               </button>
             )}
           </div>
@@ -175,7 +180,7 @@ export function FilterPanel({
             /* Tri-state: Any / Yes / No, mutually exclusive. "Any" is the
                absence of a filter, so it is simply an empty selection. */
             <div className="flex flex-wrap gap-1.5">
-              {[{ id: null, label: 'Any' }, ...expanded.options].map((opt) => {
+              {[{ id: null, label: tf.any }, ...expanded.options].map((opt) => {
                 const isSelected = opt.id === null
                   ? selectedCount(expanded.key) === 0
                   : (filters[expanded.key]?.has(opt.id) ?? false)
@@ -243,7 +248,7 @@ export function FilterPanel({
               📅 {rangeLabel(dateRange)}
               <button
                 type="button"
-                aria-label="Remove date range filter"
+                aria-label={tf.removeDateRange}
                 onClick={onClearDateRange}
                 className="ml-0.5 text-primary/60 hover:text-primary"
               >
@@ -257,10 +262,10 @@ export function FilterPanel({
               tapped, and clearable here to reveal the movements it excluded. */}
           {spendingOnly && (
             <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
-              💸 Spending only
+              💸 {tf.spendingOnly}
               <button
                 type="button"
-                aria-label="Remove spending-only filter"
+                aria-label={tf.removeSpendingOnly}
                 onClick={onClearSpendingOnly}
                 className="ml-0.5 text-primary/60 hover:text-primary"
               >
@@ -276,12 +281,12 @@ export function FilterPanel({
                 className={`inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary ${value === UNDEFINED_FILTER ? 'italic' : ''}`}
               >
                 {needsQualifier(dim, value)
-                  ? `${dim.label}: ${optionLabel(dim, value)}`
+                  ? tf.qualified({ dimension: dim.label, value: optionLabel(dim, value) })
                   : optionLabel(dim, value)}
                 {/* × button to remove this single filter value */}
                 <button
                   type="button"
-                  aria-label={`Remove filter ${optionLabel(dim, value)}`}
+                  aria-label={tf.removeFilter({ value: optionLabel(dim, value) })}
                   onClick={() => onToggleFilter(dim.key, value)}
                   className="ml-0.5 text-primary/60 hover:text-primary"
                 >
@@ -301,7 +306,7 @@ export function FilterPanel({
               onClick={onClearAll}
               className="rounded-md border border-destructive/30 bg-destructive/10 px-2 py-0.5 text-[11px] font-medium text-destructive hover:bg-destructive/20 transition-colors"
             >
-              Clear all
+              {tf.clearAll}
             </button>
           </span>
         </div>

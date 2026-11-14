@@ -20,6 +20,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Eye, EyeOff } from 'lucide-react'
+import { getT, useT } from '@/i18n'
 
 // Returns true when the app is running as an installed PWA (standalone window).
 // signInWithPopup doesn't work reliably in standalone mode — use redirect instead.
@@ -31,22 +32,26 @@ function isInstalledPWA(): boolean {
 }
 
 // Map Firebase auth error codes to user-friendly messages.
+// getT() is read at call time, so the message is in the current UI language.
 function mapAuthError(error: FirebaseError): string {
+  const e = getT().auth.login.errors
   switch (error.code) {
     case 'auth/invalid-credential':
     case 'auth/wrong-password':
-      return 'The password you entered is incorrect.'
+      return e.wrongPassword
     case 'auth/user-not-found':
-      return 'No account was found with this email address.'
+      return e.userNotFound
     case 'auth/too-many-requests':
-      return 'Too many failed attempts. Please try again in a few minutes.'
+      return e.tooManyRequests
     default:
       // Fallback for unexpected errors — keep it generic but helpful.
-      return 'Unable to sign in. Please check your details and try again.'
+      return e.generic
   }
 }
 
 export function LoginPage() {
+  // translation hook — re-renders when the language changes
+  const t = useT()
   const navigate = useNavigate()
   const location = useLocation()
   // Read the ?redirect= param set by ProtectedRoute when an unauthenticated user
@@ -93,7 +98,7 @@ export function LoginPage() {
         const message =
           error && typeof error === 'object' && 'code' in error
             ? mapAuthError(error as FirebaseError)
-            : 'Unable to sign in with Google. Please try again.'
+            : t.auth.googleError
         setErrorMessage(message)
       })
       .finally(() => setIsLoading(false))
@@ -115,7 +120,7 @@ export function LoginPage() {
       const message =
         (error && typeof error === 'object' && 'code' in error
           ? mapAuthError(error as FirebaseError)
-          : 'Unable to sign in. Please try again.')
+          : t.auth.login.errors.unknown)
 
       setErrorMessage(message)
       setIsLoading(false)
@@ -146,7 +151,7 @@ export function LoginPage() {
       const message =
         (error && typeof error === 'object' && 'code' in error
           ? mapAuthError(error as FirebaseError)
-          : 'Unable to sign in with Google. Please try again.')
+          : t.auth.googleError)
 
       setErrorMessage(message)
       setIsLoading(false)
@@ -158,15 +163,15 @@ export function LoginPage() {
     <div className="flex min-h-screen items-center justify-center px-4">
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-2">
-          <CardTitle>Welcome back</CardTitle>
+          <CardTitle>{t.auth.login.title}</CardTitle>
           <CardDescription>
-            Sign in to continue tracking your space expenses.
+            {t.auth.login.description}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           <form onSubmit={handleEmailPasswordSignIn} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">{t.auth.email}</Label>
               <Input
                 id="email"
                 type="email"
@@ -177,7 +182,7 @@ export function LoginPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">{t.auth.password}</Label>
               {/* Wrapper gives the eye toggle button a consistent position inside the field */}
               <div className="relative">
                 <Input
@@ -191,7 +196,7 @@ export function LoginPage() {
                 />
                 <button
                   type="button"
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  aria-label={showPassword ? t.auth.hidePassword : t.auth.showPassword}
                   onClick={() => setShowPassword((v) => !v)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                   tabIndex={-1}
@@ -211,13 +216,13 @@ export function LoginPage() {
               disabled={isLoading}
             >
               {/* Button label reflects loading state so users know something is happening */}
-              {isLoading ? 'Signing in…' : 'Sign in'}
+              {isLoading ? t.auth.login.signingIn : t.auth.login.signIn}
             </Button>
           </form>
 
           <div className="flex items-center justify-center">
             <span className="h-px w-16 bg-border" />
-            <span className="px-3 text-xs text-muted-foreground">or</span>
+            <span className="px-3 text-xs text-muted-foreground">{t.auth.or}</span>
             <span className="h-px w-16 bg-border" />
           </div>
 
@@ -229,25 +234,25 @@ export function LoginPage() {
             onClick={handleGoogleSignIn}
           >
             <GoogleLogo />
-            Continue with Google
+            {t.auth.continueWithGoogle}
           </Button>
 
           <GooglePwaHint visible={showPwaHint} />
 
           <p className="text-center text-sm text-muted-foreground">
-            Don&apos;t have an account?{' '}
+            {t.auth.login.noAccount}{' '}
             {/* Link component changes the URL without triggering a full page reload */}
             <Link
               to={redirectTo !== '/spaces' ? `/register?redirect=${encodeURIComponent(redirectTo)}` : '/register'}
               className="font-medium text-primary hover:underline"
             >
-              Register
+              {t.auth.login.register}
             </Link>
           </p>
 
           <p className="text-center text-sm">
             <Link to="/welcome" className="text-muted-foreground hover:text-foreground hover:underline">
-              &larr; Back to Welcome
+              {t.auth.backToWelcome}
             </Link>
           </p>
         </CardContent>

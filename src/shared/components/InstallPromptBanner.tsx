@@ -22,6 +22,7 @@ import {
   clearDeferredInstallPrompt,
   type BeforeInstallPromptEvent,
 } from '@/shared/utils/installPrompt'
+import { useT } from '@/i18n'
 
 const DISMISSED_KEY = 'pwa-install-dismissed'
 
@@ -51,6 +52,9 @@ function isMobileDevice(): boolean {
 }
 
 export function InstallPromptBanner() {
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  const ti = t.social.install // shorthand
   // 'chrome'  → Android Chrome with native install prompt available
   // 'android' → Android but no install prompt (Firefox, Samsung Internet, etc.)
   // 'ios'     → iOS Safari, manual instructions
@@ -103,27 +107,25 @@ export function InstallPromptBanner() {
       <Download className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
 
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium">Install GlobeExpenses</p>
+        <p className="text-sm font-medium">{ti.title}</p>
 
         {mode === 'ios' && (
           // iOS Safari: tap the Share icon (box with up-arrow) → "Add to Home Screen"
           <p className="mt-0.5 text-xs text-blue-700">
-            Tap <strong>Share</strong> <span aria-hidden>&#11023;</span> in your browser bar, then{' '}
-            <strong>"Add to Home Screen"</strong>.
+            {ti.ios({ icon: <span aria-hidden>&#11023;</span> })}
           </p>
         )}
 
         {mode === 'chrome' && (
           <p className="mt-0.5 text-xs text-blue-700">
-            Add to your home screen for a faster, offline-ready experience.
+            {ti.chrome}
           </p>
         )}
 
         {mode === 'android' && (
           // Firefox / Samsung Internet / other Android browsers
           <p className="mt-0.5 text-xs text-blue-700">
-            Open the <strong>browser menu</strong> (⋮) and tap{' '}
-            <strong>"Add to Home Screen"</strong> or <strong>"Install app"</strong>.
+            {ti.android()}
           </p>
         )}
       </div>
@@ -136,13 +138,13 @@ export function InstallPromptBanner() {
             onClick={handleInstall}
             className="rounded-md bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-700"
           >
-            Install
+            {ti.install}
           </button>
         )}
         <button
           type="button"
           onClick={dismiss}
-          aria-label="Dismiss install banner"
+          aria-label={ti.dismiss}
           className="text-blue-400 hover:text-blue-600"
         >
           <X className="h-4 w-4" />

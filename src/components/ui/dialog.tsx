@@ -4,6 +4,7 @@
 import * as React from 'react'
 import { Dialog as DialogPrimitive } from 'radix-ui'
 import { cn } from '@/lib/utils'
+import { useT } from '@/i18n'
 
 // Re-export root, trigger, and portal unchanged
 const Dialog = DialogPrimitive.Root
@@ -31,6 +32,7 @@ function DialogContent({
   children,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content>) {
+  const t = useT() // translation hook — for the screen-reader "Close" label
   return (
     <DialogPortal>
       <DialogOverlay />
@@ -65,7 +67,7 @@ function DialogContent({
             <line x1="18" y1="6" x2="6" y2="18" />
             <line x1="6" y1="6" x2="18" y2="18" />
           </svg>
-          <span className="sr-only">Close</span>
+          <span className="sr-only">{t.common.close}</span>
         </DialogPrimitive.Close>
       </DialogPrimitive.Content>
     </DialogPortal>

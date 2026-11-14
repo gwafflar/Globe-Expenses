@@ -16,8 +16,10 @@
 import type { CustomValue, LabeledItem, Space, SpaceConfig } from '@/spaces/types'
 import { enabledCustomFields } from '@/spaces/config'
 import { getTransactionType } from '@/transactions/utils/walletHelpers'
-import type { Transaction } from '@/transactions/types'
+import type { Transaction, TransactionType } from '@/transactions/types'
 import type { DateRange } from '@/shared/utils/dateRange'
+import { getT, getLocale } from '@/i18n'
+import { displayCountryName } from '@/shared/data/pickerData'
 
 // ---------------------------------------------------------------------------
 // Sentinel values
@@ -111,16 +113,21 @@ export interface FilterRequest {
 // Static (core + built-in) dimension metadata
 // ---------------------------------------------------------------------------
 
-const TYPE_LABELS: Record<string, string> = {
-  expense: 'Expense',
-  transfer: 'Transfer',
-  withdrawal: 'Withdrawal',
-  adjustment: 'Adjustment',
+// Labels are looked up at CALL time (getT() inside a function), never stored in
+// a module-level constant: a constant would be evaluated once at import and
+// freeze the language. The dimension list is rebuilt on every language change
+// (useTransactionFilters adds the language to its memo dependencies).
+
+/** Display label of a stored transaction type; unknown values pass through. */
+function typeLabel(value: string): string {
+  const types = getT().transactions.types
+  return value in types ? types[value as TransactionType] : value
 }
 
 interface StaticMeta {
   key: string
-  label: string
+  /** Chip label, in the current UI language. */
+  label: () => string
   emoji: string
   source: 'core' | 'builtIn'
   /** Whether the space's config makes this dimension available at all. */
@@ -139,18 +146,18 @@ interface StaticMeta {
 const STATIC_META: StaticMeta[] = [
   {
     key: 'type',
-    label: 'Type',
+    label: () => getT().transactions.filters.dimensions.type,
     emoji: '📋',
     source: 'core',
     // Always available: existing withdrawals/adjustments stay visible and
     // filterable in a space where wallets were later turned off (SPEC §6.1).
     isAvailable: () => true,
     extract: (tx) => [getTransactionType(tx)],
-    labelFor: (value) => TYPE_LABELS[value] ?? value,
+    labelFor: (value) => typeLabel(value),
   },
   {
     key: 'category',
-    label: 'Category',
+    label: () => getT().transactions.filters.dimensions.category,
     emoji: '🏷️',
     source: 'builtIn',
     isAvailable: (config) => config.builtInFields.category,
@@ -158,7 +165,7 @@ const STATIC_META: StaticMeta[] = [
   },
   {
     key: 'currency',
-    label: 'Currency',
+    label: () => getT().transactions.filters.dimensions.currency,
     emoji: '💱',
     source: 'core',
     // Core field, but meaningless when every transaction is in the main
@@ -168,15 +175,18 @@ const STATIC_META: StaticMeta[] = [
   },
   {
     key: 'country',
-    label: 'Country',
+    label: () => getT().transactions.filters.dimensions.country,
     emoji: '🌍',
     source: 'builtIn',
     isAvailable: (config) => config.builtInFields.country,
     extract: (tx) => [tx.country ?? UNDEFINED_FILTER],
+    // Stored values are English country names; show them in the UI language.
+    // The filter itself still works on the stored value (the option id).
+    labelFor: (value) => displayCountryName(value, getLocale()),
   },
   {
     key: 'city',
-    label: 'City',
+    label: () => getT().transactions.filters.dimensions.city,
     emoji: '🏙️',
     source: 'builtIn',
     isAvailable: (config) => config.builtInFields.city,
@@ -184,7 +194,7 @@ const STATIC_META: StaticMeta[] = [
   },
   {
     key: 'paymentMethod',
-    label: 'Payment',
+    label: () => getT().transactions.filters.dimensions.paymentMethod,
     emoji: '💳',
     source: 'builtIn',
     isAvailable: (config) => config.builtInFields.paymentMethod,
@@ -192,7 +202,7 @@ const STATIC_META: StaticMeta[] = [
   },
   {
     key: 'paidBy',
-    label: 'Paid by',
+    label: () => getT().transactions.filters.dimensions.paidBy,
     emoji: '🧑',
     source: 'core',
     isAvailable: (_config, isSolo) => !isSolo,
@@ -202,7 +212,7 @@ const STATIC_META: StaticMeta[] = [
   },
   {
     key: 'beneficiaries',
-    label: 'For',
+    label: () => getT().transactions.filters.dimensions.beneficiaries,
     emoji: '👥',
     source: 'core',
     isAvailable: (_config, isSolo) => !isSolo,
@@ -252,9 +262,10 @@ export function allFilterDimensions(
 
 function staticDimension(meta: StaticMeta, space: Space, observed: ObservedValues): FilterDimension {
   const values = observed[meta.key] ?? []
+  const undefinedLabel = getT().transactions.filters.undefinedOption
   return {
     key: meta.key,
-    label: meta.label,
+    label: meta.label(),
     emoji: meta.emoji,
     source: meta.source,
     control: 'multi',
@@ -262,7 +273,7 @@ function staticDimension(meta: StaticMeta, space: Space, observed: ObservedValue
       id: value,
       // The sentinel's label is uniform across every dimension, so it lives
       // here rather than in each descriptor.
-      label: value === UNDEFINED_FILTER ? 'Undefined' : (meta.labelFor?.(value, space) ?? value),
+      label: value === UNDEFINED_FILTER ? undefinedLabel : (meta.labelFor?.(value, space) ?? value),
     })),
     // Observed values, not a definition: a category that disappears from the
     // list must not silently clear the user's active filter.
@@ -271,6 +282,7 @@ function staticDimension(meta: StaticMeta, space: Space, observed: ObservedValue
 }
 
 function customDimensions(config: SpaceConfig, observed: ObservedValues): FilterDimension[] {
+  const tf = getT().transactions.filters
   const dims: FilterDimension[] = []
   for (const def of enabledCustomFields(config)) {
     if (def.type === 'select') {
@@ -288,7 +300,7 @@ function customDimensions(config: SpaceConfig, observed: ObservedValues): Filter
       // discarded whole and the dashboard's "No <field>" drill-down landed on an
       // unfiltered list showing every transaction instead of the missing ones.
       if ((observed[def.id] ?? []).includes(UNDEFINED_FILTER)) {
-        options.push({ id: UNDEFINED_FILTER, label: 'Undefined' })
+        options.push({ id: UNDEFINED_FILTER, label: tf.undefinedOption })
       }
       dims.push({
         key: def.id,
@@ -307,8 +319,8 @@ function customDimensions(config: SpaceConfig, observed: ObservedValues): Filter
         source: 'custom',
         control: 'triState',
         options: [
-          { id: BOOL_TRUE, label: 'Yes' },
-          { id: BOOL_FALSE, label: 'No' },
+          { id: BOOL_TRUE, label: tf.yes },
+          { id: BOOL_FALSE, label: tf.no },
         ],
         optionsAreClosed: true,
       })

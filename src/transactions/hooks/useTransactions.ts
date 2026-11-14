@@ -16,6 +16,7 @@ import {
   FirestoreError,
 } from 'firebase/firestore'
 import { db } from '@/services/firebase'
+import { getT } from '@/i18n'
 import type { Transaction, TransactionType, AdjustmentMode } from '@/transactions/types'
 
 // Extends Transaction with a UI-only flag — not stored in Firestore.
@@ -38,7 +39,9 @@ export function useTransactions(spaceId: string | undefined): UseTransactionsRes
     if (!spaceId) {
       setTransactions([])
       setLoading(false)
-      setError('Missing space identifier.')
+      // getT() reads the current language when the error happens (not a hook:
+      // we are inside an effect).
+      setError(getT().transactions.load.missingSpace)
       return
     }
 
@@ -156,7 +159,7 @@ export function useTransactions(spaceId: string | undefined): UseTransactionsRes
           console.error('[useTransactions] Error message:', firestoreError.message)
           setTransactions([])
           setLoading(false)
-          setError(`Unable to load transactions. (${firestoreError.code}: ${firestoreError.message})`)
+          setError(getT().transactions.load.failed({ code: firestoreError.code, message: firestoreError.message }))
         },
       )
     }

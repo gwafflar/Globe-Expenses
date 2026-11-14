@@ -22,6 +22,9 @@ import { SHEET_PARAMS, SHEET_EXPENSES } from '@/shared/utils/sheetExport'
 import { parseMetaSheet, type MetaPayload } from '@/shared/utils/sheetMeta'
 import type { ForeignParsedRow } from '@/shared/utils/foreignSheet'
 import type { CustomFieldDef, CustomValue, Space } from '@/spaces/types'
+// getT() reads the current UI language at call time: row errors shown in the
+// import result, and the default name of a description-less row.
+import { getT } from '@/i18n'
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -313,7 +316,8 @@ export async function parseSheetFile(file: File): Promise<ParseResult> {
       country:       asString(getOptionalCellValue(wsExpenses, cm.country,       r)),
       city:          asString(getOptionalCellValue(wsExpenses, cm.city,          r)),
       category:      asString(getOptionalCellValue(wsExpenses, cm.category,      r)),
-      name:          name || '(unnamed)',
+      // Written to Firestore as the transaction name, in the current language.
+      name:          name || getT().importExport.unnamedTransaction,
       totalAmount,
       currency:      rawCurrency ?? mainCurrency,
       paymentMethod: asString(getOptionalCellValue(wsExpenses, cm.paymentMethod, r)),
@@ -579,14 +583,19 @@ export async function importParsedRows(
   // Stamped on every row of this run — created AND updated-in-place rows — so
   // none of them pushes on its own. See "Import batch marker" above.
   const importBatchId = newImportBatchId(spaceId)
+  // Messages in the current UI language (the result step lists the errors).
+  const t = getT().importExport
+  // parseSheetFile() names description-less rows in the language current at
+  // parse time; also accept the English name for rows parsed before a switch.
+  const isUnnamed = (name: string) => name === t.unnamedTransaction || name === '(unnamed)'
 
   for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
     const row = rows[rowIndex]
-    const rowLabel = `Row ${rowIndex + 1}`
+    const rowNumber = rowIndex + 1
 
     // Only skip rows that have neither a description nor an amount.
     // Zero-amount rows (transfers, withdrawals) are valid and must be imported.
-    if (!row.name || row.name === '(unnamed)') {
+    if (!row.name || isUnnamed(row.name)) {
       if (row.totalAmount === null || row.totalAmount === undefined) {
         skipped++
         continue
@@ -601,7 +610,7 @@ export async function importParsedRows(
       if (!amount || amount <= 0) return
       const travelMemberId = slotToTravelMemberId[slotIdx]
       if (travelMemberId === undefined) {
-        errors.push(`${rowLabel} (${row.name}): slot ${slotIdx + 1} not mapped — cost skipped`)
+        errors.push(t.result.costSkipped({ row: rowNumber, name: row.name, slot: slotIdx + 1 }))
         hasUnmappedCost = true
       } else {
         beneficiaries.push({ travelMemberId, amount })
@@ -616,7 +625,7 @@ export async function importParsedRows(
       if (!amount || amount === 0) return
       const travelMemberId = slotToTravelMemberId[slotIdx]
       if (travelMemberId === undefined) {
-        errors.push(`${rowLabel} (${row.name}): slot ${slotIdx + 1} not mapped — paid skipped`)
+        errors.push(t.result.paidSkipped({ row: rowNumber, name: row.name, slot: slotIdx + 1 }))
         hasUnmappedPaid = true
       } else {
         paidBy.push({ travelMemberId, amount })

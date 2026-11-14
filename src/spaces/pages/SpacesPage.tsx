@@ -7,6 +7,7 @@ import { useAuthStore } from '@/auth/store/useAuthStore'
 import { isIos, isStandalone } from '@/notifications/services/pushService'
 import { requestPushPrompt } from '@/notifications/store/usePushPromptStore'
 import { usePendingInvites } from '@/friends/hooks/usePendingInvites'
+import { useT } from '@/i18n'
 
 // Simple hash-based hue — same function as ProfilePage, kept local to avoid
 // a shared utility file for now. Same UID always gives the same colour.
@@ -74,6 +75,8 @@ function SpaceCardGrid({
 }
 
 export function SpacesPage() {
+  // translation hook — re-renders when the language changes
+  const t = useT()
   const { currentUser, userProfile } = useAuthStore()
   const userId = currentUser?.uid
 
@@ -119,21 +122,21 @@ export function SpacesPage() {
       {/* Top bar with title and actions */}
       <header className="flex items-center justify-between gap-4 border-b px-4 py-3">
         <div>
-          <h1 className="text-lg font-semibold">Your spaces</h1>
+          <h1 className="text-lg font-semibold">{t.spaces.list.title}</h1>
           <p className="text-sm text-muted-foreground">
-            Select a trip to view and manage its expenses.
+            {t.spaces.list.subtitle}
           </p>
         </div>
         <div className="flex items-center gap-2">
           <Button type="button" onClick={handleOpenCreateSpace}>
-            New space
+            {t.spaces.list.newSpace}
           </Button>
           {/* Profile avatar button — navigates to /profile.
               The red badge shows the count of pending friend requests. */}
           <button
             type="button"
             onClick={() => navigate('/profile')}
-            title="Profile"
+            title={t.spaces.profile}
             className="relative flex h-9 w-9 items-center justify-center rounded-full text-sm font-bold text-white shadow-sm transition hover:opacity-90"
             style={{ backgroundColor: `hsl(${hue}, 55%, 50%)` }}
           >
@@ -152,27 +155,27 @@ export function SpacesPage() {
         {isLoading ? (
           // Loading state while the Firestore subscription is fetching data.
           <div className="flex h-full items-center justify-center">
-            <p className="text-sm text-muted-foreground">Loading your spaces...</p>
+            <p className="text-sm text-muted-foreground">{t.spaces.list.loading}</p>
           </div>
         ) : error ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
-            <p className="text-base font-medium">Unable to load your spaces.</p>
+            <p className="text-base font-medium">{t.spaces.list.loadError}</p>
             <p className="max-w-sm text-sm text-muted-foreground">
               {error}
             </p>
             <Button type="button" variant="outline" onClick={() => window.location.reload()}>
-              Retry
+              {t.common.retry}
             </Button>
           </div>
         ) : hasNoSpaces ? (
           // Empty state when the user has no spaces yet.
           <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
-            <p className="text-base font-medium">No spaces yet.</p>
+            <p className="text-base font-medium">{t.spaces.list.empty}</p>
             <p className="max-w-xs text-sm text-muted-foreground">
-              Create your first trip to start tracking shared expenses with your space companions.
+              {t.spaces.list.emptyHint}
             </p>
             <Button type="button" onClick={handleOpenCreateSpace}>
-              🚀 Create your first trip
+              {t.spaces.list.createFirst}
             </Button>
           </div>
         ) : (
@@ -182,7 +185,7 @@ export function SpacesPage() {
               <SpaceCardGrid spaces={activeSpaces} onSpaceClick={handleSpaceClick} />
             ) : (
               <p className="text-sm text-muted-foreground">
-                All your spaces are archived.
+                {t.spaces.list.allArchived}
               </p>
             )}
 
@@ -201,7 +204,7 @@ export function SpacesPage() {
                         <Archive className="h-5 w-5" />
                       </div>
                       <div className="space-y-1">
-                        <CardTitle className="text-base">Archived ({archivedSpaces.length})</CardTitle>
+                        <CardTitle className="text-base">{t.spaces.list.archived(archivedSpaces.length)}</CardTitle>
                       </div>
                       <span className="ml-auto text-xs text-muted-foreground">
                         {showArchived ? '▲' : '▼'}

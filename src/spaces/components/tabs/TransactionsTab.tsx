@@ -19,6 +19,8 @@ import { FilterPanel } from '@/transactions/components/FilterPanel'
 import { getTransactionType, countsAsSpending, isTransfer } from '@/transactions/utils/walletHelpers'
 import type { CustomFieldDef, SpaceConfig } from '@/spaces/types'
 import { getSpaceConfig, enabledCustomFields, resolveOptionLabel } from '@/spaces/config'
+import { displayCountryName } from '@/shared/data/pickerData'
+import { useLocale, useT } from '@/i18n'
 
 // ---------------------------------------------------------------------------
 // Feature gate — spreadsheet import / export
@@ -35,7 +37,8 @@ import { getSpaceConfig, enabledCustomFields, resolveOptionLabel } from '@/space
 
 const SHEETS_FEATURE_ENABLED = false
 
-const SHEETS_COMING_SOON = 'This feature is coming back soon'
+// The "coming back soon" notice text lives in t.transactionsTab.sheetsComingSoon
+// (looked up at render so it follows the current language).
 
 // ---------------------------------------------------------------------------
 // Currency symbol helpers
@@ -99,10 +102,11 @@ export function groupByDay(transactions: TransactionWithStatus[]): DayGroup[] {
   return groups
 }
 
-function formatDateLabel(dateString: string): string {
+/** `locale` is the app's Intl locale (useLocale()), not the browser's. */
+function formatDateLabel(dateString: string, locale: string): string {
   const [day, month, year] = dateString.split('-').map(Number)
   if (!day || !month || !year) return dateString
-  return new Date(year, month - 1, day).toLocaleDateString(undefined, {
+  return new Date(year, month - 1, day).toLocaleDateString(locale, {
     day: '2-digit',
     month: 'short',
   })
@@ -181,14 +185,16 @@ function MemberAvatar({
 // ---------------------------------------------------------------------------
 
 function PendingBadge({ isPending }: { isPending: boolean }) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
   const [showSynced, setShowSynced] = useState(false)
   const prevRef = useRef(isPending)
 
   useEffect(() => {
     if (prevRef.current === true && !isPending) {
       setShowSynced(true)
-      const t = setTimeout(() => setShowSynced(false), 2000)
-      return () => clearTimeout(t)
+      const timer = setTimeout(() => setShowSynced(false), 2000)
+      return () => clearTimeout(timer)
     }
     prevRef.current = isPending
   }, [isPending])
@@ -197,15 +203,15 @@ function PendingBadge({ isPending }: { isPending: boolean }) {
     return (
       <span
         className="ml-1 cursor-help rounded-full bg-orange-100 px-1.5 py-0.5 text-[10px] font-medium text-orange-600"
-        title="Saved locally — will sync when back online."
+        title={t.transactionsTab.pendingTitle}
       >
-        ⏳ Pending
+        {t.transactionsTab.pending}
       </span>
     )
   if (showSynced)
     return (
       <span className="ml-1 rounded-full bg-green-100 px-1.5 py-0.5 text-[10px] font-medium text-green-700">
-        ✅ Saved
+        {t.transactionsTab.synced}
       </span>
     )
   return null
@@ -231,7 +237,9 @@ function DayGroupHeader({
    *  cities but not countries still gets its city line. */
   showCity: boolean
 }) {
-  const dateLabel = formatDateLabel(date)
+  // App locale for the date label (re-renders when the language changes)
+  const locale = useLocale()
+  const dateLabel = formatDateLabel(date, locale)
 
   // Collect up to 3 unique country emojis from this day's transactions
   const countryEmojis = useMemo(() => {
@@ -302,6 +310,8 @@ function TransactionRow({
   showCategory: boolean
   onToggle: () => void
 }) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
   // Transaction type determines the leading emoji:
   // - transfer  → 🤝 (person-to-person)
   // - withdrawal → 🏧 (ATM/top-up)
@@ -353,17 +363,17 @@ function TransactionRow({
           <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
             {txType === 'transfer' && (
               <span className="rounded-full bg-purple-100 px-1.5 py-0.5 text-[10px] font-medium text-purple-700 dark:bg-purple-900/30 dark:text-purple-400">
-                Transfer
+                {t.transactionsTab.types.transfer}
               </span>
             )}
             {txType === 'withdrawal' && (
               <span className="rounded-full bg-green-100 px-1.5 py-0.5 text-[10px] font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">
-                Withdrawal
+                {t.transactionsTab.types.withdrawal}
               </span>
             )}
             {txType === 'adjustment' && (
               <span className="rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
-                Adjustment
+                {t.transactionsTab.types.adjustment}
               </span>
             )}
             {showCategory && transaction.category && (
@@ -395,7 +405,7 @@ function TransactionRow({
         </div>
         {showYourShare && (
           <div className="text-[10px] text-muted-foreground">
-            your share: {formatAmount(myBeneficiary!.amount, transaction.currency)}
+            {t.transactionsTab.yourShare({ amount: formatAmount(myBeneficiary!.amount, transaction.currency) })}
           </div>
         )}
         {transaction.currency !== mainCurrency && (
@@ -434,6 +444,10 @@ function TransactionDetail({
   onEdit: () => void
   onDelete: () => void
 }) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
+  // App locale — used to show the stored (English) country name in the UI language
+  const locale = useLocale()
   // Toggle between "1 TX = N main" and "1 main = N TX"
   const [rateDirection, setRateDirection] = useState<'toMain' | 'fromMain'>('toMain')
 
@@ -490,32 +504,33 @@ function TransactionDetail({
       <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
         {builtIns.category && (
           <div>
-            <span className="text-muted-foreground">Category </span>
+            <span className="text-muted-foreground">{t.transactionsTab.detail.category} </span>
             <span>{transaction.category ?? '—'}</span>
           </div>
         )}
         {builtIns.paymentMethod && (
           <div>
-            <span className="text-muted-foreground">Payment </span>
+            <span className="text-muted-foreground">{t.transactionsTab.detail.payment} </span>
             <span>{transaction.paymentMethod ?? '—'}</span>
           </div>
         )}
         {/* Fees — only shown on withdrawal transactions */}
         {transaction.fees != null && transaction.fees > 0 && (
           <div>
-            <span className="text-muted-foreground">Fees </span>
+            <span className="text-muted-foreground">{t.transactionsTab.detail.fees} </span>
             <span>{formatAmount(transaction.fees, transaction.currency)}</span>
           </div>
         )}
         {builtIns.country && (
           <div>
-            <span className="text-muted-foreground">Country </span>
-            <span>{transaction.country ?? '—'}</span>
+            <span className="text-muted-foreground">{t.transactionsTab.detail.country} </span>
+            {/* Stored value is the English name; displayCountryName shows it in the UI language */}
+            <span>{transaction.country ? displayCountryName(transaction.country, locale) : '—'}</span>
           </div>
         )}
         {builtIns.city && (
           <div>
-            <span className="text-muted-foreground">City </span>
+            <span className="text-muted-foreground">{t.transactionsTab.detail.city} </span>
             <span>{transaction.city ?? '—'}</span>
           </div>
         )}
@@ -524,7 +539,7 @@ function TransactionDetail({
       {/* Notes — only when present and the field is enabled */}
       {builtIns.notes && transaction.notes && (
         <div className="text-xs">
-          <span className="font-medium text-foreground">Notes: </span>
+          <span className="font-medium text-foreground">{t.transactionsTab.detail.notes} </span>
           <span className="text-muted-foreground">{transaction.notes}</span>
         </div>
       )}
@@ -537,7 +552,7 @@ function TransactionDetail({
         if (value === undefined) return null
         if (def.type === 'boolean' && value !== true) return null
         const label = def.emoji ? `${def.emoji} ${def.label}` : def.label
-        const display = def.type === 'boolean' ? 'Yes' : def.type === 'select' ? resolveOptionLabel(def, value) : String(value)
+        const display = def.type === 'boolean' ? t.common.yes : def.type === 'select' ? resolveOptionLabel(def, value) : String(value)
         return (
           <div key={def.id} className="text-xs">
             <span className="font-medium text-foreground">{label}: </span>
@@ -551,14 +566,14 @@ function TransactionDetail({
       {!isSolo && (
         <>
           <SplitSection
-            label={isTransfer(transaction) ? 'From' : 'Paid by'}
+            label={isTransfer(transaction) ? t.transactionsTab.detail.from : t.transactionsTab.detail.paidBy}
             splits={transaction.paidBy}
             members={members}
             currentUserUid={currentUserUid}
             currency={transaction.currency}
           />
           <SplitSection
-            label={isTransfer(transaction) ? 'To' : 'Split'}
+            label={isTransfer(transaction) ? t.transactionsTab.detail.to : t.transactionsTab.detail.split}
             splits={transaction.beneficiaries}
             members={members}
             currentUserUid={currentUserUid}
@@ -570,10 +585,10 @@ function TransactionDetail({
       {/* Actions */}
       <div className="flex gap-2 pt-1">
         <Button type="button" variant="default" size="sm" className="flex-1" onClick={onEdit}>
-          Edit
+          {t.common.edit}
         </Button>
         <Button type="button" variant="destructive" size="sm" className="w-20" onClick={onDelete}>
-          Delete
+          {t.common.delete}
         </Button>
       </div>
     </div>
@@ -597,6 +612,8 @@ function SplitSection({
   currentUserUid: string
   currency: string
 }) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
   return (
     <div>
       <div className="mb-1 text-xs font-medium text-muted-foreground">{label}</div>
@@ -614,7 +631,7 @@ function SplitSection({
               />
               <span>
                 {member?.displayName ?? '?'}
-                {isMe && <span className="ml-1 text-muted-foreground">(you)</span>}
+                {isMe && <span className="ml-1 text-muted-foreground">{t.transactionsTab.detail.you}</span>}
               </span>
               <span className="ml-auto font-medium">{formatAmount(split.amount, currency)}</span>
             </div>
@@ -706,6 +723,8 @@ function DayGroupSection({
 // ---------------------------------------------------------------------------
 
 function PlaceholderButton({ label }: { label: string }) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
   return (
     <div className="relative group">
       <button
@@ -716,7 +735,7 @@ function PlaceholderButton({ label }: { label: string }) {
         {label}
       </button>
       <div className="pointer-events-none absolute bottom-full left-1/2 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded bg-foreground px-2 py-1 text-[10px] text-background opacity-0 transition-opacity group-hover:opacity-100">
-        Coming soon
+        {t.transactionsTab.comingSoon}
       </div>
     </div>
   )
@@ -735,6 +754,8 @@ function FilterToggleButton({
   activeCount: number
   onClick: () => void
 }) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
   return (
     <button
       type="button"
@@ -749,7 +770,7 @@ function FilterToggleButton({
         }
       `}
     >
-      🔍 Filter
+      {t.transactionsTab.filter}
       {activeCount > 0 && (
         <span className="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground">
           {activeCount}
@@ -796,6 +817,8 @@ export function TransactionsTab({
   filterRequest,
   focusTxId,
 }: TransactionsTabProps) {
+  // translation hook — re-renders when the language changes
+  const t = useT()
   // Derive the current user's travelMemberId — used for "your share" and "(you)" labels
   const currentUserTravelMemberId = useMemo(
     () => space.members.find((m) => m.userId === currentUserUid)?.travelMemberId ?? '',
@@ -967,7 +990,7 @@ export function TransactionsTab({
             activeCount={activeFilterCount}
             onClick={() => setFilterOpen((prev) => !prev)}
           />
-          <PlaceholderButton label="⊞ Display" />
+          <PlaceholderButton label={t.transactionsTab.display} />
         </div>
         <div className="flex gap-2">
           {error && <p className="text-xs text-destructive">{error}</p>}
@@ -975,14 +998,14 @@ export function TransactionsTab({
             type="button"
             onClick={() => (sheetsEnabled ? setImportOpen(true) : setShowComingSoon(true))}
             aria-disabled={!sheetsEnabled}
-            title={sheetsEnabled ? undefined : SHEETS_COMING_SOON}
+            title={sheetsEnabled ? undefined : t.transactionsTab.sheetsComingSoon}
             className={
               sheetsEnabled
                 ? 'rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors'
                 : 'rounded-md border border-input bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground opacity-60 cursor-not-allowed transition-colors'
             }
           >
-            Import
+            {t.transactionsTab.import}
           </button>
           {transactions.length > 0 && (
             <button
@@ -990,14 +1013,14 @@ export function TransactionsTab({
               onClick={() => (sheetsEnabled ? handleExport() : setShowComingSoon(true))}
               disabled={sheetsEnabled && isExporting}
               aria-disabled={!sheetsEnabled}
-              title={sheetsEnabled ? undefined : SHEETS_COMING_SOON}
+              title={sheetsEnabled ? undefined : t.transactionsTab.sheetsComingSoon}
               className={
                 sheetsEnabled
                   ? 'rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors disabled:opacity-60 disabled:cursor-not-allowed'
                   : 'rounded-md border border-input bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground opacity-60 cursor-not-allowed transition-colors'
               }
             >
-              {sheetsEnabled && isExporting ? 'Exporting…' : 'Export'}
+              {sheetsEnabled && isExporting ? t.transactionsTab.exporting : t.transactionsTab.export}
             </button>
           )}
         </div>
@@ -1008,7 +1031,7 @@ export function TransactionsTab({
           only other signal that the tap was registered. */}
       {showComingSoon && (
         <p role="status" className="text-right text-xs text-muted-foreground">
-          {SHEETS_COMING_SOON}
+          {t.transactionsTab.sheetsComingSoon}
         </p>
       )}
 
@@ -1041,18 +1064,18 @@ export function TransactionsTab({
         </div>
       ) : transactions.length === 0 ? (
         <div className="flex h-40 flex-col items-center justify-center gap-3 text-center">
-          <p className="text-sm font-medium">No expenses recorded yet.</p>
-          <p className="max-w-xs text-xs text-muted-foreground">Tap + to add your first expense.</p>
+          <p className="text-sm font-medium">{t.transactionsTab.empty}</p>
+          <p className="max-w-xs text-xs text-muted-foreground">{t.transactionsTab.emptyHint}</p>
           <Button type="button" size="sm" onClick={() => onAddExpense()}>
-            💸 Add your first expense
+            {t.transactionsTab.addFirst}
           </Button>
         </div>
       ) : filteredTransactions.length === 0 && hasActiveFilters ? (
         /* No results after filtering — show a message instead of empty space */
         <div className="flex h-40 flex-col items-center justify-center gap-3 text-center">
-          <p className="text-sm font-medium text-muted-foreground">No transactions match your filters.</p>
+          <p className="text-sm font-medium text-muted-foreground">{t.transactionsTab.noMatch}</p>
           <Button type="button" variant="outline" size="sm" onClick={clearAll}>
-            Clear all filters
+            {t.transactionsTab.clearAll}
           </Button>
         </div>
       ) : (
