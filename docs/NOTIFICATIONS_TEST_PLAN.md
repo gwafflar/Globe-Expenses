@@ -20,8 +20,45 @@ You need **two accounts** in **one shared space**, each with a claimed member sl
 
 A user is never notified of their own actions, so one account alone shows nothing.
 
+> ⚠️ **"Involving B" needs a deliberate step.** A new expense defaults to
+> *paid by me, split: me only*. Saved like that, it involves nobody else and — by
+> design (spec T7) — notifies nobody. In the form, tap the **Split** row and select B
+> as well (or tap **Paid by** and pick B). The same goes for edits: editing the amount
+> of an expense that is only A's own notifies nobody.
+>
+> Quick sanity check after saving: in the list, B's device should show a "for you"
+> amount on that row.
+
+**Browser:** use **Chrome** on Android (the spec's target). Firefox for Android also
+works, but its push delivery can wait until the phone wakes up (seen on 14 Nov: a
+push sent at once arrived a minute later, on unlock).
+
 The preview URL is a different origin from `globe-expenses.web.app`: sign in again
 there, and on iPhone install it to the Home Screen **from the preview URL**.
+
+---
+
+## Results so far (14 Nov)
+
+| Test | Result |
+|---|---|
+| T3 iPhone Safari tab hint | ✅ OK |
+| T4 iPhone enable | ✅ OK |
+| iPhone: "invite accepted" push | ✅ delivered |
+| Android Firefox: enable, space invite push, tap opens the invite | ✅ OK |
+| Android Firefox: transaction push, tap opens the transaction | ✅ delivered once (a minute late, on unlock) |
+| Transaction pushes otherwise | ❌ none — **to redo, see below** |
+| Banner stays after enabling from Profile | 🐛 fixed, redeployed |
+
+**Why the other transactions did not push:** the server ran for each of them (7 runs)
+and decided there was nobody to notify. The logs of that version did not say why. The
+only cause consistent with the code is the default split above: an expense saved as
+"me only" has no other recipient. This is an inference, not an observation.
+
+The redeployed functions now log the reason for every run. **To redo:** T4 step 3
+onwards and T5 on the iPhone, T1–T2 on Android Chrome, each time selecting B in the
+**Split** row. If a push is still missing, give me the time and I will read the
+reason in the logs.
 
 ---
 

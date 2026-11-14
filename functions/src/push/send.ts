@@ -55,23 +55,27 @@ export async function deliverPush(
   body: ActivityBody,
   plan: PushPlan,
 ): Promise<void> {
+  // Every reason for NOT pushing is logged: a missing notification must be
+  // explainable from the logs alone.
+  const skip = (reason: string) => logger.info('push: skipped', { recipientUid, kind: body.kind, reason })
+
   try {
     // 1. Devices. No token = notifications are off everywhere for this user;
     //    stop before touching the limiter.
     const tokenSnap = await db.collection(`users/${recipientUid}/fcmTokens`).get()
-    if (tokenSnap.empty) return
+    if (tokenSnap.empty) return skip('no registered device')
     const tokens = tokenSnap.docs.map((d) => d.id) // the token IS the document id
 
     // 2. Per-space mute, stored in the recipient's private document (§3.5).
     if (plan.muteSpaceId) {
       const prefs = await db.doc(`users/${recipientUid}/private/notifications`).get()
       const muted = (prefs.data()?.mutedSpaceIds as string[] | undefined) ?? []
-      if (muted.includes(plan.muteSpaceId)) return
+      if (muted.includes(plan.muteSpaceId)) return skip('space muted by the recipient')
     }
 
     // 3. Limiter.
     const decision = await takePushSlot(db, recipientUid, plan.throttleKey)
-    if (decision === 'none') return
+    if (decision === 'none') return skip('limiter: burst in progress')
     const message = decision === 'final' ? buildFinalPushMessage(body, plan.throttleKey) : buildPushMessage(body)
 
     // 4. Send. DATA-only message: FCM shows nothing by itself; our service

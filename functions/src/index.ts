@@ -31,7 +31,7 @@ import { resolveActorUid } from './actor'
 import { buildImportEvents } from './events/imports'
 import { buildInviteAcceptedEvents, buildInviteCreatedEvents, newAccepters } from './events/invites'
 import { buildSpaceDeletedEvents, buildSpaceUpdateEvents, diffMemberUids, memberNameOf } from './events/spaces'
-import { buildTransactionEvents, type TxChange } from './events/transactions'
+import { buildTransactionEvents, involvedMemberIds, type TxChange } from './events/transactions'
 import { mapInviteForEvents, mapSpaceForEvents, mapTxForEvents } from './mapping'
 import type { ActorRef, SpaceForEvents } from './model'
 
@@ -71,14 +71,27 @@ export const onTransactionWritten = onDocumentWrittenWithAuthContext(
 
     // No end user behind the write (e.g. the Admin-SDK cascade of
     // onTravelDeleted below): nothing to report. Checked first — it is free.
+    // One log line per invocation says what was decided and why. Without it a
+    // "nothing happened" is invisible: every exit below is silent by design.
+    // Ids and counts only — never names or amounts.
+    const changeType = before && after ? 'update' : after ? 'create' : 'delete'
+    const trace = (outcome: string, extra: Record<string, unknown> = {}) =>
+      logger.info('transaction event', { outcome, change: changeType, spaceId, txId, ...extra })
+
     const actorUid = resolveActorUid(event.authType, event.authId, (after ?? before)?.lastModifiedBy)
-    if (!actorUid) return
+    if (!actorUid) {
+      trace('skipped: no end-user actor', { authType: event.authType })
+      return
+    }
 
     // The space is needed to map travelMemberId → user. If it no longer exists
     // the transaction is being swept up after a space deletion, which already
     // produced its single `space_deleted` event (§5 rule 5): stay silent.
     const spaceSnap = await db().doc(`travels/${spaceId}`).get()
-    if (!spaceSnap.exists) return
+    if (!spaceSnap.exists) {
+      trace('skipped: space no longer exists')
+      return
+    }
     const space = mapSpaceForEvents(spaceId, spaceSnap.data() ?? {})
 
     let change: TxChange
@@ -88,6 +101,13 @@ export const onTransactionWritten = onDocumentWrittenWithAuthContext(
     else return
 
     const drafts = buildTransactionEvents(change, space, await actorInSpace(space, actorUid))
+    trace(drafts.length > 0 ? 'events written' : 'no recipient: involves nobody but the actor, or nothing visible changed', {
+      // Members the transaction involves vs. users who get an entry: a gap
+      // means unclaimed slots or the actor themselves.
+      involvedMembers: involvedMemberIds(after ?? before!).size,
+      recipients: drafts.length,
+      pushCandidates: drafts.filter((d) => d.push !== null).length,
+    })
     await publishEvents(event.id, event.time, drafts)
   },
 )

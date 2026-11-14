@@ -192,6 +192,10 @@ export async function enablePush(uid: string): Promise<PushState> {
   const permission = await Notification.requestPermission() // no prompt if already granted
   if (permission === 'granted') {
     localStorage.removeItem(optOutKey(uid)) // turning it on clears the opt-out
+    // Announce the granted permission right away: creating the token below can
+    // take a few seconds, and anything still offering "Enable" (the banner)
+    // should disappear now, not then.
+    emitChange()
     try {
       await registerToken(uid)
     } finally {

@@ -79,6 +79,29 @@ runs at the end instead, on the complete feature.
   cascade is still worth having (500-write cap, offline, crash safety).
 - `pnpm lint` reports 92 problems on this branch before and after: no new ones.
 
+## 14 Nov 2026 (afternoon) — first device results
+
+- **Confirmed on devices:** FCM delivers from the deployed functions to iPhone
+  (installed app) and to Firefox on Android; the service worker shows the notification;
+  tapping opens the invite page and the transaction. iOS Safari-tab hint and the iOS
+  permission prompt from a tap both work.
+- **Reported:** most transaction pushes missing. Logs: 7 runs of `onTransactionWritten`,
+  1 push sent and delivered, 6 silent exits. The silent exits could not be told apart
+  from the logs. Most likely cause, inferred from the code and not yet observed: the
+  form's default split is "me only", so those expenses involved nobody else (spec T7).
+- **Fix for the blind spot:** `onTransactionWritten` logs one line per run with the
+  outcome and counts (no names or amounts); `deliverPush` logs every reason for not
+  pushing (no device, muted, limiter). Redeployed.
+- **Bug fixed:** the permission banner stayed on screen after enabling notifications
+  from Profile. The banner store now listens to `pushService` changes and closes when
+  there is nothing left to enable; `enablePush()` announces the granted permission
+  before the (slower) token creation.
+- **Firefox for Android** delivered a push about a minute late, on unlock. Sent with
+  `Urgency: high`; the delay is on the browser's push service side. Chrome is the
+  spec's Android target.
+- **Open:** Windows Firefox received nothing — not yet explained; the new logs will
+  show whether that account was a recipient and had a device registered.
+
 ## Open points
 
 - **Device tests T1–T5** (test plan). In particular: real FCM delivery from the

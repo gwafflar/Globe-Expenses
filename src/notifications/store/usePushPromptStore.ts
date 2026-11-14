@@ -13,7 +13,7 @@
 
 import { create } from 'zustand'
 import { useAuthStore } from '@/auth/store/useAuthStore'
-import { enablePush, readPushState } from '@/notifications/services/pushService'
+import { enablePush, onPushStateChange, readPushState } from '@/notifications/services/pushService'
 import {
   EMPTY_BANNER_HISTORY,
   canShowBanner,
@@ -72,6 +72,9 @@ interface PushPromptState {
   notNow: () => void
   /** Closes the iOS hint. Not a refusal, so it is not counted. */
   close: () => void
+  /** Hides the banner if it no longer has anything to offer — e.g. the user
+   *  just enabled notifications from the Profile page instead. */
+  revalidate: () => Promise<void>
 }
 
 export const usePushPromptStore = create<PushPromptState>((set, get) => ({
@@ -123,7 +126,26 @@ export const usePushPromptStore = create<PushPromptState>((set, get) => ({
   },
 
   close: () => set({ active: null }),
+
+  revalidate: async () => {
+    const uid = useAuthStore.getState().currentUser?.uid
+    // `busy` = the banner's own Enable is running; it closes itself when done.
+    if (!get().active || get().busy) return
+    if (!uid) {
+      set({ active: null }) // signed out
+      return
+    }
+    const state = await readPushState(uid)
+    // The banner only makes sense while there is still something to enable.
+    if (state !== 'prompt' && state !== 'ios-needs-install') set({ active: null })
+  },
 }))
+
+// The banner is not the only way to enable notifications (Profile toggle,
+// Parameters button). pushService announces every change it makes; listening
+// here closes a banner that has just become pointless. Registered once, when
+// this module is first imported — a store is a singleton, so no cleanup needed.
+onPushStateChange(() => void usePushPromptStore.getState().revalidate())
 
 /** Shorthand for non-React code and event handlers. Fire-and-forget. */
 export function requestPushPrompt(moment: BannerMoment, message?: string): void {
