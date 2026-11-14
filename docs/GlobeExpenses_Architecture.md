@@ -102,6 +102,11 @@ Conflict policy for v1: last-write-wins (Firestore default). Concurrent edit det
 | travels/{travelId}/drafts/{draftId} | Draft transactions pending user review (v2) |
 | feedback/{feedbackId} | User-submitted beta feedback. Writable by any user including unauthenticated. Fields: userId, displayName, text, source, userAgent, createdAt, imageUrl?. |
 | travels/{travelId}/settlements/{sId} | Computed settlement suggestions (v2) |
+| travels/{travelId}/importBatches/{importBatchId} | "Import finished" marker `{ createdBy, rowCount, createdAt }`, written by the XLSX importer after its last batch. Triggers one summary notification per import (`NOTIFICATIONS_SPEC.md` §7). Create-only. |
+| users/{userId}/activity/{eventId} | Activity feed entries, written only by Cloud Functions (`NOTIFICATIONS_SPEC.md` §3.1) |
+| users/{userId}/fcmTokens/{token} | One document per device registered for push |
+| users/{userId}/pushThrottle/{spaceId} | Push limiter counter per space (`_social` for invitations) |
+| users/{userId}/private/notifications | Owner-only notification settings: `mutedSpaceIds` and the feed watermarks |
 
 ## 4.2 Core Data Models
 
@@ -211,6 +216,8 @@ TypeScript interface defined in `src/auth/services/userService.ts`. Mirrors the 
 | fees | number? | Withdrawal fees in transaction currency. Deducted from wallet balance: user received `totalAmount - fees`. Only meaningful when `type === 'withdrawal'`. |
 | adjustmentMode | AdjustmentMode? | `'expense'` (counts in spending analytics) or `'balance_only'` (wallet-only, invisible to analytics). Only meaningful when `type === 'adjustment'`. |
 | custom | Record<string, CustomValue>? | User-defined field values, keyed by `CustomFieldDef.id`. `CustomValue = string \| boolean`. Absent when the space has no custom fields or none were filled. ⚠️ For `select` fields the value is the **option id**, never the label — renaming an option updates every transaction for free. ⚠️ `false` is **never stored**: `buildCustomPayload()` omits it, so an absent boolean key means "no". A single map rather than top-level keys avoids collisions with reserved names and gives form, detail, filter and export one generic code path. |
+
+| importBatchId | string? | Set on every transaction written by one XLSX import run. Read by Cloud Functions only: imported rows get a feed entry but no push, and one summary push is sent per import. Stays on the document; later manual edits notify normally. |
 
 **Split**: `{ travelMemberId: string, amount: number }` — amounts must sum to totalAmount. `travelMemberId` is the stable nanoid from `SpaceMember`, never a Firebase Auth UID. Legacy documents stored `{ uid, amount }`; `normalizeTransactionSplits()` in `dashboardHelpers.ts` remaps these at read time (applied in both `DashboardTab` and `TransactionsTab`).
 
@@ -346,7 +353,11 @@ Firestore FieldValue transforms (arrayUnion, arrayRemove, serverTimestamp) are N
 
 ## 5.6 Activity Feed & Push Notifications Flow
 
-Full design: `docs/NOTIFICATIONS_SPEC.md` (authoritative). Summary:
+Full design: `docs/NOTIFICATIONS_SPEC.md` (authoritative). Steps 1–3 and 5 below are implemented (Nov 2026); the feed UI (step 4) is not.
+
+Code map: server in `functions/src/` — `index.ts` (five Firestore triggers), `events/` (pure event and recipient rules), `push/` (limiter, message text, FCM send), `activity/publish.ts` (feed writes), `mapping.ts` (raw documents → event inputs). Client in `src/notifications/` — `services/pushService.ts` (device token lifecycle), `services/notificationPrefs.ts` (mute, limiter reset), `store/usePushPromptStore.ts` + `components/PushPromptBanner.tsx` (permission banner), the two toggles, and `public/push-sw.js` (the `push` / `notificationclick` handlers, loaded into the Workbox service worker with `importScripts`).
+
+Summary:
 
 1. A Firestore write (transaction created/edited/deleted, invite, friend request, space deleted, import finished) fires a Cloud Function that resolves the event kind and its recipients (`travelMemberId` → `uid` via the space's `members`; the actor is never notified)
 2. The function writes one activity document per event per recipient to `users/{uid}/activity/{eventId}` (fan-out on write, snapshot of names and amounts, the recipient's own share). This happens from day one, even if push ships before the feed UI
@@ -367,12 +378,13 @@ Full design: `docs/NOTIFICATIONS_SPEC.md` (authoritative). Summary:
 
 **Delete (solo / last user):**
 1. User taps "Delete this space" → confirmation dialog
-2. `deleteSpace()`: batch-deletes all transactions in the subcollection (`getDocs` + `writeBatch`), then `deleteDoc` on the space document
+2. `deleteSpace()` deletes **only the space document** (fire-and-forget `deleteDoc`, works offline)
 3. User navigated back to `/spaces`
+4. The Cloud Function `onTravelDeleted` removes every subcollection server-side (`recursiveDelete()`: `transactions`, `importBatches`) and writes one `space_deleted` activity event per former member
 
-**v1 limitation:** subcollection cleanup is client-side. If the client crashes mid-deletion, orphaned transactions remain (invisible but consuming storage). A single `writeBatch` is also capped at 500 writes, so a space with more than 500 transactions currently cannot be deleted.
+Deleting the space first means each cascaded transaction delete finds no parent space (and no end-user actor) and produces no event (`NOTIFICATIONS_SPEC.md` §5 rule 5). There is no 500-write cap any more, and a crash mid-deletion can no longer strand transactions. For a few seconds the orphaned transactions still exist but are unreadable: the rules check the parent's `memberUids`.
 
-**Planned (prerequisite for notifications, `NOTIFICATIONS_SPEC.md` §5 rule 5):** `deleteSpace()` deletes only the space document. A Cloud Function `onTravelDeleted` cascade-deletes the `transactions` subcollection server-side (`recursiveDelete()`) and writes one `space_deleted` activity event per former member. Deleting the space first means each cascaded transaction delete finds no parent space and produces no event.
+⚠️ Until the notifications build is on production hosting, the live client still runs the old client-side cascade (`getDocs` + `writeBatch`, capped at 500). Both paths end in the same state.
 
 **Archive / Unarchive (per-user):**
 1. `archivedByUids: string[]` on the space document — each member archives independently
@@ -443,6 +455,9 @@ All operations require authentication. Rules are deployed via `firestore.rules` 
 **travels/{travelId}/transactions/{txId}:**
 - Read/write: space member only (membership validated via `get()` on the parent space document — one extra read per rule evaluation)
 
+**travels/{travelId}/importBatches/{importBatchId}:**
+- Create only: space member, `createdBy == auth.uid`, fields limited to `createdBy`, `rowCount`, `createdAt`. No read, update or delete (the Cloud Function trusts `createdBy` as the actor).
+
 **Notification paths under users/{userId}/** (owner-only; Cloud Functions write with the Admin SDK and bypass rules — see `NOTIFICATIONS_SPEC.md` §3.4):
 - `activity/{eventId}`: read; update of `openedAt` only (must be a timestamp). No client create/delete.
 - `fcmTokens/{token}`: read, create, update, delete.
@@ -478,4 +493,4 @@ All operations require authentication. Rules are deployed via `firestore.rules` 
 | Manual fetch trigger | On-demand webhook fallback deferred to v4. | Decided (v4) |
 | updateSpaceList conflict | Adding categories/methods from transaction form overwrites the full LabeledItem[] array. Two offline members adding different items simultaneously → last sync wins. Fix in v2: use arrayUnion for individual item additions. | Open (v2) |
 | arrayUnion in security rules | Resolved: FieldValue transforms (arrayUnion) are NOT reflected in request.resource.data during rule evaluation. Rules must use capability tokens (pendingInviteId + get()) instead of checking mutated array fields. | Decided |
-| Space deletion subcollection cleanup | Cloud Function `onTravelDeleted` cascade-deletes server-side; the client deletes only the space document. Pulled forward from v2 as a prerequisite for notifications (avoids one `tx_deleted` event per transaction). Also fixes the >500-transaction cap and crash recovery. | Decided (with notifications) |
+| Space deletion subcollection cleanup | Cloud Function `onTravelDeleted` cascade-deletes server-side; the client deletes only the space document. Pulled forward from v2 as a prerequisite for notifications (avoids one `tx_deleted` event per transaction). Also fixes the >500-transaction cap and crash recovery. | Implemented (Nov 2026), function deployed; client change ships with the notifications build |

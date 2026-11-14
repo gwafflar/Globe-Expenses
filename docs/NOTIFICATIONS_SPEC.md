@@ -1,6 +1,9 @@
 # Notifications & Activity Feed — Specification
 
-> Status: **design agreed, not implemented** (October 2026).
+> Status: **implemented, device tests pending** (November 2026). Functions and rules are
+> deployed; the web app is on a preview channel. Progress and decisions taken while
+> building: `docs/notification-implementation-journal.md`. Manual device tests:
+> `docs/NOTIFICATIONS_TEST_PLAN.md`. The Activity Feed UI (§10) is not built.
 > Supersedes the short notes in `GlobeExpenses_Specification.md` §3.7 / §3.11 and
 > `GlobeExpenses_Architecture.md` §5.6 where they differ.
 
@@ -155,6 +158,8 @@ interface ActivityEvent {
   actor: { uid: string; name: string }                   // snapshot (§3.2)
   space?: { id: string; name: string; emoji?: string }   // snapshot
   importBatchId?: string      // imported rows + the import_completed summary
+  inviteId?: string           // space_invite, friend_request(_accepted): link to /invite/:id
+  import?: { rowCount: number; involvingMe: number }   // import_completed only (§7)
   openedAt?: Timestamp        // set by the client when the entry is tapped (§3.3)
 
   // Transaction kinds only
@@ -169,8 +174,12 @@ interface ActivityEvent {
     totalAmount?: number; currency?: string; exchangeRate?: number; type?: TransactionType
   }
   material?: boolean                                // edits only (§5.3)
+  transferFrom?: string                             // transfer_received only: sender's member name
 }
 ```
+
+`createdAt` is the triggering write's time (the trigger's event time), so it is the
+same on a retried trigger and orders the feed by when things happened.
 
 `kind` is a discriminated union: one document shape, optional fields filled by kind,
 one renderer per kind in the UI. T5 and T6 are separate kinds (not flags) because the
@@ -538,7 +547,35 @@ carries the pending-invites badge). v1 must not use that spot for anything else.
 
 ---
 
-## 11. Open questions
+## 11. Implementation notes (November 2026)
+
+Points the design left open, as built. Reasons are in the journal.
+
+- **Involved** = listed as payer or beneficiary with a non-zero amount (any listed
+  member on a zero-total transaction). A recipient must also still be in `memberUids`.
+- **Cosmetic fields** also include `date`, `fees`, `adjustmentMode`, `amountFormula`.
+  An edit that changes no visible field writes no event.
+- **S1 fires on gaining access** (`memberUids` grows), not on claiming a slot.
+  **F3a** is that same `member_joined` event, pushed to the inviter only; the inviter
+  is read from the invite named by `pendingInviteId`.
+- **No end-user actor, no event** (Admin SDK or console writes). The delete cascade
+  relies on this as well as on the missing parent space.
+- **Imports:** a write that stamps a new `importBatchId` never pushes, so a re-import
+  that updates rows in place is covered too. The summary's counts come from the server
+  query; the client's `rowCount` is ignored.
+- **Limiter keys:** F1, F2 use `_social`; everything tied to a space the recipient is
+  in uses the space id, including the import summary and F3a.
+- **Tap targets:** transaction events → `/spaces/:id?tx=:txId`; deleted transaction,
+  member and import events → `/spaces/:id`; space deleted → `/spaces`; space invite →
+  `/invite/:inviteId`; friend events → `/profile`.
+- **Notifications also show while the app is open**: iOS forbids a push without a
+  visible notification, so nothing is suppressed in the foreground.
+- **Known gap:** merging two member slots rewrites many transactions and reads as many
+  material edits (3 pushes at most, one feed entry each).
+
+---
+
+## 12. Open questions
 
 - **Retention (deferred, to fix later):** activity documents are kept forever for now.
   Revisit once real volumes are known (~1 KB per event per recipient; Firestore

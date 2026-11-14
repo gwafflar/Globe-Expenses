@@ -2877,3 +2877,13 @@ Plan: Session 028 table. Design: `docs/NOTIFICATIONS_SPEC.md`. This entry is ext
 - Deploy with pnpm needs `@google-cloud/functions-framework` as an explicit dependency: Cloud Build adds it automatically for npm projects only. Image cleanup policy set to 1 day.
 - Verified: `tsc -b`, `pnpm test` 625/625, `build`, functions typecheck, rules 22/22, emulator trigger fired for create/update/delete.
 - Functions + rules deployed by the user (the first functions attempt left an HTTPS placeholder that had to be deleted). Real actor confirmed: `authType: 'api_key'` + `authId` = Firebase Auth uid on create/update/delete (spec §3.2).
+
+### Steps 2–7 — built 14 November 2026, device tests pending
+
+Details and decisions: `docs/notification-implementation-journal.md`. Manual tests: `docs/NOTIFICATIONS_TEST_PLAN.md`.
+
+- Server: five triggers in `functions/src/index.ts` over pure event logic (`events/`), limiter + text + FCM send (`push/`). Smoke trigger removed. `onTravelDeleted` cascade replaces the client-side one; `deleteSpace()` now deletes only the space document.
+- Client: `src/notifications/` (token lifecycle, live push state, banner store, Profile and space toggles, `?tx=` deep link, reset-on-open) and `public/push-sw.js` via Workbox `importScripts`. Importer stamps `importBatchId` and writes the `importBatches` marker.
+- Verified: `tsc -b`, `pnpm test` 644/644, `build`, functions 79/79, rules 28/28, 29-check end-to-end run on the emulators.
+- Deployed: rules + functions to production; web app to preview channel `notifications` only. **Production hosting unchanged.**
+- **Next:** user runs test plan T1–T5 on Android and iPhone. Then production hosting deploy and PR. Open: `mergeMembers()` reads as a burst of material edits.

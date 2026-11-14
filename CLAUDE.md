@@ -20,6 +20,9 @@ At the start of every session, before doing anything else, read all files in `do
 - No behaviour may branch on `presetOrigin`; behaviour reads `config` via `getSpaceConfig()`
 - When stripping fields before a Firestore write, test `v !== undefined` explicitly. Never filter by truthiness — `false`, `0` and `''` are all valid stored values and dropping them produces partial documents that resolvers silently paper over.
 - Firestore documents are mapped to domain objects in exactly one place per collection (`mapSpaceDoc()` for `travels/`). Never hand-roll a second mapping — optional fields make an omission type-check, and the value is silently `undefined` rather than a compile error.
+  - **One deliberate exception:** `functions/src/mapping.ts`. Cloud Functions cannot import from `src/`, so they keep a minimal second mapping of spaces, members, splits and invites (only the fields notifications read). `functions/src/mapping.test.ts` pins the legacy cases; when the stored shape of a member or split changes, update both sides.
+- Notification event logic in `functions/src/events/` is pure (no Firestore, no clock). Triggers in `functions/src/index.ts` only read, call it, and publish. Keep new rules there, with a unit test.
+- Push permission is requested only from a tap handler, and `enablePush()` must be the first call in it (iOS drops the prompt otherwise). Never call it from an effect.
 
 ## Verification
 
