@@ -21,7 +21,7 @@ import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore'
 import { auth, db } from '@/services/firebase'
 import type { UserProfile } from '@/auth/services/userService'
 import { refreshPushToken, removePushTokenOnSignOut } from '@/notifications/services/pushService'
-import { useLanguageStore } from '@/i18n'
+import { languageForNewProfile, useLanguageStore } from '@/i18n'
 
 // Shape of the auth store
 interface AuthState {
@@ -81,7 +81,13 @@ onAuthStateChanged(auth, async (user) => {
     if (!snapshot.exists()) {
       // Document doesn't exist yet — create it with default values.
       // This handles first sign-in for both email/password and Google OAuth.
+      //
+      // Language: a choice made before signing up (Welcome page switcher)
+      // becomes the account's language. No choice ('auto') → field omitted,
+      // not written as undefined (Firestore rejects undefined values).
+      const language = languageForNewProfile(useLanguageStore.getState().preference)
       await setDoc(userDocRef, {
+        ...(language !== undefined ? { language } : {}),
         uid: user.uid,
         type: 'human',
         displayName: user.displayName ?? '',

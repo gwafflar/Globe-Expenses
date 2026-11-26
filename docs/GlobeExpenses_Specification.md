@@ -43,6 +43,7 @@ The product is distributed as a Progressive Web App (PWA), installable directly 
 - The User document carries a `type` field fixed to `'human'`, distinguishing human actors from agent actors in the CreatedByRef union type. Agent actors do not have User documents.
 - Global categories and payment methods are available across all spaces as a fallback when a space has no per-space list defined.
 - **UI language** (since Nov 2026): English or French, chosen in Profile → Preferences. Default "Automatic" follows the browser language (first supported one, else English). The choice is saved on the profile and follows the user to other devices; it applies immediately, also on the login page of that device. Push notifications use each device's language.
+- Before signing in, a language pill (flag + code, top right of the Welcome page) sets the language of this device for the whole login/register flow. A new account created after such a choice stores it as its language. On login to an existing account, a language saved on the profile wins. Flags: 🇬🇧 English, 🇫🇷 Français.
 
 ## 3.2 Space Management
 

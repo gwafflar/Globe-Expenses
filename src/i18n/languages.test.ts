@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   detectBrowserLanguage,
   intlLocaleFor,
+  LANGUAGE_FLAGS,
+  languageForNewProfile,
   parsePreference,
   resolveLanguage,
 } from './languages'
@@ -35,6 +37,22 @@ describe('parsePreference', () => {
     expect(parsePreference('de')).toBe('auto')
     expect(parsePreference(null)).toBe('auto')
     expect(parsePreference(42)).toBe('auto')
+  })
+})
+
+describe('languageForNewProfile', () => {
+  it('keeps an explicit choice made before sign-up', () => {
+    expect(languageForNewProfile('fr')).toBe('fr')
+    expect(languageForNewProfile('en')).toBe('en')
+  })
+  it('stores nothing when the user never chose', () => {
+    expect(languageForNewProfile('auto')).toBeUndefined()
+  })
+})
+
+describe('LANGUAGE_FLAGS', () => {
+  it('uses the UK flag for English and the French flag for French', () => {
+    expect(LANGUAGE_FLAGS).toEqual({ en: '🇬🇧', fr: '🇫🇷' })
   })
 })
 

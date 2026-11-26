@@ -7,8 +7,16 @@ Automated checks cover key completeness (compiler), empty or untranslated French
    - Welcome, login and register pages are in French.
 2. Browser set to German or English. Same steps → English.
 
+## L1b — Welcome page pill and sign-up
+1. Signed out, Welcome page: a pill top right shows the flag and code ("🇬🇧 EN"). It does not overlap the beta banner or the logo, on phone and desktop.
+2. Tap it, choose 🇫🇷 Français: the page turns French. Open login, then register: both French.
+3. Register a new account (email, then separately Google): after sign-up the app stays French, and Profile → Language shows "🇫🇷 Français" (not "Automatic").
+4. Without touching the pill: a new account's Profile shows "Automatic".
+5. Pill set to French, then log in to an existing account whose profile language is English: the app switches to English after login.
+6. On Windows, flags show as letters ("GB", "FR"): expected, Windows has no flag emoji glyphs.
+
 ## L2 — Picker in Profile
-1. Profile → Préférences / Preferences → Language. Options: "Automatic (…)", "English", "Français".
+1. Profile → Préférences / Preferences → Language. Options: "Automatic (…)", "🇬🇧 English", "🇫🇷 Français".
 2. Switch to Français: the whole page changes immediately, no reload, no Save button.
 3. Go through every screen once: spaces list, create space (each preset), space detail, the four tabs, transaction form (all four types), filters, Parameters (members, rates, fields editor, reset-to-preset dialog), Dashboard (cards, card builder, wallet balances), import dialog, export with a disabled field holding data, invite page. Note any English left, any text overflowing its button or badge (French is ~20 % longer), and any awkward wording.
 4. Reload: still French. Sign out: login page still French.

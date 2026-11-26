@@ -29,8 +29,10 @@ export type { Language, LanguagePreference } from './languages'
 export {
   SUPPORTED_LANGUAGES,
   LANGUAGE_NAMES,
+  LANGUAGE_FLAGS,
   isSupportedLanguage,
   detectBrowserLanguage,
+  languageForNewProfile,
 } from './languages'
 export { plural, type PluralForms } from './plural'
 export { useLanguageStore } from './useLanguageStore'
