@@ -2911,3 +2911,12 @@ Design: Architecture §3.3, Spec §3.1 and decisions #99–103. Manual tests: `d
 - **Bug fixed in passing**: `getFlagForCountry()` returned the ISO code ("JP") instead of the flag for countries auto-added from a transaction or an import.
 - **Verified**: `tsc -b`, `pnpm test` 661/661, `build`, functions typecheck + 84/84, lint no worse on any touched file. Rules unchanged (`fcmTokens` and `users/{uid}` accept the new field). Not deployed.
 - **Open**: device run of the test plan (L1–L6); deploy functions + hosting; pre-existing hooks-after-early-return in `ProfilePage` and `TransactionForm` (flagged as a separate task).
+
+---
+
+## 🐛 Working Session 032 — 26 November 2026 — User-reported fixes
+
+- **Feedback**: sends failed (no `feedback/` rule in `firestore.rules`, so every write is denied since rules are deployed from the file). Beta banner (all pages) and Profile section removed; the form remains in Parameters, Welcome and the PWA Google hint.
+- **Google sign-in in the installed PWA** (iPhone, sometimes Android): `authDomain` was `firebaseapp.com` while the app runs on `web.app`; storage partitioning hides the redirect result, so the user lands back on Welcome. `resolveAuthDomain()` now uses the page's own Hosting domain. **Before deploying**: add `https://globe-expenses.web.app/__/auth/handler` to the OAuth client's redirect URIs in Google Cloud Console.
+- **Merge members white screen**: `batch.commit()` applies locally first, so the space snapshot dropped the deleted member while the confirm step still looked it up with `!`. The confirm step now renders from a copy taken when it opens.
+- **Open**: device test of PWA Google sign-in; merging away your own slot leaves you in `memberUids` with no slot (by design today); `mergeMembers()` compares `createdBy` (a uid) with a `travelMemberId`, so that branch never runs.
