@@ -438,7 +438,7 @@ The Activity Feed is a pull-model notification center surfacing collaborative ev
 | 75 | mainCurrency is per-space | `Space.mainCurrency` set at creation. Locked in v1. `UserProfile.mainCurrency` retained as default for new spaces. | Ensures consistent exchange rates across all members in a shared space |
 | 76 | defaultRates per-space | `Space.defaultRates?: Record<string, number>`. Seeded from hardcoded table. User-editable. Per-transaction override available. | Lets users correct rates to match actual space rates without affecting past transactions |
 | 77 | Same-currency balance optimization | `getSingleCurrency()` + `computeBalancesRaw()` — skips exchangeRate multiplication when all txs share one currency. | Eliminates lossy round-trip distortion (e.g. all-MYR trip settling in MYR) |
-| 78 | Feedback collection (`/feedback/{id}`) | Written with `await` (not fire-and-forget). `allow create: if true` security rule (anonymous allowed). | Feedback needs success/failure feedback; unauthenticated users should still be able to report issues |
+| 78 | ~~Feedback collection (`/feedback/{id}`)~~ | Superseded by #104 (Nov 2026). | |
 | 79 | Container renamed Travel → Space | Generic across trips, flatshares, personal budgets | See `docs/SPACE_REFACTOR_SPEC.md` |
 | 80 | Firestore path `travels/` frozen as legacy | Renaming a collection means copying every document; zero user value | |
 | 81 | Firestore field keys frozen, incl. `travelMemberId` | Type properties map 1:1 to stored keys; renaming needs a migration | |
@@ -464,3 +464,4 @@ The Activity Feed is a pull-model notification center surfacing collaborative ev
 | 101 | Stored values stay language-neutral | Countries stored as English names, displayed via `Intl.DisplayNames`; categories etc. are user data, not translated | Translating stored values would split "Japan"/"Japon" in mixed-language spaces and break filters and exports |
 | 102 | XLSX workbook stays English | Sheet names, headers and cells are not translated; only the import/export UI is. Foreign-file import also recognises French headers | The importer matches on them and round-trip tests pin them |
 | 103 | Push language per device | `fcmTokens/{token}.language`, messages grouped by language in `deliverPush()` | `'auto'` resolves differently per browser; one user can have devices in two languages |
+| 104 | No in-app feedback | Beta banner and every feedback form removed, `src/feedback/` deleted | Sends had been failing (no `feedback/` rule in `firestore.rules`); not worth keeping a broken entry point |

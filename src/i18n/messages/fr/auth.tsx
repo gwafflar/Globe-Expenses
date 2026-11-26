@@ -61,7 +61,7 @@ export const auth: Messages['auth'] = {
       removeAndroid: "Android : appui long sur l'icône → Désinstaller",
       removeIos: "iOS : appui long sur l'icône → Supprimer l'app",
       removeDesktop: "Ordinateur : clic droit sur l'icône → Désinstaller",
-      issues: 'Un problème ? Envoyez un retour via le bandeau en haut.',
+      issues: 'Un problème ? Vous pouvez contacter le développeur grâce aux coordonnées en bas de cette page.',
     },
 
     features: {
@@ -79,7 +79,6 @@ export const auth: Messages['auth'] = {
       openSourceDesc: 'Gratuit et code public.',
       viewOnGithub: 'Voir sur GitHub',
     },
-    feedbackTitle: 'Votre avis',
   },
 
   login: {
@@ -124,6 +123,5 @@ export const auth: Messages['auth'] = {
 
   pwaHint: {
     message: 'Un problème de connexion avec Google ? Essayez de vous connecter depuis votre navigateur :',
-    sendFeedback: 'Envoyer un retour',
   },
 }

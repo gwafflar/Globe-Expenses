@@ -1,4 +1,4 @@
-// social.tsx — invite page, friends, push notification UI, install prompt, feedback.
+// social.tsx — invite page, friends, push notification UI, install prompt.
 // `.tsx` because several messages embed markup (<strong>, an icon, a link):
 // those are functions taking the ReactNode pieces as parameters, so French can
 // place them where its word order needs them.
@@ -122,20 +122,5 @@ export const social = {
     ),
     install: 'Install',
     dismiss: 'Dismiss install banner',
-  },
-
-  // Feedback form + the beta banner that opens it
-  feedback: {
-    thanks: 'Thank you for your feedback!',
-    intro: "Your feedback is important! Instantaneously share a bug, a suggestion, or anything you'd like to improve. Add you contact info if you want to be contacted.",
-    placeholder: 'Type your feedback here...',
-    sendFailed: 'Failed to send feedback',
-    sending: 'Sending...',
-    send: 'Send',
-    contactDeveloper: 'Contact developer',
-    // `author` is the link to the developer's GitHub profile
-    madeBy: (p: { author: ReactNode }) => <>Made with 💜 by{' '}{p.author}{' '}in South-East Asia 🌏</>,
-    betaBanner: () => <><strong>Beta Version</strong> — Your feedback is welcome!</>,
-    dialogTitle: 'Send feedback',
   },
 }

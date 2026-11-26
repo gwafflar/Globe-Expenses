@@ -63,7 +63,7 @@ export const auth = {
       removeAndroid: 'Android: Long-press icon → Uninstall',
       removeIos: 'iOS: Long-press icon → Remove App',
       removeDesktop: 'Desktop: Right-click icon → Uninstall',
-      issues: 'Have issues? Send feedback via the banner on top.',
+      issues: 'Have issues? You can contact the developer with the contact information at the bottom of this page.',
     },
 
     features: {
@@ -81,7 +81,6 @@ export const auth = {
       openSourceDesc: 'Free to use  & Public code.',
       viewOnGithub: 'View on GitHub',
     },
-    feedbackTitle: 'Feedback',
   },
 
   login: {
@@ -127,6 +126,5 @@ export const auth = {
   // GooglePwaHint — shown in the installed app when Google sign-in struggles
   pwaHint: {
     message: 'Issues connecting with Google? Try signing in from your browser:',
-    sendFeedback: 'Send feedback',
   },
 }

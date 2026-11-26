@@ -4,12 +4,19 @@
 import { initializeApp } from 'firebase/app'
 import { getAuth } from 'firebase/auth'
 import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore'
+import { resolveAuthDomain } from './authDomain'
 // import { getStorage } from 'firebase/storage'  // uncomment when Firebase Storage is configured
 
 // Vite exposes env variables prefixed with VITE_ via import.meta.env
 const firebaseConfig = {
   apiKey:            import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain:        import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  // Same domain as the page when served from Firebase Hosting, so Google
+  // sign-in by redirect works in the installed PWA — see authDomain.ts.
+  authDomain:        resolveAuthDomain(
+    window.location.hostname,
+    import.meta.env.VITE_FIREBASE_PROJECT_ID,
+    import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  ),
   projectId:         import.meta.env.VITE_FIREBASE_PROJECT_ID,
   storageBucket:     import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,

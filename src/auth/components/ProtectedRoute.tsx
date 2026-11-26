@@ -5,7 +5,6 @@
 
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { useAuthStore } from '@/auth/store/useAuthStore'
-import { BetaBanner } from '@/feedback/components/BetaBanner'
 import { NotificationClickHandler } from '@/notifications/components/NotificationClickHandler'
 import { PushPromptBanner } from '@/notifications/components/PushPromptBanner'
 
@@ -41,7 +40,6 @@ export function ProtectedRoute() {
   // <Outlet /> is a React Router v6 placeholder which renders any child
   // route element nested under this ProtectedRoute in the <Routes> tree.
   // This lets us wrap multiple protected pages with a single guard.
-  // BetaBanner sits above all protected page content for maximum visibility.
   // Push notifications (docs/NOTIFICATIONS_SPEC.md):
   //  - NotificationClickHandler renders nothing; it navigates when a
   //    notification is tapped while the app is open.
@@ -50,7 +48,6 @@ export function ProtectedRoute() {
   return (
     <>
       <NotificationClickHandler />
-      <BetaBanner />
       <PushPromptBanner />
       <Outlet />
     </>

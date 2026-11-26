@@ -16,7 +16,6 @@ export const parameters: Messages['parameters'] = {
     paymentMethods: 'Moyens de paiement',
     countries: 'Pays',
     cities: 'Villes',
-    feedback: 'Votre avis',
     manageSpace: "Gérer l'espace",
   },
 

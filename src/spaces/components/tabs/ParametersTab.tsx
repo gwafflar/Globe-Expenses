@@ -55,7 +55,6 @@ import {
 import { useLocale, useT } from '@/i18n'
 import { getExchangeRate } from '@/shared/utils/exchangeRates'
 import { Share2, Check } from 'lucide-react'
-import { FeedbackForm } from '@/feedback/components/FeedbackForm'
 import { SpaceNotificationToggle } from '@/notifications/components/SpaceNotificationToggle'
 import { requestPushPrompt } from '@/notifications/store/usePushPromptStore'
 
@@ -1005,6 +1004,12 @@ function MembersSection({
   const [mergeStep, setMergeStep] = useState<'select' | 'confirm'>('select')
   const [mergeSelected, setMergeSelected] = useState<Set<string>>(new Set())
   const [mergeKeepId, setMergeKeepId] = useState<string | null>(null)
+  // The two members as they were when the confirm step opened. The confirm
+  // step renders from this copy, not from live `space.members`: while
+  // mergeMembers() awaits the server, Firestore already applies the batch
+  // locally and onSnapshot pushes a `space` without the deleted member.
+  // Reading it from `space.members` then crashed the whole page (white screen).
+  const [mergePair, setMergePair] = useState<[SpaceMember, SpaceMember] | null>(null)
   const [mergeLoading, setMergeLoading] = useState(false)
   const [mergeDone, setMergeDone] = useState<{ keptName: string; deletedName: string } | null>(null)
 
@@ -1012,6 +1017,7 @@ function MembersSection({
     setMergeStep('select')
     setMergeSelected(new Set())
     setMergeKeepId(null)
+    setMergePair(null)
     setMergeLoading(false)
     setMergeDone(null)
     setMergeModalOpen(true)
@@ -1034,23 +1040,27 @@ function MembersSection({
     // Default: keep the claimed one if one is claimed; otherwise keep the first selected
     const memberA = space.members.find(m => m.travelMemberId === a)
     const memberB = space.members.find(m => m.travelMemberId === b)
-    const defaultKeep = (memberA?.userId !== null ? a : memberB?.userId !== null ? b : a)
+    // A member removed meanwhile (another device) — stay on the select step
+    if (!memberA || !memberB) return
+    const defaultKeep = (memberA.userId !== null ? a : memberB.userId !== null ? b : a)
+    setMergePair([memberA, memberB])
     setMergeKeepId(defaultKeep)
     setMergeStep('confirm')
   }
 
   async function handleMerge() {
-    if (!mergeKeepId) return
-    const [a, b] = Array.from(mergeSelected)
-    const deleteId = mergeKeepId === a ? b : a
-    const keptMember = space.members.find(m => m.travelMemberId === mergeKeepId)
-    const deletedMember = space.members.find(m => m.travelMemberId === deleteId)
+    if (!mergeKeepId || !mergePair) return
+    const keptMember = mergePair.find(m => m.travelMemberId === mergeKeepId)
+    const deletedMember = mergePair.find(m => m.travelMemberId !== mergeKeepId)
     if (!keptMember || !deletedMember) return
+    const deleteId = deletedMember.travelMemberId
+    // Captured before the await: `space` may already be the post-merge snapshot afterwards
+    const membersBefore = space.members
 
     setMergeLoading(true)
     try {
-      await mergeMembers(space.spaceId, mergeKeepId, deleteId, space.members, space.createdBy)
-      onSpaceChange({ members: space.members.filter(m => m.travelMemberId !== deleteId) })
+      await mergeMembers(space.spaceId, mergeKeepId, deleteId, membersBefore, space.createdBy)
+      onSpaceChange({ members: membersBefore.filter(m => m.travelMemberId !== deleteId) })
       setMergeDone({ keptName: keptMember.displayName, deletedName: deletedMember.displayName })
     } finally {
       setMergeLoading(false)
@@ -1608,12 +1618,12 @@ function MembersSection({
               )}
 
               {/* ── Step 2: choose which to keep + confirm ── */}
-              {!mergeDone && mergeStep === 'confirm' && (() => {
-                const [a, b] = Array.from(mergeSelected)
-                const memberA = space.members.find(m => m.travelMemberId === a)!
-                const memberB = space.members.find(m => m.travelMemberId === b)!
-                const deleteId = mergeKeepId === a ? b : a
-                const deletedMember = space.members.find(m => m.travelMemberId === deleteId)!
+              {!mergeDone && mergeStep === 'confirm' && mergePair && (() => {
+                // Rendered from the snapshot taken at proceedToConfirm(), never
+                // from live space.members (see mergePair above)
+                const [memberA, memberB] = mergePair
+                const keptMember = mergeKeepId === memberA.travelMemberId ? memberA : memberB
+                const deletedMember = keptMember === memberA ? memberB : memberA
                 return (
                   <div className="flex flex-col gap-4">
                     <p className="text-xs text-muted-foreground">
@@ -1657,8 +1667,7 @@ function MembersSection({
                       <p className="mt-0.5">
                         {tmerge.warning({
                           deleted: deletedMember.displayName,
-                          // `?? ''` matches the old JSX, which rendered nothing for undefined
-                          kept: space.members.find(m => m.travelMemberId === mergeKeepId)?.displayName ?? '',
+                          kept: keptMember.displayName,
                         })}
                       </p>
                     </div>
@@ -2142,11 +2151,6 @@ export function ParametersTab({ space, transactions, onSpaceChange }: Parameters
           />
         </Section>
       )}
-
-      {/* Feedback — embedded form for quick beta feedback */}
-      <Section title={tp.sections.feedback}>
-        <FeedbackForm source="ParametersTab" />
-      </Section>
 
       {/* ----------------------------------------------------------------- */}
       {/* Manage space — archive and leave/delete actions                   */}

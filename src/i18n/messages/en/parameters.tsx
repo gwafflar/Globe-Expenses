@@ -19,7 +19,6 @@ export const parameters = {
     paymentMethods: 'Payment methods',
     countries: 'Countries',
     cities: 'Cities',
-    feedback: 'Feedback',
     manageSpace: 'Manage space',
   },
 

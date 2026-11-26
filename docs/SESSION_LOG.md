@@ -2912,3 +2912,12 @@ Design: Architecture §3.3, Spec §3.1 and decisions #99–103. Manual tests: `d
 - **Verified**: `tsc -b`, `pnpm test` 661/661, `build`, functions typecheck + 84/84, lint no worse on any touched file. Rules unchanged (`fcmTokens` and `users/{uid}` accept the new field). Not deployed.
 - **Open**: device run of the test plan (L1–L6); deploy functions + hosting; pre-existing hooks-after-early-return in `ProfilePage` and `TransactionForm` (flagged as a separate task).
 - **26 Nov — Welcome page language pill**: `LanguageSwitcher` (flag + code, top right) sets the device language before login; a new account stores an explicit choice (`languageForNewProfile()`). Flags 🇬🇧 / 🇫🇷 in both pickers. Checked by headless screenshots (phone/desktop, EN/FR): the pill first rendered centred because a concatenated `relative` beat the caller's `absolute`; fixed with `cn()`. Test plan L1b.
+
+---
+
+## 🐛 Working Session 032 — 26 November 2026 — User-reported fixes
+
+- **Feedback**: sends failed (no `feedback/` rule in `firestore.rules`, so every write is denied since rules are deployed from the file). Then removed everywhere (banner, Profile, Parameters, Welcome, PWA Google hint) and `src/feedback/` deleted — decision #104. The "Contact developer" card is kept as a standalone `ContactDeveloperCard` at the bottom of Profile and Welcome.
+- **Google sign-in in the installed PWA** (iPhone, sometimes Android): `authDomain` was `firebaseapp.com` while the app runs on `web.app`; storage partitioning hides the redirect result, so the user lands back on Welcome. `resolveAuthDomain()` now uses the page's own Hosting domain. Required `https://globe-expenses.web.app/__/auth/handler` in the OAuth client's redirect URIs (Google Cloud Console) — added by the user on 26 Nov.
+- **Merge members white screen**: `batch.commit()` applies locally first, so the space snapshot dropped the deleted member while the confirm step still looked it up with `!`. The confirm step now renders from a copy taken when it opens.
+- **Open**: device test of PWA Google sign-in; merging away your own slot leaves you in `memberUids` with no slot (by design today); `mergeMembers()` compares `createdBy` (a uid) with a `travelMemberId`, so that branch never runs.

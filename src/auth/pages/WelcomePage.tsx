@@ -16,9 +16,8 @@ import { cn } from '@/lib/utils'
 import { GoogleLogo } from '@/auth/components/GoogleLogo'
 import { GooglePwaHint, markPwaGoogleAttempted, isPwaGoogleAttempted, clearPwaGoogleAttempted } from '@/auth/components/GooglePwaHint'
 import { WifiOff, Users, Wallet, Plane, BarChart3, Github, ChevronDown, ChevronUp, Smartphone } from 'lucide-react'
-import { BetaBanner } from '@/feedback/components/BetaBanner'
-import { FeedbackForm } from '@/feedback/components/FeedbackForm'
 import { useT } from '@/i18n'
+import { ContactDeveloperCard } from '@/auth/components/ContactDeveloperCard'
 import { LanguageSwitcher } from '@/auth/components/LanguageSwitcher'
 
 // Returns true when the app is running as an installed PWA (standalone window).
@@ -102,9 +101,6 @@ export function WelcomePage() {
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
-      {/* Beta feedback banner — always visible at the very top */}
-      <BetaBanner />
-
       {/* Hero section — `relative` anchors the language switcher to its corner */}
       <div className="relative flex flex-1 flex-col items-center justify-center px-6 pb-8 pt-16">
         {/* Language for this device; carried through login/register and saved
@@ -333,13 +329,10 @@ export function WelcomePage() {
         </div>
       </div>
 
-      {/* Feedback section — embedded form for maximum visibility on the welcome page */}
-      <div className="border-t px-6 py-8">
+      {/* Contact developer — collapsible card, same component as on Profile */}
+      <div className="border-t px-4 py-3">
         <div className="mx-auto max-w-lg">
-          <h2 className="mb-3 text-center text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-            {w.feedbackTitle}
-          </h2>
-          <FeedbackForm source="WelcomePage" />
+          <ContactDeveloperCard />
         </div>
       </div>
     </div>
