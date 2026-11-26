@@ -30,6 +30,13 @@ export const LANGUAGE_NAMES: Record<Language, string> = {
   fr: 'Français',
 }
 
+/** Flag shown next to each language in the pickers. English uses the UK flag
+ *  (product choice), not the US one. Record<Language, …> = one per language. */
+export const LANGUAGE_FLAGS: Record<Language, string> = {
+  en: '🇬🇧',
+  fr: '🇫🇷',
+}
+
 /** Type guard: narrows an unknown value (Firestore, localStorage) to Language. */
 export function isSupportedLanguage(value: unknown): value is Language {
   return typeof value === 'string' && (SUPPORTED_LANGUAGES as readonly string[]).includes(value)
@@ -51,6 +58,16 @@ export function detectBrowserLanguage(browserLanguages: readonly string[]): Lang
     if (isSupportedLanguage(primary)) return primary
   }
   return FALLBACK_LANGUAGE
+}
+
+/**
+ * The `language` to store on a NEW user profile, from this device's
+ * preference at sign-up time. An explicit choice (e.g. made on the Welcome
+ * page) is kept; 'auto' gives `undefined` = field omitted = "never chose",
+ * so each of the user's devices keeps following its own browser.
+ */
+export function languageForNewProfile(preference: LanguagePreference): Language | undefined {
+  return preference === 'auto' ? undefined : preference
 }
 
 /** The language actually shown: the explicit choice, or the browser's. */

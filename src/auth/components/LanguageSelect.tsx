@@ -16,6 +16,7 @@ import { useAuthStore } from '@/auth/store/useAuthStore'
 import { updateUserLanguage } from '@/auth/services/userService'
 import { refreshPushToken } from '@/notifications/services/pushService'
 import {
+  LANGUAGE_FLAGS,
   LANGUAGE_NAMES,
   SUPPORTED_LANGUAGES,
   detectBrowserLanguage,
@@ -64,7 +65,7 @@ export function LanguageSelect({ uid }: { uid: string }) {
           // Each language is listed under its own name ("Français", not
           // "French"), so a user stuck in a language they cannot read finds theirs.
           <option key={code} value={code} lang={code}>
-            {LANGUAGE_NAMES[code]}
+            {LANGUAGE_FLAGS[code]} {LANGUAGE_NAMES[code]}
           </option>
         ))}
       </select>

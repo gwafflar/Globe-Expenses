@@ -19,6 +19,7 @@ import { WifiOff, Users, Wallet, Plane, BarChart3, Github, ChevronDown, ChevronU
 import { BetaBanner } from '@/feedback/components/BetaBanner'
 import { FeedbackForm } from '@/feedback/components/FeedbackForm'
 import { useT } from '@/i18n'
+import { LanguageSwitcher } from '@/auth/components/LanguageSwitcher'
 
 // Returns true when the app is running as an installed PWA (standalone window).
 function isInstalledPWA(): boolean {
@@ -104,8 +105,11 @@ export function WelcomePage() {
       {/* Beta feedback banner — always visible at the very top */}
       <BetaBanner />
 
-      {/* Hero section */}
-      <div className="flex flex-1 flex-col items-center justify-center px-6 pb-8 pt-16">
+      {/* Hero section — `relative` anchors the language switcher to its corner */}
+      <div className="relative flex flex-1 flex-col items-center justify-center px-6 pb-8 pt-16">
+        {/* Language for this device; carried through login/register and saved
+            on the profile if this visit ends in a new account. */}
+        <LanguageSwitcher className="absolute right-4 top-4" />
         {/* App icon / branding */}
         <img
           src="/images/icon-512.png"
