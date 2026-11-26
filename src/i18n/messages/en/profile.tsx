@@ -1,6 +1,8 @@
 // profile.tsx — the Profile page (identity, security, preferences, friends, sign out).
 // `.tsx` because the sign-out dialog text embeds <br /> and <strong> markup.
 
+import type { ReactNode } from 'react'
+
 export const profile = {
   allSpaces: 'All spaces',
   title: 'Profile',
@@ -77,5 +79,12 @@ export const profile = {
       </>
     ),
     confirm: 'Sign out',
+  },
+
+  // Collapsible card at the bottom of the page (ContactDeveloperCard)
+  contact: {
+    title: 'Contact developer',
+    // `author` is the link to the developer's GitHub profile
+    madeBy: (p: { author: ReactNode }) => <>Made with 💜 by{' '}{p.author}{' '}in South-East Asia 🌏</>,
   },
 }

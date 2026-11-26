@@ -78,4 +78,9 @@ export const profile: Messages['profile'] = {
     ),
     confirm: 'Se déconnecter',
   },
+
+  contact: {
+    title: 'Contacter le développeur',
+    madeBy: (p) => <>Fait avec 💜 par{' '}{p.author}{' '}en Asie du Sud-Est 🌏</>,
+  },
 }

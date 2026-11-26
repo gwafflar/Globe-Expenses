@@ -6,6 +6,7 @@
 //   - Security: email (read-only), send password reset email
 //   - Preferences: favorite main space currency (editable), theme (v2 placeholder)
 //   - Friends: placeholder (v2)
+//   - Contact developer (collapsible ContactDeveloperCard)
 //   - Sign out (red, with confirmation dialog)
 
 import { useState, useEffect, useRef } from 'react'
@@ -46,6 +47,7 @@ import { ALL_CURRENCIES, localizedCurrencyName } from '@/shared/data/pickerData'
 import { useLocale, useT } from '@/i18n'
 import { DeviceNotificationToggle } from '@/notifications/components/DeviceNotificationToggle'
 import { LanguageSelect } from '@/auth/components/LanguageSelect'
+import { ContactDeveloperCard } from '@/auth/components/ContactDeveloperCard'
 
 // ---------------------------------------------------------------------------
 // Avatar color
@@ -747,6 +749,8 @@ export function ProfilePage() {
           </div>
         </Section>
 
+        {/* Contact developer — collapsible, same spot the feedback section used to be */}
+        <ContactDeveloperCard />
 
         {/* Sign out */}
         <div className="pb-8">
