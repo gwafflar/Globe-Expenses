@@ -13,7 +13,6 @@ export const profile = {
     security: 'Security',
     preferences: 'Preferences',
     friends: 'Friends',
-    feedback: 'Feedback',
   },
 
   identity: {

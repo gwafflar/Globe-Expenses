@@ -6,7 +6,6 @@
 //   - Security: email (read-only), send password reset email
 //   - Preferences: favorite main space currency (editable), theme (v2 placeholder)
 //   - Friends: placeholder (v2)
-//   - Feedback: embedded FeedbackForm (includes collapsible contact developer card)
 //   - Sign out (red, with confirmation dialog)
 
 import { useState, useEffect, useRef } from 'react'
@@ -45,7 +44,6 @@ import { createShareableInvite } from '@/friends/services/friendService'
 import { InstallPromptBanner } from '@/shared/components/InstallPromptBanner'
 import { ALL_CURRENCIES, localizedCurrencyName } from '@/shared/data/pickerData'
 import { useLocale, useT } from '@/i18n'
-import { FeedbackForm } from '@/feedback/components/FeedbackForm'
 import { DeviceNotificationToggle } from '@/notifications/components/DeviceNotificationToggle'
 import { LanguageSelect } from '@/auth/components/LanguageSelect'
 
@@ -747,11 +745,6 @@ export function ProfilePage() {
               </p>
             )}
           </div>
-        </Section>
-
-        {/* Feedback — embedded form for quick beta feedback */}
-        <Section title={p.sections.feedback}>
-          <FeedbackForm source="ProfilePage" />
         </Section>
 
 

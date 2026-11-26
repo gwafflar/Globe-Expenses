@@ -1,7 +1,7 @@
 // FeedbackForm.tsx — reusable feedback form with text input, optional image, and send animation.
 //
-// Used in three places: ProfilePage, ParametersTab, WelcomePage.
-// Also rendered inside a Dialog triggered by the BetaBanner on all pages.
+// Used in ParametersTab, WelcomePage and GooglePwaHint.
+// (The global beta banner and the Profile section were removed.)
 //
 // Props:
 //   source — identifies where the form is rendered (for analytics in Firestore)

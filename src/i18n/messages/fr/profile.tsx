@@ -14,7 +14,6 @@ export const profile: Messages['profile'] = {
     security: 'Sécurité',
     preferences: 'Préférences',
     friends: 'Amis',
-    feedback: 'Votre avis',
   },
 
   identity: {

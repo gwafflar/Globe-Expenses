@@ -118,7 +118,5 @@ export const social: Messages['social'] = {
     send: 'Envoyer',
     contactDeveloper: 'Contacter le développeur',
     madeBy: (p) => <>Fait avec 💜 par{' '}{p.author}{' '}en Asie du Sud-Est 🌏</>,
-    betaBanner: () => <><strong>Version bêta</strong> — Vos retours sont les bienvenus !</>,
-    dialogTitle: 'Envoyer un retour',
   },
 }

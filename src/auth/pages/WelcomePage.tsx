@@ -16,7 +16,6 @@ import { cn } from '@/lib/utils'
 import { GoogleLogo } from '@/auth/components/GoogleLogo'
 import { GooglePwaHint, markPwaGoogleAttempted, isPwaGoogleAttempted, clearPwaGoogleAttempted } from '@/auth/components/GooglePwaHint'
 import { WifiOff, Users, Wallet, Plane, BarChart3, Github, ChevronDown, ChevronUp, Smartphone } from 'lucide-react'
-import { BetaBanner } from '@/feedback/components/BetaBanner'
 import { FeedbackForm } from '@/feedback/components/FeedbackForm'
 import { useT } from '@/i18n'
 
@@ -101,9 +100,6 @@ export function WelcomePage() {
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
-      {/* Beta feedback banner — always visible at the very top */}
-      <BetaBanner />
-
       {/* Hero section */}
       <div className="flex flex-1 flex-col items-center justify-center px-6 pb-8 pt-16">
         {/* App icon / branding */}

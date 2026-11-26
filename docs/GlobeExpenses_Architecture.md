@@ -52,10 +52,9 @@ The frontend is organized into the following top-level modules:
   - `spaces/components/CollapsibleCard.tsx` — reusable collapsible card (used by Dashboard; planned for Balance tab)
   - `spaces/components/tabs/ParametersTab.tsx` — all per-space editable lists and settings, members section with invite
 - **transactions/** — Transaction form (create + edit), transaction service
-- **feedback/** — In-app beta feedback form and banner
+- **feedback/** — In-app beta feedback form
   - `feedback/services/feedbackService.ts` — writes to `/feedback/{id}` (awaited, not fire-and-forget; supports anonymous users)
-  - `feedback/components/FeedbackForm.tsx` — bilingual (EN/FR) textarea form with success animation, collapsible contact card
-  - `feedback/components/BetaBanner.tsx` — amber banner visible on all authenticated pages; opens FeedbackForm in a Dialog
+  - `feedback/components/FeedbackForm.tsx` — bilingual (EN/FR) textarea form with success animation, collapsible contact card; shown in ParametersTab, WelcomePage and GooglePwaHint. The global beta banner and the Profile section were removed (Session 032) because sends were failing.
 - **friends/** — Friend search, invite flows, invite acceptance page
   - `friends/services/friendService.ts` — all friend and invite Firestore operations
   - `friends/hooks/usePendingInvites.ts` — real-time snapshot of incoming active invites, exposes `{ invites, count }`

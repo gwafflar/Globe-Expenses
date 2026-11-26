@@ -135,7 +135,5 @@ export const social = {
     contactDeveloper: 'Contact developer',
     // `author` is the link to the developer's GitHub profile
     madeBy: (p: { author: ReactNode }) => <>Made with 💜 by{' '}{p.author}{' '}in South-East Asia 🌏</>,
-    betaBanner: () => <><strong>Beta Version</strong> — Your feedback is welcome!</>,
-    dialogTitle: 'Send feedback',
   },
 }
