@@ -108,15 +108,4 @@ export const social: Messages['social'] = {
     install: 'Installer',
     dismiss: "Fermer la bannière d'installation",
   },
-
-  feedback: {
-    thanks: 'Merci pour votre retour !',
-    intro: "Votre avis compte ! Signalez instantanément un bug, une suggestion ou toute piste d'amélioration. Ajoutez vos coordonnées si vous souhaitez être recontacté.",
-    placeholder: 'Écrivez votre retour ici…',
-    sendFailed: "Échec de l'envoi du retour",
-    sending: 'Envoi…',
-    send: 'Envoyer',
-    contactDeveloper: 'Contacter le développeur',
-    madeBy: (p) => <>Fait avec 💜 par{' '}{p.author}{' '}en Asie du Sud-Est 🌏</>,
-  },
 }

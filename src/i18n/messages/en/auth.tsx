@@ -81,7 +81,6 @@ export const auth = {
       openSourceDesc: 'Free to use  & Public code.',
       viewOnGithub: 'View on GitHub',
     },
-    feedbackTitle: 'Feedback',
   },
 
   login: {
@@ -127,6 +126,5 @@ export const auth = {
   // GooglePwaHint — shown in the installed app when Google sign-in struggles
   pwaHint: {
     message: 'Issues connecting with Google? Try signing in from your browser:',
-    sendFeedback: 'Send feedback',
   },
 }

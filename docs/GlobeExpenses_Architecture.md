@@ -52,9 +52,6 @@ The frontend is organized into the following top-level modules:
   - `spaces/components/CollapsibleCard.tsx` — reusable collapsible card (used by Dashboard; planned for Balance tab)
   - `spaces/components/tabs/ParametersTab.tsx` — all per-space editable lists and settings, members section with invite
 - **transactions/** — Transaction form (create + edit), transaction service
-- **feedback/** — In-app beta feedback form
-  - `feedback/services/feedbackService.ts` — writes to `/feedback/{id}` (awaited, not fire-and-forget; supports anonymous users)
-  - `feedback/components/FeedbackForm.tsx` — bilingual (EN/FR) textarea form with success animation, collapsible contact card; shown in ParametersTab, WelcomePage and GooglePwaHint. The global beta banner and the Profile section were removed (Session 032) because sends were failing.
 - **friends/** — Friend search, invite flows, invite acceptance page
   - `friends/services/friendService.ts` — all friend and invite Firestore operations
   - `friends/hooks/usePendingInvites.ts` — real-time snapshot of incoming active invites, exposes `{ invites, count }`
@@ -113,7 +110,6 @@ English and French, in `src/i18n/` (no library — decision #99).
 | travels/{travelId} | Space metadata, member list — collection name frozen as legacy |
 | travels/{travelId}/transactions/{txId} | Individual transaction documents |
 | travels/{travelId}/drafts/{draftId} | Draft transactions pending user review (v2) |
-| feedback/{feedbackId} | User-submitted beta feedback. Writable by any user including unauthenticated. Fields: userId, displayName, text, source, userAgent, createdAt, imageUrl?. |
 | travels/{travelId}/settlements/{sId} | Computed settlement suggestions (v2) |
 | travels/{travelId}/importBatches/{importBatchId} | "Import finished" marker `{ createdBy, rowCount, createdAt }`, written by the XLSX importer after its last batch. Triggers one summary notification per import (`NOTIFICATIONS_SPEC.md` §7). Create-only. |
 | users/{userId}/activity/{eventId} | Activity feed entries, written only by Cloud Functions (`NOTIFICATIONS_SPEC.md` §3.1) |

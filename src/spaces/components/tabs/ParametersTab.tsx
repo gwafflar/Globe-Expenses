@@ -55,7 +55,6 @@ import {
 import { useLocale, useT } from '@/i18n'
 import { getExchangeRate } from '@/shared/utils/exchangeRates'
 import { Share2, Check } from 'lucide-react'
-import { FeedbackForm } from '@/feedback/components/FeedbackForm'
 import { SpaceNotificationToggle } from '@/notifications/components/SpaceNotificationToggle'
 import { requestPushPrompt } from '@/notifications/store/usePushPromptStore'
 
@@ -2152,11 +2151,6 @@ export function ParametersTab({ space, transactions, onSpaceChange }: Parameters
           />
         </Section>
       )}
-
-      {/* Feedback — embedded form for quick beta feedback */}
-      <Section title={tp.sections.feedback}>
-        <FeedbackForm source="ParametersTab" />
-      </Section>
 
       {/* ----------------------------------------------------------------- */}
       {/* Manage space — archive and leave/delete actions                   */}

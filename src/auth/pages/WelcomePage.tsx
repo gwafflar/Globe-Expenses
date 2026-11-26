@@ -16,7 +16,6 @@ import { cn } from '@/lib/utils'
 import { GoogleLogo } from '@/auth/components/GoogleLogo'
 import { GooglePwaHint, markPwaGoogleAttempted, isPwaGoogleAttempted, clearPwaGoogleAttempted } from '@/auth/components/GooglePwaHint'
 import { WifiOff, Users, Wallet, Plane, BarChart3, Github, ChevronDown, ChevronUp, Smartphone } from 'lucide-react'
-import { FeedbackForm } from '@/feedback/components/FeedbackForm'
 import { useT } from '@/i18n'
 
 // Returns true when the app is running as an installed PWA (standalone window).
@@ -322,16 +321,6 @@ export function WelcomePage() {
               </p>
             </div>
           ))}
-        </div>
-      </div>
-
-      {/* Feedback section — embedded form for maximum visibility on the welcome page */}
-      <div className="border-t px-6 py-8">
-        <div className="mx-auto max-w-lg">
-          <h2 className="mb-3 text-center text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-            {w.feedbackTitle}
-          </h2>
-          <FeedbackForm source="WelcomePage" />
         </div>
       </div>
     </div>

@@ -79,7 +79,6 @@ export const auth: Messages['auth'] = {
       openSourceDesc: 'Gratuit et code public.',
       viewOnGithub: 'Voir sur GitHub',
     },
-    feedbackTitle: 'Votre avis',
   },
 
   login: {
@@ -124,6 +123,5 @@ export const auth: Messages['auth'] = {
 
   pwaHint: {
     message: 'Un problème de connexion avec Google ? Essayez de vous connecter depuis votre navigateur :',
-    sendFeedback: 'Envoyer un retour',
   },
 }
