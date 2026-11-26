@@ -1,5 +1,6 @@
 // ContactDeveloperCard.tsx — collapsible "Contact developer" card shown at the
-// bottom of the Profile page: author name, Discord, GitHub repo, "made by" line.
+// bottom of the Profile and Welcome pages: author name, Discord, GitHub repo,
+// "made by" line. Works signed out (no store or Firestore access).
 //
 // Static content only, no Firestore. It used to live inside the feedback form,
 // which was removed (Specification decision #104).

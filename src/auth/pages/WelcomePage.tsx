@@ -17,6 +17,7 @@ import { GoogleLogo } from '@/auth/components/GoogleLogo'
 import { GooglePwaHint, markPwaGoogleAttempted, isPwaGoogleAttempted, clearPwaGoogleAttempted } from '@/auth/components/GooglePwaHint'
 import { WifiOff, Users, Wallet, Plane, BarChart3, Github, ChevronDown, ChevronUp, Smartphone } from 'lucide-react'
 import { useT } from '@/i18n'
+import { ContactDeveloperCard } from '@/auth/components/ContactDeveloperCard'
 
 // Returns true when the app is running as an installed PWA (standalone window).
 function isInstalledPWA(): boolean {
@@ -321,6 +322,13 @@ export function WelcomePage() {
               </p>
             </div>
           ))}
+        </div>
+      </div>
+
+      {/* Contact developer — collapsible card, same component as on Profile */}
+      <div className="border-t px-6 py-8">
+        <div className="mx-auto max-w-lg">
+          <ContactDeveloperCard />
         </div>
       </div>
     </div>
