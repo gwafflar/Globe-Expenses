@@ -63,7 +63,7 @@ export const auth = {
       removeAndroid: 'Android: Long-press icon → Uninstall',
       removeIos: 'iOS: Long-press icon → Remove App',
       removeDesktop: 'Desktop: Right-click icon → Uninstall',
-      issues: 'Have issues? Send feedback via the banner on top.',
+      issues: 'Have issues? You can contact the developer with the contact information at the bottom of this page.',
     },
 
     features: {

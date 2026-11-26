@@ -61,7 +61,7 @@ export const auth: Messages['auth'] = {
       removeAndroid: "Android : appui long sur l'icône → Désinstaller",
       removeIos: "iOS : appui long sur l'icône → Supprimer l'app",
       removeDesktop: "Ordinateur : clic droit sur l'icône → Désinstaller",
-      issues: 'Un problème ? Envoyez un retour via le bandeau en haut.',
+      issues: 'Un problème ? Vous pouvez contacter le développeur grâce aux coordonnées en bas de cette page.',
     },
 
     features: {

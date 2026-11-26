@@ -326,7 +326,7 @@ export function WelcomePage() {
       </div>
 
       {/* Contact developer — collapsible card, same component as on Profile */}
-      <div className="border-t px-6 py-8">
+      <div className="border-t px-4 py-3">
         <div className="mx-auto max-w-lg">
           <ContactDeveloperCard />
         </div>
